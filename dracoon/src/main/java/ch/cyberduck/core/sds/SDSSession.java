@@ -446,7 +446,9 @@ public class SDSSession extends HttpSession<SDSApiClient> {
     public GeneralSettingsInfo generalSettingsInfo() throws BackgroundException {
         if(generalSettingsInfo.get() == null) {
             try {
-                generalSettingsInfo.set(new ConfigApi(client).requestGeneralSettingsInfo(StringUtils.EMPTY));
+                if (client != null){
+                    generalSettingsInfo.set(new ConfigApi(client).requestGeneralSettingsInfo(StringUtils.EMPTY));
+                }
             }
             catch(ApiException e) {
                 // Precondition: Right "Config Read" required.
@@ -483,11 +485,14 @@ public class SDSSession extends HttpSession<SDSApiClient> {
     protected boolean isS3DirectUploadSupported() {
         if(preferences.getBoolean("sds.upload.s3.enable")) {
             try {
-                if(this.generalSettingsInfo().isUseS3Storage()) {
-                    final Matcher matcher = Pattern.compile(SDSSession.VERSION_REGEX).matcher(this.softwareVersion().getRestApiVersion());
-                    if(matcher.matches()) {
-                        if(new Version(matcher.group(1)).compareTo(new Version("4.22")) >= 0) {
-                            return true;
+                final GeneralSettingsInfo info = this.generalSettingsInfo();
+                if(info != null) {
+                    if(info.isUseS3Storage()) {
+                        final Matcher matcher = Pattern.compile(SDSSession.VERSION_REGEX).matcher(this.softwareVersion().getRestApiVersion());
+                        if(matcher.matches()) {
+                            if(new Version(matcher.group(1)).compareTo(new Version("4.22")) >= 0) {
+                                return true;
+                            }
                         }
                     }
                 }

@@ -23,6 +23,7 @@ import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
+import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.features.Logging;
 import ch.cyberduck.core.logging.LoggingConfiguration;
 import ch.cyberduck.core.preferences.HostPreferences;
@@ -58,19 +59,24 @@ public class S3LoggingFeature implements Logging {
             final StorageBucketLoggingStatus status
                     = session.getClient().getBucketLoggingStatusImpl(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
             if(null == status) {
-                log.warn(String.format("Failure parsing logging status for %s", bucket));
+                log.warn("Failure parsing logging status for {}", bucket);
                 return LoggingConfiguration.empty();
             }
             final LoggingConfiguration configuration = new LoggingConfiguration(status.isLoggingEnabled(),
                     status.getTargetBucketName());
-            try {
-                configuration.setContainers(new S3BucketListService(session, new S3LocationFeature.S3Region(session.getHost().getRegion())).list(
-                        new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory)),
-                        new DisabledListProgressListener()).toList());
+            if(bucket.isRoot()) {
+                configuration.setContainers(Collections.singletonList(
+                        new Path(RequestEntityRestStorageService.findBucketInHostname(session.getHost()), EnumSet.of(Path.Type.volume, Path.Type.directory)))
+                );
             }
-            catch(AccessDeniedException | InteroperabilityException e) {
-                log.warn(String.format("Failure listing buckets. %s", e.getMessage()));
-                configuration.setContainers(Collections.singletonList(bucket));
+            else {
+                try {
+                    configuration.setContainers(new S3BucketListService(session).list(Home.ROOT, new DisabledListProgressListener()).toList());
+                }
+                catch(AccessDeniedException | InteroperabilityException e) {
+                    log.warn("Failure listing buckets. {}", e.getMessage());
+                    configuration.setContainers(Collections.singletonList(bucket));
+                }
             }
             return configuration;
         }
@@ -79,7 +85,7 @@ public class S3LoggingFeature implements Logging {
                 throw new S3ExceptionMappingService().map("Failure to read attributes of {0}", e, file);
             }
             catch(AccessDeniedException | InteroperabilityException l) {
-                log.warn(String.format("Missing permission to read logging configuration for %s %s", bucket.getName(), e.getMessage()));
+                log.warn("Missing permission to read logging configuration for {} {}", bucket.getName(), e.getMessage());
                 return LoggingConfiguration.empty();
             }
         }
@@ -93,11 +99,11 @@ public class S3LoggingFeature implements Logging {
         try {
             final S3BucketLoggingStatus status = new S3BucketLoggingStatus(
                     StringUtils.isNotBlank(configuration.getLoggingTarget()) ? configuration.getLoggingTarget() :
-                            bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), null);
+                            bucket.isRoot() ? RequestEntityRestStorageService.findBucketInHostname(session.getHost()) : bucket.getName(), null);
             if(configuration.isEnabled()) {
                 status.setLogfilePrefix(new HostPreferences(session.getHost()).getProperty("s3.logging.prefix"));
             }
-            session.getClient().setBucketLoggingStatus(bucket.getName(), status, true);
+            session.getClient().setBucketLoggingStatus(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), status, true);
         }
         catch(ServiceException e) {
             throw new S3ExceptionMappingService().map("Failure to write attributes of {0}", e, file);

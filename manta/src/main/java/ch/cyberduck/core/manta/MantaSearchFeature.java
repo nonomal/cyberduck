@@ -18,12 +18,12 @@ package ch.cyberduck.core.manta;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.Filter;
 import ch.cyberduck.core.ListProgressListener;
-import ch.cyberduck.core.NullFilter;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.Search;
 
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -75,25 +75,18 @@ public class MantaSearchFeature implements Search {
 
     private void cleanResults(final List<Path> foundPaths, final Filter<Path> regex) {
         final Set<Path> removal = new HashSet<>();
-
-        // NullFilter removes everything unless handled separately
-        if(regex.toPattern().pattern().equals(".*") || regex instanceof NullFilter<?>) {
-            return;
-        }
-
         for(final Path f : foundPaths) {
-            if(!f.getName().contains(regex.toPattern().pattern())) {
+            if(!regex.accept(f)) {
                 removal.add(f);
             }
         }
-
         foundPaths.removeAll(removal);
     }
 
     private List<Path> findObjectsAsPaths(final Path workdir, final Predicate<MantaObject> searchPredicate) {
         return session.getClient().find(workdir.getAbsolute(), searchPredicate)
-            .map(adapter::toPath)
-            .collect(Collectors.toList());
+                .map(adapter::toPath)
+                .collect(Collectors.toList());
     }
 
     private void addPaths(final AttributedList<Path> list,
@@ -107,8 +100,8 @@ public class MantaSearchFeature implements Search {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 
 }

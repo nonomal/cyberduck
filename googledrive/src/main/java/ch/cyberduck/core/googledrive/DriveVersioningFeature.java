@@ -32,6 +32,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.Iterator;
 
 import com.google.api.services.drive.model.Revision;
@@ -66,17 +67,20 @@ public class DriveVersioningFeature implements Versioning {
     }
 
     @Override
-    public boolean isRevertable(final Path file) {
-        return false;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.list);
     }
 
     @Override
     public AttributedList<Path> list(final Path file, final ListProgressListener listener) throws BackgroundException {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
         try {
             final AttributedList<Path> versions = new AttributedList<>();
             String page = null;
             do {
-                final RevisionList list = session.getClient().revisions().list(fileid.getFileId(file, listener))
+                final RevisionList list = session.getClient().revisions().list(fileid.getFileId(file))
                         .setFields(DEFAULT_FIELDS)
                         .setPageSize(new HostPreferences(session.getHost()).getInteger("googledrive.list.limit"))
                         .setPageToken(page).execute();
@@ -88,10 +92,9 @@ public class DriveVersioningFeature implements Versioning {
                             continue;
                         }
                     }
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Found revision %s", revision));
-                    }
+                    log.debug("Found revision {}", revision);
                     versions.add(new Path(file).withAttributes(this.toAttributes(revision)));
+                    listener.chunk(file.getParent(), versions);
                 }
                 page = list.getNextPageToken();
             }

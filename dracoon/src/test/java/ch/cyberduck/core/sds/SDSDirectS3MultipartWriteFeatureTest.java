@@ -84,7 +84,8 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
             final TransferStatus status = new TransferStatus();
             status.setLength(content.length);
             status.setChecksum(new MD5ChecksumCompute().compute(new ByteArrayInputStream(content), new TransferStatus()));
-            status.setTimestamp(1632127025217L);
+            status.setCreated(1L);
+            status.setModified(1632127025217L);
             final StatusOutputStream<Node> out = writer.write(test, status, new DisabledConnectionCallback());
             assertNotNull(out);
             new StreamCopier(status, status).transfer(new ByteArrayInputStream(content), out);
@@ -95,6 +96,7 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
         assertTrue(new SDSFindFeature(session, nodeid).find(test));
         final PathAttributes attr = new SDSAttributesFinderFeature(session, nodeid).find(test);
         assertEquals(test.attributes().getVersionId(), attr.getVersionId());
+        assertEquals(1L, attr.getCreationDate());
         assertEquals(1632127025217L, attr.getModificationDate());
         assertEquals(1632127025217L, new DefaultAttributesFinderFeature(session).find(test).getModificationDate());
         final byte[] compare = new byte[content.length];
@@ -102,7 +104,7 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
         IOUtils.readFully(stream, compare);
         stream.close();
         assertArrayEquals(content, compare);
-        String previousVersion = test.attributes().getVersionId();
+        String previousVersion = attr.getVersionId();
         // Overwrite
         {
             final byte[] change = RandomUtils.nextBytes(256);
@@ -112,9 +114,8 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
             final StatusOutputStream<Node> out = writer.write(test, status.exists(true), new DisabledConnectionCallback());
             assertNotNull(out);
             new StreamCopier(status, status).transfer(new ByteArrayInputStream(change), out);
-            assertNotEquals(test.attributes().getVersionId(), out.getStatus());
+            assertNotEquals(previousVersion, new SDSAttributesAdapter(session).toAttributes(out.getStatus()).getVersionId());
         }
-        assertNotEquals(attr.getRevision(), new SDSAttributesFinderFeature(session, nodeid).find(test));
         // Read with previous version must fail
         try {
             test.attributes().withVersionId(previousVersion);
@@ -139,7 +140,7 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
             final TransferStatus status = new TransferStatus();
             status.setLength(content.length);
             status.setChecksum(new MD5ChecksumCompute().compute(new ByteArrayInputStream(content), new TransferStatus()));
-            status.setTimestamp(1632127025217L);
+            status.setModified(1632127025217L);
             final StatusOutputStream<Node> out = writer.write(test, status, new DisabledConnectionCallback());
             assertNotNull(out);
             new StreamCopier(status, status).transfer(new ByteArrayInputStream(content), out);
@@ -162,7 +163,7 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
         IOUtils.readFully(stream, compare);
         stream.close();
         assertArrayEquals(content, compare);
-        String previousVersion = test.attributes().getVersionId();
+        String previousVersion = attr.getVersionId();
         // Overwrite
         {
             final byte[] change = RandomUtils.nextBytes(256);
@@ -172,9 +173,8 @@ public class SDSDirectS3MultipartWriteFeatureTest extends AbstractSDSTest {
             final StatusOutputStream<Node> out = writer.write(test, status.exists(true), new DisabledConnectionCallback());
             assertNotNull(out);
             new StreamCopier(status, status).transfer(new ByteArrayInputStream(change), out);
-            assertNotEquals(test.attributes().getVersionId(), out.getStatus());
+            assertNotEquals(previousVersion, new SDSAttributesAdapter(session).toAttributes(out.getStatus()).getVersionId());
         }
-        assertNotEquals(attr.getRevision(), new SDSAttributesFinderFeature(session, nodeid).find(test));
         // Read with previous version must fail
         try {
             test.attributes().withVersionId(previousVersion);

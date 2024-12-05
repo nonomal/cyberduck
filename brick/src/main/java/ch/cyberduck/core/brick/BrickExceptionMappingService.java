@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -18,6 +20,7 @@ import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DefaultSocketExceptionMappingService;
 import ch.cyberduck.core.brick.io.swagger.client.ApiException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.LockedException;
 import ch.cyberduck.core.http.DefaultHttpResponseExceptionMappingService;
@@ -26,12 +29,11 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.HttpResponseException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.StringReader;
 import java.net.SocketException;
+import java.util.List;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -40,14 +42,11 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 public class BrickExceptionMappingService extends AbstractExceptionMappingService<ApiException> {
-    private static final Logger log = LogManager.getLogger(BrickExceptionMappingService.class);
+
+    private static final String ERROR_CLASS_RESPONSE_HEADER = "X-Files-Error-Class";
 
     @Override
     public BackgroundException map(final ApiException failure) {
-        switch(failure.getCode()) {
-            case HttpStatus.SC_UNPROCESSABLE_ENTITY:
-                return new LockedException(StringUtils.EMPTY, failure);
-        }
         for(Throwable cause : ExceptionUtils.getThrowableList(failure)) {
             if(cause instanceof SocketException) {
                 // Map Connection has been shutdown: javax.net.ssl.SSLException: java.net.SocketException: Broken pipe
@@ -66,6 +65,19 @@ public class BrickExceptionMappingService extends AbstractExceptionMappingServic
         }
         final StringBuilder buffer = new StringBuilder();
         this.parse(buffer, failure.getResponseBody());
+        switch(failure.getCode()) {
+            case HttpStatus.SC_UNPROCESSABLE_ENTITY:
+                if(failure.getResponseHeaders().containsKey(ERROR_CLASS_RESPONSE_HEADER)) {
+                    final List<String> type = failure.getResponseHeaders().get(ERROR_CLASS_RESPONSE_HEADER);
+                    for(String t : type) {
+                        switch(t) {
+                            case "processing-failure/destination-exists":
+                                return new ConflictException(StringUtils.EMPTY, failure);
+                        }
+                    }
+                }
+                return new LockedException(StringUtils.EMPTY, failure);
+        }
         return new DefaultHttpResponseExceptionMappingService().map(failure, buffer, failure.getCode());
     }
 

@@ -17,8 +17,11 @@
 // 
 
 using System;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 using ch.cyberduck.core;
 using ch.cyberduck.core.threading;
+using ch.cyberduck.ui.core;
 using Ch.Cyberduck.Core;
 using Ch.Cyberduck.Ui.Controller.Threading;
 using java.lang;
@@ -27,15 +30,19 @@ using Exception = System.Exception;
 
 namespace Ch.Cyberduck.Ui.Controller
 {
-    public abstract class AsyncController : AbstractController
+    public abstract class AsyncController : AbstractController, IWindowController
     {
         public delegate void AsyncDelegate();
 
         public delegate void SyncDelegate();
 
-        private static readonly Logger Log = LogManager.getLogger(typeof (AsyncController).Name);
+        private static readonly Logger Log = LogManager.getLogger(typeof(AsyncController).Name);
 
         public virtual IView View { get; set; }
+
+        public bool Visible => View?.Visible ?? false;
+
+        public IWin32Window Window => View;
 
         public void Background(AsyncDelegate del, AsyncDelegate cleanup)
         {
@@ -99,13 +106,20 @@ namespace Ch.Cyberduck.Ui.Controller
                 if (View.InvokeRequired)
                 {
                     //currently only sync
-                    if (true)
+                    if (wait)
                     {
                         View.Invoke(new AsyncDelegate(runnable.run), null);
                     }
                     else
                     {
-                        View.BeginInvoke(new AsyncDelegate(runnable.run), null);
+                        Task.Factory.FromAsync(View.BeginInvoke(new AsyncDelegate(runnable.run), null), View.EndInvoke)
+                            .ContinueWith(result =>
+                            {
+                                if (result.IsFaulted)
+                                {
+                                    Log.warn("Exception on async invoke", result.Exception);
+                                }
+                            });
                     }
                 }
                 else

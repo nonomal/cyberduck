@@ -21,6 +21,7 @@ import ch.cyberduck.binding.BundleController;
 import ch.cyberduck.binding.Delegate;
 import ch.cyberduck.binding.Outlet;
 import ch.cyberduck.binding.OutlineDataSource;
+import ch.cyberduck.binding.WindowController;
 import ch.cyberduck.binding.application.*;
 import ch.cyberduck.binding.foundation.NSArray;
 import ch.cyberduck.binding.foundation.NSAttributedString;
@@ -38,8 +39,6 @@ import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.ProviderHelpServiceFactory;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.local.BrowserLauncherFactory;
-import ch.cyberduck.core.preferences.Preferences;
-import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.profiles.LocalProfileDescription;
 import ch.cyberduck.core.profiles.ProfileDescription;
 import ch.cyberduck.core.profiles.ProfilesFinder;
@@ -47,9 +46,8 @@ import ch.cyberduck.core.profiles.ProfilesSynchronizeWorker;
 import ch.cyberduck.core.profiles.ProfilesWorkerBackgroundAction;
 import ch.cyberduck.core.profiles.SearchProfilePredicate;
 import ch.cyberduck.core.resources.IconCacheFactory;
-import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.rococoa.Foundation;
@@ -73,13 +71,12 @@ public class ProfilesPreferencesController extends BundleController {
     private final ProtocolFactory protocols = ProtocolFactory.get();
 
     private final NSNotificationCenter notificationCenter = NSNotificationCenter.defaultCenter();
-    private final Preferences preferences = PreferencesFactory.get();
 
     /**
      * Synchronized ist of available profiles
      */
     private final Map<ProfileDescription, Profile> repository
-        = Collections.synchronizedMap(new LinkedHashMap<>());
+            = Collections.synchronizedMap(new LinkedHashMap<>());
 
     @Delegate
     private ProfilesTableDataSource profilesTableDataSource;
@@ -118,9 +115,9 @@ public class ProfilesPreferencesController extends BundleController {
         this.searchField.setTarget(this.id());
         this.searchField.setAction(Foundation.selector("searchFieldTextDidChange:"));
         this.notificationCenter.addObserver(this.id(),
-            Foundation.selector("searchFieldTextDidEndEditing:"),
-            NSControl.NSControlTextDidEndEditingNotification,
-            this.searchField.id());
+                Foundation.selector("searchFieldTextDidEndEditing:"),
+                NSControl.NSControlTextDidEndEditingNotification,
+                this.searchField.id());
     }
 
     @Action
@@ -130,6 +127,10 @@ public class ProfilesPreferencesController extends BundleController {
 
     @Action
     public void searchFieldTextDidEndEditing(final NSNotification notification) {
+        this.reload();
+    }
+
+    private void reload() {
         final String input = searchField.stringValue();
         if(StringUtils.isBlank(input)) {
             this.profilesTableDataSource.withSource(toSorted(repository.keySet()));
@@ -137,7 +138,7 @@ public class ProfilesPreferencesController extends BundleController {
         else {
             // Setup search filter
             this.profilesTableDataSource.withSource(toSorted(
-                repository.keySet().stream().filter(new SearchProfilePredicate(input)).collect(Collectors.toSet())));
+                    repository.keySet().stream().filter(new SearchProfilePredicate(input)).collect(Collectors.toSet())));
         }
         // Reload with current cache
         this.profilesTableView.reloadData();
@@ -160,31 +161,29 @@ public class ProfilesPreferencesController extends BundleController {
         return panelProfiles;
     }
 
-    @Override
-    public void awakeFromNib() {
-        try {
-            progressIndicator.startAnimation(null);
-            final ProfilePlistReader reader = new ProfilePlistReader(protocols);
-            this.background(new ProfilesWorkerBackgroundAction(this,
-                new ProfilesSynchronizeWorker(protocols, ProfilesFinder.Visitor.Prefetch) {
-                    @Override
-                    public void cleanup(final Set<ProfileDescription> set) {
-                        for(ProfileDescription description : set) {
-                            if(description.getProfile().isPresent()) {
-                                repository.put(description, description.getProfile().get());
+    protected void load(final WindowController controller) {
+        if(repository.isEmpty()) {
+            try {
+                progressIndicator.startAnimation(null);
+                this.background(new ProfilesWorkerBackgroundAction(controller,
+                        new ProfilesSynchronizeWorker(protocols, ProfilesFinder.Visitor.Prefetch) {
+                            @Override
+                            public void cleanup(final Set<ProfileDescription> set) {
+                                for(ProfileDescription description : set) {
+                                    if(description.getProfile().isPresent()) {
+                                        repository.put(description, description.getProfile().get());
+                                    }
+                                }
+                                reload();
+                                progressIndicator.stopAnimation(null);
                             }
-                        }
-                        profilesTableDataSource.withSource(toSorted(repository.keySet()));
-                        profilesTableView.reloadData();
-                        progressIndicator.stopAnimation(null);
-                    }
-                })
-            );
+                        })
+                );
+            }
+            catch(BackgroundException e) {
+                log.error("Failure {} retrieving profiles", e.getMessage());
+            }
         }
-        catch(BackgroundException e) {
-            log.error(String.format("Failure %s retrieving profiles", e));
-        }
-        super.awakeFromNib();
     }
 
     public final class ProfilesTableDelegate extends AbstractTableDelegate<Protocol, Void> implements NSOutlineView.Delegate {
@@ -196,7 +195,7 @@ public class ProfilesPreferencesController extends BundleController {
 
         private ProfileDescription fromChecksum(final NSObject hash) {
             final Optional<ProfileDescription> found = repository.keySet().stream()
-                .filter(description -> description.getChecksum().hash.equals(hash.toString())).findFirst();
+                    .filter(description -> description.getChecksum().hash.equals(hash.toString())).findFirst();
             return found.orElse(null);
         }
 
@@ -245,7 +244,7 @@ public class ProfilesPreferencesController extends BundleController {
         }
 
         @Override
-        public void outlineView_willDisplayCell_forTableColumn_item(final NSOutlineView view, final NSTextFieldCell cell, final NSTableColumn tableColumn, final NSObject item) {
+        public void outlineView_willDisplayCell_forTableColumn_item(final NSOutlineView view, final NSCell cell, final NSTableColumn tableColumn, final NSObject item) {
             //
         }
 
@@ -358,25 +357,25 @@ public class ProfilesPreferencesController extends BundleController {
     }
 
     private static final NSDictionary PRIMARY_FONT_ATTRIBUTES = NSDictionary.dictionaryWithObjectsForKeys(
-        NSArray.arrayWithObjects(
-            NSFont.boldSystemFontOfSize(NSFont.systemFontSize()),
-            NSColor.controlTextColor(),
-            BundleController.PARAGRAPH_STYLE_LEFT_ALIGNMENT_TRUNCATE_TAIL),
-        NSArray.arrayWithObjects(
-            NSAttributedString.FontAttributeName,
-            NSAttributedString.ForegroundColorAttributeName,
-            NSAttributedString.ParagraphStyleAttributeName)
+            NSArray.arrayWithObjects(
+                    NSFont.boldSystemFontOfSize(NSFont.systemFontSize()),
+                    NSColor.controlTextColor(),
+                    BundleController.PARAGRAPH_STYLE_LEFT_ALIGNMENT_TRUNCATE_TAIL),
+            NSArray.arrayWithObjects(
+                    NSAttributedString.FontAttributeName,
+                    NSAttributedString.ForegroundColorAttributeName,
+                    NSAttributedString.ParagraphStyleAttributeName)
     );
 
     private static final NSDictionary SECONDARY_FONT_ATTRIBUTES = NSDictionary.dictionaryWithObjectsForKeys(
-        NSArray.arrayWithObjects(
-            NSFont.systemFontOfSize(NSFont.systemFontSize()),
-            NSColor.secondaryLabelColor(),
-            BundleController.PARAGRAPH_STYLE_LEFT_ALIGNMENT_TRUNCATE_TAIL),
-        NSArray.arrayWithObjects(
-            NSAttributedString.FontAttributeName,
-            NSAttributedString.ForegroundColorAttributeName,
-            NSAttributedString.ParagraphStyleAttributeName)
+            NSArray.arrayWithObjects(
+                    NSFont.systemFontOfSize(NSFont.systemFontSize()),
+                    NSColor.secondaryLabelColor(),
+                    BundleController.PARAGRAPH_STYLE_LEFT_ALIGNMENT_TRUNCATE_TAIL),
+            NSArray.arrayWithObjects(
+                    NSAttributedString.FontAttributeName,
+                    NSAttributedString.ForegroundColorAttributeName,
+                    NSAttributedString.ParagraphStyleAttributeName)
     );
 
     public final class ProfileTableViewController extends BundleController {
@@ -444,7 +443,8 @@ public class ProfilesPreferencesController extends BundleController {
             if(enabled) {
                 final Optional<Local> file = description.getFile();
                 // Update with last version from repository
-                file.ifPresent(local -> repository.put(new LocalProfileDescription(protocols.register(local)), profile));
+                file.ifPresent(local -> repository.put(new LocalProfileDescription(protocols, ProtocolFactory.BUNDLED_PROFILE_PREDICATE,
+                        protocols.register(local)), profile));
             }
             else {
                 final Optional<Profile> profile = description.getProfile();
@@ -472,8 +472,8 @@ public class ProfilesPreferencesController extends BundleController {
      */
     private static List<ProfileDescription> toSorted(final Set<ProfileDescription> profiles) {
         return profiles.stream()
-            .filter(description -> description.getProfile().isPresent())
-            .sorted(Comparator.comparing(o -> o.getProfile().get()))
-            .collect(Collectors.toList());
+                .filter(description -> description.getProfile().isPresent())
+                .sorted(Comparator.comparing(o -> o.getProfile().get()))
+                .collect(Collectors.toList());
     }
 }

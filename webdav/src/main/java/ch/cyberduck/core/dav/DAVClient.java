@@ -21,11 +21,19 @@ package ch.cyberduck.core.dav;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.Credentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.HttpClient;
 import org.apache.http.client.ResponseHandler;
 import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.client.protocol.HttpClientContext;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.auth.BasicScheme;
+import org.apache.http.impl.client.BasicAuthCache;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -33,6 +41,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -51,9 +60,28 @@ public class DAVClient extends SardineImpl {
 
     private final String uri;
 
+    private final BasicAuthCache authCache = new BasicAuthCache();
+    private final CredentialsProvider authProvider = new BasicCredentialsProvider();
+
     public DAVClient(final String uri, final HttpClientBuilder http) {
         super(http);
         this.uri = uri;
+    }
+
+    public void setCredentials(final AuthScope authScope, final Credentials credentials) {
+        authProvider.setCredentials(authScope, credentials);
+    }
+
+    @Override
+    public void enablePreemptiveAuthentication(final String hostname, final int httpPort, final int httpsPort, final Charset credentialsCharset) {
+        final BasicScheme basicScheme = new BasicScheme(credentialsCharset);
+        authCache.put(new HttpHost(hostname, httpPort, "http"), basicScheme);
+        authCache.put(new HttpHost(hostname, httpsPort, "https"), basicScheme);
+    }
+
+    @Override
+    public void disablePreemptiveAuthentication() {
+        authCache.clear();
     }
 
     @Override
@@ -64,7 +92,10 @@ public class DAVClient extends SardineImpl {
         else {
             request.setURI(URI.create(String.format("%s%s", uri, request.getURI().getRawPath())));
         }
-        return super.execute(request, responseHandler);
+        final HttpClientContext context = HttpClientContext.create();
+        context.setCredentialsProvider(authProvider);
+        context.setAuthCache(authCache);
+        return this.execute(context, request, responseHandler);
     }
 
     @Override
@@ -75,29 +106,36 @@ public class DAVClient extends SardineImpl {
         else {
             request.setURI(URI.create(String.format("%s%s", uri, request.getURI().getRawPath())));
         }
-        return super.execute(request);
+        final HttpClientContext context = HttpClientContext.create();
+        context.setCredentialsProvider(authProvider);
+        context.setAuthCache(authCache);
+        return this.execute(context, request, null);
     }
 
     @Override
-    protected List<DavResource> propfind(final String url, final int depth, final Propfind body) throws IOException {
+    public List<DavResource> propfind(final String url, final int depth, final Propfind body) throws IOException {
         HttpPropFind entity = new HttpPropFind(url);
         entity.setDepth(depth < 0 ? "infinity" : Integer.toString(depth));
         entity.setEntity(new StringEntity(SardineUtil.toXml(body), StandardCharsets.UTF_8));
         Multistatus multistatus = this.execute(entity, PreferencesFactory.get().getBoolean("webdav.list.handler.sax") ? new SaxPropFindResponseHandler() : new MultiStatusResponseHandler());
         List<Response> responses = multistatus.getResponse();
-        List<DavResource> resources = new ArrayList<DavResource>(responses.size());
+        List<DavResource> resources = new ArrayList<>(responses.size());
         for(Response response : responses) {
             try {
                 resources.add(new DavResource(response));
             }
             catch(URISyntaxException e) {
-                log.warn(String.format("Ignore resource with invalid URI %s", response.getHref().get(0)));
+                log.warn("Ignore resource with invalid URI {}", response.getHref().get(0));
             }
         }
         return resources;
     }
 
-    public HttpClientContext context() {
+    public HttpClientContext getContext() {
         return context;
+    }
+
+    public HttpClient getClient() {
+        return client;
     }
 }

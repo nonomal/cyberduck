@@ -24,6 +24,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 public final class PreferencesFactory {
+    private static final Logger log = LogManager.getLogger(PreferencesFactory.class);
+
     private PreferencesFactory() {
         //
     }
@@ -39,26 +41,14 @@ public final class PreferencesFactory {
         preferences.setDefaults(LocalFactory.get(SupportDirectoryFinderFactory.get().find(), "default.properties"));
         preferences.configureLogging(preferences.getProperty("logging"));
         final Logger log = LogManager.getLogger(PreferencesFactory.class);
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Running version %s.%s (%s)",
-                preferences.getProperty("application.version"),
-                preferences.getProperty("application.revision"),
-                preferences.getProperty("application.hash")));
-        }
+        log.info("Running version {}", preferences.getVersion());
     }
 
     public static synchronized Preferences get() {
         if(null == preferences) {
-            set(new DefaultLoggingMemoryPreferenes());
+            log.error("No application preferences registered");
+            set(new MemoryPreferences());
         }
         return preferences;
-    }
-
-    private static final class DefaultLoggingMemoryPreferenes extends MemoryPreferences {
-        @Override
-        protected void configureLogging(final String level) {
-            this.setDefault("logging.config", "log4j.xml");
-            super.configureLogging(level);
-        }
     }
 }

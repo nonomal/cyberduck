@@ -26,6 +26,7 @@ import ch.cyberduck.core.eue.io.swagger.client.model.UiFsModel;
 import ch.cyberduck.core.eue.io.swagger.client.model.UiWin32;
 import ch.cyberduck.core.eue.io.swagger.client.model.Uifs;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesFinder;
 
 import org.apache.commons.lang3.StringUtils;
@@ -56,7 +57,7 @@ public class EueAttributesFinderFeature implements AttributesFinder {
         try {
             final EueApiClient client = new EueApiClient(session);
             final UiFsModel response;
-            final String resourceId = fileid.getFileId(file, listener);
+            final String resourceId = fileid.getFileId(file);
             switch(resourceId) {
                 case EueResourceIdProvider.ROOT:
                 case EueResourceIdProvider.TRASH:
@@ -70,6 +71,19 @@ public class EueAttributesFinderFeature implements AttributesFinder {
                             Collections.singletonList(OPTION_WIN_32_PROPS), null);
                     break;
             }
+            switch(response.getUifs().getResourceType()) {
+                case "aliascontainer":
+                case "container":
+                    if(file.isFile()) {
+                        throw new NotfoundException(file.getAbsolute());
+                    }
+                    break;
+                default:
+                    if(file.isDirectory()) {
+                        throw new NotfoundException(file.getAbsolute());
+                    }
+                    break;
+            }
             final PathAttributes attr = this.toAttributes(response.getUifs(), response.getUiwin32(),
                     EueShareFeature.findShareForResource(session.userShares(), resourceId));
             if(client.getResponseHeaders().containsKey(HttpHeaders.ETAG)) {
@@ -80,22 +94,28 @@ public class EueAttributesFinderFeature implements AttributesFinder {
         catch(ApiException e) {
             switch(e.getCode()) {
                 case HttpStatus.SC_NOT_MODIFIED:
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("No changes for file %s with ETag %s", file, file.attributes().getETag()));
-                    }
+                    log.debug("No changes for file {} with ETag {}", file, file.attributes().getETag());
                     return file.attributes();
             }
             throw new EueExceptionMappingService().map("Failure to read attributes of {0}", e, file);
         }
     }
 
-    protected PathAttributes toAttributes(final Uifs entity, final UiWin32 uiwin32, final ShareCreationResponseEntity share) {
+    protected PathAttributes toAttributes(final Uifs entity, final UiWin32 uiwin32,
+                                          final ShareCreationResponseEntity share) {
         final PathAttributes attr = new PathAttributes();
         attr.setDisplayname(entity.getName());
         // Matches ETag response header
         attr.setETag(StringUtils.remove(entity.getMetaETag(), '"'));
-        if(entity.getVersion() != null) {
-            attr.setRevision(Long.valueOf(entity.getVersion()));
+        switch(entity.getResourceType()) {
+            case "aliascontainer":
+            case "container":
+                break;
+            default:
+                if(entity.getVersion() != null) {
+                    attr.setRevision(Long.valueOf(entity.getVersion()));
+                }
+                break;
         }
         attr.setSize(entity.getSize());
         final String resourceId = EueResourceIdProvider.getResourceIdFromResourceUri(entity.getResourceURI());

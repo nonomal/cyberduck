@@ -23,6 +23,8 @@ import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.AttributesFinder;
+import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.Checksum;
@@ -43,20 +45,26 @@ public class ResumeFilter extends AbstractUploadFilter {
         this(symlinkResolver, session, new UploadFilterOptions(session.getHost()));
     }
 
-    public ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session,
-                        final UploadFilterOptions options) {
-        this(symlinkResolver, session, options, session.getFeature(Upload.class));
+    public ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session, final UploadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(Find.class), session.getFeature(AttributesFinder.class), session.getFeature(Upload.class), options);
     }
 
-    public ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session,
-                        final UploadFilterOptions options, final Upload<?> upload) {
-        super(symlinkResolver, session, options);
+    public ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session, final Find find, final AttributesFinder attribute, final UploadFilterOptions options) {
+        this(symlinkResolver, session, find, attribute, session.getFeature(Upload.class), options);
+    }
+
+    public <Reply> ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session, final Upload<?> upload, final UploadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(Find.class), session.getFeature(AttributesFinder.class), upload, options);
+    }
+
+    public ResumeFilter(final SymlinkResolver<Local> symlinkResolver, final Session<?> session, final Find find, final AttributesFinder attribute, final Upload<?> upload, final UploadFilterOptions options) {
+        super(symlinkResolver, session, find, attribute, options);
         this.upload = upload;
     }
 
     @Override
-    public boolean accept(final Path file, final Local local, final TransferStatus parent) throws BackgroundException {
-        if(super.accept(file, local, parent)) {
+    public boolean accept(final Path file, final Local local, final TransferStatus parent, final ProgressListener progress) throws BackgroundException {
+        if(super.accept(file, local, parent, progress)) {
             if(local.isFile()) {
                 if(parent.isExists()) {
                     if(find.find(file)) {
@@ -65,17 +73,13 @@ public class ResumeFilter extends AbstractUploadFilter {
                             if(Checksum.NONE != attributes.getChecksum()) {
                                 final ChecksumCompute compute = ChecksumComputeFactory.get(attributes.getChecksum().algorithm);
                                 if(compute.compute(local.getInputStream(), parent).equals(attributes.getChecksum())) {
-                                    if(log.isInfoEnabled()) {
-                                        log.info(String.format("Skip file %s with checksum %s", file, local.attributes().getChecksum()));
-                                    }
+                                    log.info("Skip file {} with checksum {}", file, attributes.getChecksum());
                                     return false;
                                 }
-                                log.warn(String.format("Checksum mismatch for %s and %s", file, local));
+                                log.warn("Checksum mismatch for {} and {}", file, local);
                             }
                             else {
-                                if(log.isInfoEnabled()) {
-                                    log.info(String.format("Skip file %s with remote size %d", file, attributes.getSize()));
-                                }
+                                log.info("Skip file {} with remote size {}", file, attributes.getSize());
                                 // No need to resume completed transfers
                                 return false;
                             }
@@ -92,14 +96,13 @@ public class ResumeFilter extends AbstractUploadFilter {
     public TransferStatus prepare(final Path file, final Local local, final TransferStatus parent, final ProgressListener progress) throws BackgroundException {
         final TransferStatus status = super.prepare(file, local, parent, progress);
         if(file.isFile()) {
-            if(status.isExists()) {
-                final Write.Append append = upload.append(file, status);
-                if(append.append && append.size < status.getLength()) {
-                    // Append to existing file
-                    status.withRename((Path) null).withDisplayname((Path) null).setAppend(true);
-                    status.setLength(status.getLength() - append.size);
-                    status.setOffset(append.size);
-                }
+            final Write.Append append = upload.append(file, status);
+            if(append.append && append.offset <= status.getLength()) {
+                // Append to existing file
+                status.withRename((Path) null).withDisplayname((Path) null).setAppend(true);
+                status.setLength(status.getLength() - append.offset);
+                status.setOffset(append.offset);
+                log.debug("Resume file {} at offset {} and remaining length {}", file, status.getOffset(), status.getLength());
             }
         }
         return status;

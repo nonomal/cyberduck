@@ -15,12 +15,14 @@ package ch.cyberduck.core.googlestorage;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.CancellingListProgressListener;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.VersioningConfiguration;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ListCanceledException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.features.AttributesFinder;
@@ -33,6 +35,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.Collections;
 
 import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.Bucket;
@@ -44,9 +47,11 @@ public class GoogleStorageAttributesFinderFeature implements AttributesFinder, A
     private final PathContainerService containerService;
     private final GoogleStorageSession session;
 
+    public static final String KEY_REQUESTER_PAYS = "requester_pays";
+
     public GoogleStorageAttributesFinderFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
@@ -56,27 +61,62 @@ public class GoogleStorageAttributesFinderFeature implements AttributesFinder, A
         }
         try {
             if(containerService.isContainer(file)) {
-                return this.toAttributes(session.getClient().buckets().get(
-                        containerService.getContainer(file).getName()).execute());
+                final Storage.Buckets.Get request = session.getClient().buckets().get(containerService.getContainer(file).getName());
+                if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                    request.setUserProject(session.getHost().getCredentials().getUsername());
+                }
+                return this.toAttributes(request.execute());
             }
             else {
-                final Storage.Objects.Get request = session.getClient().objects().get(
+                final Storage.Objects.Get get = session.getClient().objects().get(
                         containerService.getContainer(file).getName(), containerService.getKey(file));
+                if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                    get.setUserProject(session.getHost().getCredentials().getUsername());
+                }
                 final VersioningConfiguration versioning = null != session.getFeature(Versioning.class) ? session.getFeature(Versioning.class).getConfiguration(
                         containerService.getContainer(file)
                 ) : VersioningConfiguration.empty();
                 if(versioning.isEnabled()) {
                     if(StringUtils.isNotBlank(file.attributes().getVersionId())) {
-                        request.setGeneration(Long.parseLong(file.attributes().getVersionId()));
+                        get.setGeneration(Long.parseLong(file.attributes().getVersionId()));
                     }
                 }
-                final PathAttributes attributes = this.toAttributes(request.execute());
+                final PathAttributes attributes;
+                try {
+                    attributes = this.toAttributes(get.execute());
+                }
+                catch(IOException e) {
+                    if(file.isDirectory()) {
+                        final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to read attributes of {0}", e, file);
+                        if(failure instanceof NotfoundException) {
+                            log.debug("Search for common prefix {}", file);
+                            // File may be marked as placeholder but no placeholder file exists. Check for common prefix returned.
+                            try {
+                                new GoogleStorageObjectListService(session).list(file, new CancellingListProgressListener(), String.valueOf(Path.DELIMITER), 1, VersioningConfiguration.empty());
+                            }
+                            catch(ListCanceledException l) {
+                                // Found common prefix
+                                return PathAttributes.EMPTY;
+                            }
+                            catch(NotfoundException n) {
+                                throw e;
+                            }
+                            // Found common prefix
+                            return PathAttributes.EMPTY;
+                        }
+                    }
+                    throw e;
+                }
                 if(versioning.isEnabled()) {
                     // Determine if latest version
                     try {
                         // Duplicate if not latest version
-                        final String latest = this.toAttributes(session.getClient().objects().get(
-                                containerService.getContainer(file).getName(), containerService.getKey(file)).execute()).getVersionId();
+                        final Storage.Objects.Get request = session.getClient().objects().get(
+                                containerService.getContainer(file).getName(), containerService.getKey(file));
+                        if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                            request.setUserProject(session.getHost().getCredentials().getUsername());
+                        }
+                        final String latest = this.toAttributes(request.execute()).getVersionId();
                         if(null != latest) {
                             attributes.setDuplicate(!latest.equals(attributes.getVersionId()));
                         }
@@ -111,6 +151,9 @@ public class GoogleStorageAttributesFinderFeature implements AttributesFinder, A
             attributes.setEncryption(new Encryption.Algorithm("AES256", bucket.getEncryption().getDefaultKmsKeyName()));
         }
         attributes.setRegion(bucket.getLocation());
+        if(bucket.getBilling() != null) {
+            attributes.setCustom(Collections.singletonMap(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS, String.valueOf(true)));
+        }
         return attributes;
     }
 

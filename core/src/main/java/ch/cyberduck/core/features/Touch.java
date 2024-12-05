@@ -15,10 +15,15 @@ package ch.cyberduck.core.features;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import java.text.MessageFormat;
+
+@Optional
 public interface Touch<Reply> {
 
     Path touch(Path file, TransferStatus status) throws BackgroundException;
@@ -29,8 +34,26 @@ public interface Touch<Reply> {
      * @return True if creating an empty file is possible.
      */
     default boolean isSupported(final Path workdir, final String filename) {
-        return workdir.attributes().getPermission().isWritable();
+        try {
+            this.preflight(workdir, filename);
+            return true;
+        }
+        catch(BackgroundException e) {
+            return false;
+        }
     }
 
-    Touch<Reply> withWriter(Write<Reply> writer);
+    default Touch<Reply> withWriter(Write<Reply> writer) {
+        return this;
+    }
+
+    /**
+     * @throws AccessDeniedException Permission failure for target directory
+     */
+    default void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!workdir.attributes().getPermission().isWritable()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString(
+                    "Cannot create {0}", "Error"), filename)).withFile(workdir);
+        }
+    }
 }

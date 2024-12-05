@@ -17,7 +17,6 @@ package ch.cyberduck.core.nio;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Touch;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
@@ -45,12 +44,7 @@ public class LocalTouchFeature implements Touch {
                 throw new LocalExceptionMappingService().map("Cannot create {0}", e, file);
             }
         }
-        return file.withAttributes(new LocalAttributesFinderFeature(session).find(file));
-    }
-
-    @Override
-    public Touch withWriter(final Write writer) {
-        return this;
+        return file;
     }
 }
 

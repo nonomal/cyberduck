@@ -17,7 +17,6 @@ package ch.cyberduck.core.ftp;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
-import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionTimeoutException;
@@ -46,11 +45,10 @@ public class DataConnectionActionExecutor {
     }
 
     /**
-     * @param action   Action that needs to open a data connection
-     * @param listener Progress callback
+     * @param action Action that needs to open a data connection
      * @return True if action was successful
      */
-    public <T> T data(final DataConnectionAction<T> action, final ProgressListener listener) throws IOException, BackgroundException {
+    public <T> T data(final DataConnectionAction<T> action) throws IOException, BackgroundException {
         try {
             // Make sure to always configure data mode because connect event sets defaults.
             final FTPConnectMode mode = session.getConnectMode();
@@ -65,7 +63,7 @@ public class DataConnectionActionExecutor {
             return action.execute();
         }
         catch(ConnectionTimeoutException failure) {
-            log.warn(String.format("Timeout opening data socket %s", failure.getMessage()));
+            log.warn("Timeout opening data socket {}", failure.getMessage());
             // Expect 421 response
             session.getClient().completePendingCommand();
             // Fallback handling
@@ -74,21 +72,21 @@ public class DataConnectionActionExecutor {
                     return this.fallback(action);
                 }
                 catch(BackgroundException e) {
-                    log.warn(String.format("Connect mode fallback failed with %s", e.getMessage()));
+                    log.warn("Connect mode fallback failed with {}", e.getMessage());
                     // Throw original error message
                 }
             }
             throw failure;
         }
         catch(InteroperabilityException | NotfoundException | AccessDeniedException failure) {
-            log.warn(String.format("Server denied data socket operation with %s", failure.getMessage()));
+            log.warn("Server denied data socket operation with {}", failure.getMessage());
             // Fallback handling
             if(enabled) {
                 try {
                     return this.fallback(action);
                 }
                 catch(BackgroundException e) {
-                    log.warn(String.format("Connect mode fallback failed with %s", e.getMessage()));
+                    log.warn("Connect mode fallback failed with {}", e.getMessage());
                     // Throw original error message
                 }
             }

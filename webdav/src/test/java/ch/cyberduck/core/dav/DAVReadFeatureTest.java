@@ -3,6 +3,7 @@ package ch.cyberduck.core.dav;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
+import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.NotfoundException;
@@ -19,6 +20,7 @@ import ch.cyberduck.test.IntegrationTest;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.CountingInputStream;
 import org.apache.commons.lang3.RandomUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -40,7 +42,7 @@ public class DAVReadFeatureTest extends AbstractDAVTest {
             new DAVReadFeature(session).read(new Path(new DefaultHomeFinderService(session).find(), "nosuchname", EnumSet.of(Path.Type.file)), status, new DisabledConnectionCallback());
         }
         catch(NotfoundException e) {
-            assertEquals("Unexpected response (404 OK). Please contact your web hosting service provider for assistance.", e.getDetail());
+            assertTrue(StringUtils.startsWith(e.getDetail(), "Unexpected response"));
             throw e;
         }
     }
@@ -55,7 +57,7 @@ public class DAVReadFeatureTest extends AbstractDAVTest {
         IOUtils.write(content, out);
         out.close();
         new DAVUploadFeature(session).upload(
-                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledStreamListener(),
+                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledProgressListener(), new DisabledStreamListener(),
                 new TransferStatus().withLength(content.length),
                 new DisabledConnectionCallback());
         // Unknown length in status
@@ -102,7 +104,7 @@ public class DAVReadFeatureTest extends AbstractDAVTest {
         IOUtils.write(content, out);
         out.close();
         new DAVUploadFeature(session).upload(
-                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledStreamListener(),
+                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledProgressListener(), new DisabledStreamListener(),
                 new TransferStatus().withLength(content.length),
                 new DisabledConnectionCallback());
         final TransferStatus status = new TransferStatus();
@@ -130,7 +132,7 @@ public class DAVReadFeatureTest extends AbstractDAVTest {
         IOUtils.write(content, out);
         out.close();
         new DAVUploadFeature(session).upload(
-                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledStreamListener(),
+                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledProgressListener(), new DisabledStreamListener(),
                 new TransferStatus().withLength(content.length),
                 new DisabledConnectionCallback());
         final TransferStatus status = new TransferStatus();

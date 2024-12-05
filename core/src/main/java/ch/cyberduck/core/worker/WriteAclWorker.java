@@ -23,11 +23,13 @@ import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.AclPermission;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -74,9 +76,10 @@ public class WriteAclWorker extends Worker<Boolean> {
     @Override
     public Boolean run(final Session<?> session) throws BackgroundException {
         final AclPermission feature = session.getFeature(AclPermission.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
+        if(null == feature) {
+            return false;
         }
+        log.debug("Run with feature {}", feature);
         for(Path file : files) {
             this.write(session, feature, file);
         }
@@ -89,8 +92,14 @@ public class WriteAclWorker extends Worker<Boolean> {
         }
         listener.message(MessageFormat.format(LocaleFactory.localizedString("Changing permission of {0} to {1}", "Status"),
                 file.getName(), acl));
-        feature.setPermission(file, acl);
-        file.attributes().setAcl(acl);
+        final TransferStatus status = new TransferStatus().withAcl(acl);
+        feature.setPermission(file, status);
+        if(!PathAttributes.EMPTY.equals(status.getResponse())) {
+            file.withAttributes(status.getResponse());
+        }
+        else {
+            file.attributes().setAcl(acl);
+        }
         if(file.isVolume()) {
             // No recursion when changing container ACL
         }

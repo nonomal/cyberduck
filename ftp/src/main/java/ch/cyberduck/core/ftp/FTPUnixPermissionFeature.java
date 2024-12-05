@@ -21,14 +21,14 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.UnixPermission;
-import ch.cyberduck.core.shared.DefaultUnixPermissionFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 
-public class FTPUnixPermissionFeature extends DefaultUnixPermissionFeature implements UnixPermission {
+public class FTPUnixPermissionFeature implements UnixPermission {
     private static final Logger log = LogManager.getLogger(FTPUnixPermissionFeature.class);
 
     private final FTPSession session;
@@ -45,7 +45,7 @@ public class FTPUnixPermissionFeature extends DefaultUnixPermissionFeature imple
         try {
             if(!session.getClient().sendSiteCommand(String.format("%s %s %s", command, owner, file.getAbsolute()))) {
                 throw new FTPException(session.getClient().getReplyCode(),
-                    session.getClient().getReplyString());
+                        session.getClient().getReplyString());
             }
         }
         catch(IOException e) {
@@ -72,17 +72,15 @@ public class FTPUnixPermissionFeature extends DefaultUnixPermissionFeature imple
     }
 
     @Override
-    public void setUnixPermission(final Path file, final Permission permission) throws BackgroundException {
+    public void setUnixPermission(final Path file, final TransferStatus status) throws BackgroundException {
         if(failure != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Skip setting permission for %s due to previous failure %s", file, failure.getMessage()));
-            }
+            log.debug("Skip setting permission for {} due to previous failure {}", file, failure.getMessage());
             throw failure;
         }
         try {
-            if(!session.getClient().sendSiteCommand(String.format("CHMOD %s %s", permission.getMode(), file.getAbsolute()))) {
+            if(!session.getClient().sendSiteCommand(String.format("CHMOD %s %s", status.getPermission().getMode(), file.getAbsolute()))) {
                 throw new FTPException(session.getClient().getReplyCode(),
-                    session.getClient().getReplyString());
+                        session.getClient().getReplyString());
             }
         }
         catch(IOException e) {

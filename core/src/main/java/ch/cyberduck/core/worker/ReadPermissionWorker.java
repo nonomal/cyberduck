@@ -55,18 +55,13 @@ public class ReadPermissionWorker extends Worker<PermissionOverwrite> {
     @Override
     public PermissionOverwrite run(final Session<?> session) throws BackgroundException {
         final UnixPermission feature = session.getFeature(UnixPermission.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
+        log.debug("Run with feature {}", feature);
         final List<Permission> permissions = new ArrayList<>();
         for(Path next : files) {
             if(this.isCanceled()) {
                 throw new ConnectionCanceledException();
             }
-            if(Permission.EMPTY == next.attributes().getPermission()) {
-                next.attributes().setPermission(feature.getUnixPermission(next));
-            }
-            permissions.add(next.attributes().getPermission());
+            permissions.add(feature.getUnixPermission(next));
         }
 
         final PermissionOverwrite overwrite = new PermissionOverwrite();

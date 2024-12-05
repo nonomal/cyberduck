@@ -19,11 +19,11 @@ import ch.cyberduck.core.AbstractPath;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.BytecountStreamListener;
 import ch.cyberduck.core.DisabledConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.eue.io.swagger.client.model.UploadType;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.QuotaException;
 import ch.cyberduck.core.exception.TransferCanceledException;
 import ch.cyberduck.core.exception.TransferStatusCanceledException;
@@ -70,7 +70,7 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
-    @Test(expected = TransferCanceledException.class)
+    @Test(expected = TransferStatusCanceledException.class)
     public void testWriteCancel() throws Exception {
         final EueResourceIdProvider fileid = new EueResourceIdProvider(session);
         final EueWriteFeature writer = new EueWriteFeature(session, fileid);
@@ -80,7 +80,7 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
             final BytecountStreamListener count = new BytecountStreamListener();
             final TransferStatus status = new TransferStatus() {
                 @Override
-                public void validate() throws TransferStatusCanceledException {
+                public void validate() throws ConnectionCanceledException {
                     if(count.getSent() >= 32768) {
                         throw new TransferStatusCanceledException();
                     }
@@ -115,12 +115,14 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
         final EueResourceIdProvider fileid = new EueResourceIdProvider(session);
         final EueWriteFeature feature = new EueWriteFeature(session, fileid);
         final Path container = new EueDirectoryFeature(session, fileid).mkdir(new Path(new AlphanumericRandomStringService().random(), EnumSet.of(AbstractPath.Type.directory)), new TransferStatus());
+        long containerModification = new EueAttributesFinderFeature(session, fileid).find(container).getModificationDate();
         final Path file = new Path(container, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         String resourceId;
         {
             final byte[] content = RandomUtils.nextBytes(8235);
-            final long ts = System.currentTimeMillis();
-            final TransferStatus status = new TransferStatus().withLength(content.length).withTimestamp(ts);
+            final long modified = System.currentTimeMillis();
+            final long created = 1695161463630L;
+            final TransferStatus status = new TransferStatus().withLength(content.length).withModified(modified).withCreated(created);
             final Checksum checksum = feature.checksum(file, status).compute(new ByteArrayInputStream(content), new TransferStatus().withLength(content.length));
             status.withChecksum(checksum);
             final HttpResponseOutputStream<EueWriteFeature.Chunk> out = feature.write(file, status, new DisabledConnectionCallback());
@@ -132,22 +134,26 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
             in.close();
             out.close();
             assertEquals(checksum, out.getStatus().getChecksum());
+            assertNotEquals(containerModification, new EueAttributesFinderFeature(session, fileid).find(container).getModificationDate());
             resourceId = status.getResponse().getFileId();
             assertTrue(new EueFindFeature(session, fileid).find(file));
             final PathAttributes attributes = new EueAttributesFinderFeature(session, fileid).find(file);
             assertEquals(content.length, attributes.getSize());
-            assertEquals(ts, attributes.getModificationDate());
+            assertEquals(modified, attributes.getModificationDate());
+            assertEquals(created, attributes.getCreationDate());
             final byte[] compare = new byte[content.length];
             final InputStream stream = new EueReadFeature(session, fileid).read(file, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
             IOUtils.readFully(stream, compare);
             stream.close();
             assertArrayEquals(content, compare);
         }
+        containerModification = new EueAttributesFinderFeature(session, fileid).find(container).getModificationDate();
         // Override
         {
+            final PathAttributes previous = new EueAttributesFinderFeature(session, fileid).find(file);
             final byte[] content = RandomUtils.nextBytes(6231);
             final long ts = System.currentTimeMillis();
-            final TransferStatus status = new TransferStatus().withLength(content.length).withTimestamp(ts);
+            final TransferStatus status = new TransferStatus().withLength(content.length).withModified(ts);
             final Checksum checksum = feature.checksum(file, status).compute(new ByteArrayInputStream(content), new TransferStatus().withLength(content.length));
             status.withChecksum(checksum).exists(true);
             final HttpResponseOutputStream<EueWriteFeature.Chunk> out = feature.write(file, status, new DisabledConnectionCallback());
@@ -159,11 +165,13 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
             in.close();
             out.close();
             assertEquals(checksum, out.getStatus().getChecksum());
-            assertEquals(resourceId, out.getStatus().getResourceId());
             assertTrue(new EueFindFeature(session, fileid).find(file));
+            assertNotEquals(containerModification, new EueAttributesFinderFeature(session, fileid).find(container).getModificationDate());
             final PathAttributes attributes = new EueAttributesFinderFeature(session, fileid).find(file);
+            assertNotEquals(previous, attributes);
+            assertNotEquals(previous.getETag(), attributes.getETag());
+            assertNotEquals(previous.getRevision(), attributes.getRevision());
             assertEquals(ts, attributes.getModificationDate());
-            assertEquals(resourceId, attributes.getFileId());
             assertEquals(content.length, attributes.getSize());
             final byte[] compare = new byte[content.length];
             final InputStream stream = new EueReadFeature(session, fileid).read(file, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
@@ -207,7 +215,7 @@ public class EueWriteFeatureTest extends AbstractEueSessionTest {
         final Path file = new Path(new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final byte[] content = RandomUtils.nextBytes(423);
         final TransferStatus status = new TransferStatus().withLength(content.length);
-        EueUploadHelper.createResource(session, fileid.getFileId(file.getParent(), new DisabledListProgressListener()), file.getName(), status, UploadType.SIMPLE);
+        EueUploadHelper.createResource(session, fileid.getFileId(file.getParent()), file.getName(), status, UploadType.SIMPLE);
         final Checksum checksum = feature.checksum(file, status).compute(new ByteArrayInputStream(content), new TransferStatus().withLength(content.length));
         status.withChecksum(checksum);
         final HttpResponseOutputStream<EueWriteFeature.Chunk> out = feature.write(file, status, new DisabledConnectionCallback());

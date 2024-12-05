@@ -15,18 +15,21 @@ package ch.cyberduck.core.cryptomator.features;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.cryptomator.CryptoVault;
 import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Touch;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import org.apache.commons.lang3.StringUtils;
 import org.cryptomator.cryptolib.api.FileHeader;
+
+import java.text.MessageFormat;
 
 public class CryptoTouchFeature<Reply> implements Touch<Reply> {
 
@@ -45,7 +48,7 @@ public class CryptoTouchFeature<Reply> implements Touch<Reply> {
         // Write header
         final FileHeader header = vault.getFileHeaderCryptor().create();
         status.setHeader(vault.getFileHeaderCryptor().encryptHeader(header));
-        status.setNonces(new RandomNonceGenerator());
+        status.setNonces(new RandomNonceGenerator(vault.getNonceSize()));
         final Path target = proxy.touch(vault.encrypt(session, file), new TransferStatus(status) {
             @Override
             public void setResponse(final PathAttributes attributes) {
@@ -60,13 +63,11 @@ public class CryptoTouchFeature<Reply> implements Touch<Reply> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String filename) {
-        return proxy.isSupported(workdir, StringUtils.EMPTY) && vault.getFilenameProvider().isValid(filename);
-    }
-
-    @Override
-    public CryptoTouchFeature<Reply> withWriter(final Write<Reply> writer) {
-        return this;
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!vault.getFilenameProvider().isValid(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename));
+        }
+        proxy.preflight(workdir, filename);
     }
 
     @Override

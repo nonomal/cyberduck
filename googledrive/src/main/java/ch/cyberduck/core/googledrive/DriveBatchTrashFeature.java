@@ -15,9 +15,9 @@ package ch.cyberduck.core.googledrive;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.collections.Partition;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Trash;
@@ -31,6 +31,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -61,19 +62,19 @@ public class DriveBatchTrashFeature implements Trash {
             final List<BackgroundException> failures = new CopyOnWriteArrayList<>();
             for(Path f : partition) {
                 try {
-                    if(DriveHomeFinderService.SHARED_DRIVES_NAME.equals(f.getParent())) {
-                        session.getClient().teamdrives().delete(fileid.getFileId(f, new DisabledListProgressListener()))
+                    if(new SimplePathPredicate(DriveHomeFinderService.SHARED_DRIVES_NAME).test(f.getParent())) {
+                        session.getClient().teamdrives().delete(fileid.getFileId(f))
                                 .queue(batch, new DeleteBatchCallback<>(f, failures, callback));
                     }
                     else {
                         if(f.attributes().isHidden()) {
-                            log.warn(String.format("Delete file %s already in trash", f));
+                            log.warn("Delete file {} already in trash", f);
                             new DriveBatchDeleteFeature(session, fileid).queue(f, batch, callback, failures);
                             continue;
                         }
                         final File properties = new File();
                         properties.setTrashed(true);
-                        session.getClient().files().update(fileid.getFileId(f, new DisabledListProgressListener()), properties)
+                        session.getClient().files().update(fileid.getFileId(f), properties)
                                 .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable"))
                                 .queue(batch, new DeleteBatchCallback<>(f, failures, callback));
                     }
@@ -109,7 +110,7 @@ public class DriveBatchTrashFeature implements Trash {
 
         @Override
         public void onFailure(final GoogleJsonError e, final HttpHeaders responseHeaders) {
-            log.warn(String.format("Failure trashing %s. %s", file, e.getMessage()));
+            log.warn("Failure trashing {}. {}", file, e.getMessage());
             failures.add(new DefaultHttpResponseExceptionMappingService().map(
                     new HttpResponseException(e.getCode(), e.getMessage())));
         }
@@ -122,7 +123,7 @@ public class DriveBatchTrashFeature implements Trash {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 }

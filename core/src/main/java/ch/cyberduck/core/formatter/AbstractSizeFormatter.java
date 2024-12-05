@@ -17,8 +17,6 @@ package ch.cyberduck.core.formatter;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
-import ch.cyberduck.core.LocaleFactory;
-
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.text.NumberFormat;
@@ -29,6 +27,8 @@ public abstract class AbstractSizeFormatter implements SizeFormatter {
     private final Unit mega;
     private final Unit giga;
     private final Unit tera;
+
+    private static final String UNKNOWN = "--";
 
     public AbstractSizeFormatter(final Unit kilo, final Unit mega, final Unit giga, final Unit tera) {
         this.kilo = kilo;
@@ -45,7 +45,7 @@ public abstract class AbstractSizeFormatter implements SizeFormatter {
     @Override
     public String format(final long size, final boolean plain) {
         if(size < 0) {
-            return LocaleFactory.localizedString("--");
+            return UNKNOWN;
         }
         if(size < kilo.multiple()) {
             return String.format("%d B", size);
@@ -53,8 +53,8 @@ public abstract class AbstractSizeFormatter implements SizeFormatter {
         StringBuilder formatted = new StringBuilder();
         if(size < mega.multiple()) {
             formatted.append(new BigDecimal(size).divide(new BigDecimal(kilo.multiple()),
-                1,
-                RoundingMode.HALF_UP)).append(" ").append(kilo.suffix());
+                    1,
+                    RoundingMode.HALF_UP)).append(" ").append(kilo.suffix());
         }
         else if(size < giga.multiple()) {
             formatted.append(new BigDecimal(size).divide(new BigDecimal(mega.multiple()),

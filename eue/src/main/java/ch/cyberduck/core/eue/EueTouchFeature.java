@@ -15,10 +15,15 @@ package ch.cyberduck.core.eue;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.shared.DefaultTouchFeature;
 
 import org.apache.commons.lang3.StringUtils;
+
+import java.text.MessageFormat;
 
 public class EueTouchFeature extends DefaultTouchFeature<EueWriteFeature.Chunk> {
 
@@ -27,7 +32,13 @@ public class EueTouchFeature extends DefaultTouchFeature<EueWriteFeature.Chunk> 
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String filename) {
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename));
+        }
+    }
+
+    public static boolean validate(final String filename) {
         // The path may contain all characters except the following: /, ", >, <, ?, *, :, \, |.
         // Also prohibited is a trailing space or a trailing dot (" ", ".").
         if(StringUtils.containsAny(filename, '\\', '<', '>', ':', '"', '|', '?', '*', '/')) {
@@ -37,6 +48,9 @@ public class EueTouchFeature extends DefaultTouchFeature<EueWriteFeature.Chunk> 
             return false;
         }
         if(StringUtils.endsWith(filename, ".")) {
+            return false;
+        }
+        if(StringUtils.length(filename) > 250) {
             return false;
         }
         return true;

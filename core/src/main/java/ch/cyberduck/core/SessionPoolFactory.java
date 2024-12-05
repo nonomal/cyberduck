@@ -19,7 +19,7 @@ import ch.cyberduck.core.pool.DefaultSessionPool;
 import ch.cyberduck.core.pool.SessionPool;
 import ch.cyberduck.core.pool.StatefulSessionPool;
 import ch.cyberduck.core.pool.StatelessSessionPool;
-import ch.cyberduck.core.preferences.PreferencesFactory;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.ssl.DefaultTrustManagerHostnameCallback;
 import ch.cyberduck.core.ssl.KeychainX509KeyManager;
 import ch.cyberduck.core.ssl.KeychainX509TrustManager;
@@ -73,9 +73,9 @@ public class SessionPoolFactory {
         final LoginConnectionService connect = new LoginConnectionService(login, key, keychain, listener);
         final CertificateStore certificates = CertificateStoreFactory.get();
         return create(connect, transcript, bookmark,
-            new KeychainX509TrustManager(CertificateTrustCallbackFactory.get(controller), new DefaultTrustManagerHostnameCallback(bookmark), certificates),
-            new KeychainX509KeyManager(CertificateIdentityCallbackFactory.get(controller), bookmark, certificates),
-            VaultRegistryFactory.create(keychain, login), usage);
+                new KeychainX509TrustManager(CertificateTrustCallbackFactory.get(controller), new DefaultTrustManagerHostnameCallback(bookmark), certificates),
+                new KeychainX509KeyManager(CertificateIdentityCallbackFactory.get(controller), bookmark, certificates),
+                VaultRegistryFactory.get(keychain, login), usage);
     }
 
     public static SessionPool create(final ConnectionService connect, final TranscriptListener transcript,
@@ -86,25 +86,20 @@ public class SessionPoolFactory {
         switch(bookmark.getProtocol().getStatefulness()) {
             case stateful:
                 if(Arrays.asList(usage).contains(Usage.browser)) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Create new stateful connection pool for %s", bookmark));
-                    }
+                    log.info("Create new stateful connection pool for {}", bookmark);
                     final Session<?> session = SessionFactory.create(new Host(bookmark).withCredentials(new Credentials(bookmark.getCredentials())), trust, key);
                     return new StatefulSessionPool(connect, session, transcript, registry);
                 }
                 // Break through to default pool
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Create new pooled connection pool for %s", bookmark));
-                }
+                log.info("Create new pooled connection pool for {}", bookmark);
+                final HostPreferences preferences = new HostPreferences(bookmark);
                 return new DefaultSessionPool(connect, trust, key, registry, transcript, bookmark)
-                        .withMinIdle(PreferencesFactory.get().getInteger("connection.pool.minidle"))
-                        .withMaxIdle(PreferencesFactory.get().getInteger("connection.pool.maxidle"))
-                        .withMaxTotal(PreferencesFactory.get().getInteger("connection.pool.maxtotal"));
+                        .withMinIdle(preferences.getInteger("connection.pool.minidle"))
+                        .withMaxIdle(preferences.getInteger("connection.pool.maxidle"))
+                        .withMaxTotal(preferences.getInteger("connection.pool.maxtotal"));
             default:
                 // Stateless protocol
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Create new stateless connection pool for %s", bookmark));
-                }
+                log.info("Create new stateless connection pool for {}", bookmark);
                 final Session<?> session = SessionFactory.create(bookmark, trust, key);
                 return new StatelessSessionPool(connect, session, transcript, registry);
         }

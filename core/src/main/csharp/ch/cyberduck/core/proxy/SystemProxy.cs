@@ -16,46 +16,55 @@
 // feedback@cyberduck.io
 // 
 
-// Bug fixes, suggestions and comments should be sent to:
-// yves@cyberduck.ch
-// 
-
 using System;
-using System.Globalization;
 using System.Net;
-using System.Threading;
-using ch.cyberduck.core.preferences;
 using ch.cyberduck.core.proxy;
+using org.apache.logging.log4j;
+using Logger = org.apache.logging.log4j.Logger;
 
 namespace Ch.Cyberduck.Core.Proxy
 {
     public class SystemProxy : AbstractProxyFinder
     {
+        private static readonly Logger Log = LogManager.getLogger(typeof(SystemProxy).FullName);
+
         private readonly IWebProxy _system = WebRequest.GetSystemWebProxy();
 
         public override ch.cyberduck.core.proxy.Proxy find(string host)
         {
+            if (Log.isDebugEnabled())
+            {
+                Log.debug($"Finding proxy for {host}");
+            }
             Uri target;
             try
             {
                 target = new Uri(host);
             }
-            catch (UriFormatException)
+            catch (UriFormatException e)
             {
+                Log.warn($"Failure finding proxy for {host}", e);
                 return ch.cyberduck.core.proxy.Proxy.DIRECT;
             }
 
             if (_system.IsBypassed(target))
             {
+                if (Log.isDebugEnabled())
+                {
+                    Log.debug($"Direct connection for {host}");
+                }
                 return ch.cyberduck.core.proxy.Proxy.DIRECT;
             }
 
-            // Hack to make Secur32/IWA work. With a non-us locale we get an invalid codepage (1) exception when using the native library.
-            Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US");
+            Uri uri = _system.GetProxy(target);
+            var proxy = new ch.cyberduck.core.proxy.Proxy(ch.cyberduck.core.proxy.Proxy.Type.valueOf(uri.Scheme.ToUpper()),
+                uri.Host, uri.Port, uri.UserInfo);
+            if (Log.isDebugEnabled())
+            {
+                Log.debug($"Proxy {proxy} found for {host}");
+            }
 
-            Uri proxy = _system.GetProxy(target);
-            return new ch.cyberduck.core.proxy.Proxy(ch.cyberduck.core.proxy.Proxy.Type.valueOf(proxy.Scheme.ToUpper()),
-                proxy.Host, proxy.Port, proxy.UserInfo);
+            return proxy;
         }
     }
 }

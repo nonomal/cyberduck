@@ -22,6 +22,7 @@ import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
@@ -36,7 +37,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.charset.Charset;
 import java.text.MessageFormat;
 
@@ -73,7 +73,7 @@ public class DriveAttributesFinderFeature implements AttributesFinder, Attribute
             query = file;
         }
         final AttributedList<Path> list;
-        if(DriveHomeFinderService.SHARED_DRIVES_NAME.equals(file.getParent())) {
+        if(new SimplePathPredicate(DriveHomeFinderService.SHARED_DRIVES_NAME).test(file.getParent())) {
             list = new DriveTeamDrivesListService(session, fileid).list(file.getParent(), listener);
         }
         else {
@@ -95,7 +95,7 @@ public class DriveAttributesFinderFeature implements AttributesFinder, Attribute
                 return this.toAttributes(session.getClient().files().get(shortcutDetails.getTargetId()).setFields(DEFAULT_FIELDS).execute());
             }
             catch(IOException e) {
-                log.warn(String.format("Failure %s resolving shortcut for %s", e, e));
+                log.warn("Failure {} resolving shortcut for {}", e, f);
                 return PathAttributes.EMPTY;
             }
         }
@@ -120,11 +120,11 @@ public class DriveAttributesFinderFeature implements AttributesFinder, Attribute
         }
         attributes.setChecksum(Checksum.parse(f.getMd5Checksum()));
         if(StringUtils.isNotBlank(f.getWebViewLink())) {
-            attributes.setLink(new DescriptiveUrl(URI.create(f.getWebViewLink()),
+            attributes.setLink(new DescriptiveUrl(f.getWebViewLink(),
                     DescriptiveUrl.Type.http,
                     MessageFormat.format(LocaleFactory.localizedString("{0} URL"), "HTTP")));
             if(!DRIVE_FOLDER.equals(f.getMimeType()) && !DRIVE_SHORTCUT.equals(f.getMimeType()) && StringUtils.startsWith(f.getMimeType(), GOOGLE_APPS_PREFIX)) {
-                attributes.setSize(UrlFileWriterFactory.get().write(new DescriptiveUrl(URI.create(f.getWebViewLink())))
+                attributes.setSize(UrlFileWriterFactory.get().write(new DescriptiveUrl(f.getWebViewLink()))
                         .getBytes(Charset.defaultCharset()).length);
             }
         }

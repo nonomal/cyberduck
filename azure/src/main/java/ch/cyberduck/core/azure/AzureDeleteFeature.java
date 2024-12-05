@@ -47,7 +47,7 @@ public class AzureDeleteFeature implements Delete {
     private final OperationContext context;
 
     private final PathContainerService containerService
-        = new DirectoryDelimiterPathContainerService();
+            = new DirectoryDelimiterPathContainerService();
 
     public AzureDeleteFeature(final AzureSession session, final OperationContext context) {
         this.session = session;
@@ -67,7 +67,7 @@ public class AzureDeleteFeature implements Delete {
                     final BlobRequestOptions options = new BlobRequestOptions();
                     session.getClient().getContainerReference(containerService.getContainer(file).getName())
                             .getBlockBlobReference(containerService.getKey(file)).delete(
-                            DeleteSnapshotsOption.INCLUDE_SNAPSHOTS, AccessCondition.generateEmptyCondition(), options, context);
+                                    DeleteSnapshotsOption.INCLUDE_SNAPSHOTS, AccessCondition.generateEmptyCondition(), options, context);
                 }
                 catch(StorageException e) {
                     switch(e.getHttpStatusCode()) {

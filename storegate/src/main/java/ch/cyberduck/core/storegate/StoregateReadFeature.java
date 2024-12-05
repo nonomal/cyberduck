@@ -17,7 +17,6 @@ package ch.cyberduck.core.storegate;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Read;
@@ -54,8 +53,8 @@ public class StoregateReadFeature implements Read {
     public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         try {
             final StoregateApiClient client = session.getClient();
-            final HttpUriRequest request = new HttpGet(String.format("%s/v4/download/files/%s?stream=true", client.getBasePath(),
-                fileid.getFileId(file, new DisabledListProgressListener())));
+            final HttpUriRequest request = new HttpGet(String.format("%s/v4.2/download/files/%s?stream=true", client.getBasePath(),
+                fileid.getFileId(file)));
             if(status.isAppend()) {
                 final HttpRange range = HttpRange.withStatus(status);
                 final String header;
@@ -65,9 +64,7 @@ public class StoregateReadFeature implements Read {
                 else {
                     header = String.format("bytes=%d-%d", range.getStart(), range.getEnd());
                 }
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add range header %s for file %s", header, file));
-                }
+                log.debug("Add range header {} for file {}", header, file);
                 request.addHeader(new BasicHeader(HttpHeaders.RANGE, header));
                 // Disable compression
                 request.addHeader(new BasicHeader(HttpHeaders.ACCEPT_ENCODING, "identity"));
@@ -81,8 +78,8 @@ public class StoregateReadFeature implements Read {
                     fileid.cache(file, null);
                     // Break through
                 default:
-                    throw new DefaultHttpResponseExceptionMappingService().map(new HttpResponseException(
-                        response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()));
+                    throw new DefaultHttpResponseExceptionMappingService().map("Download {0} failed", new HttpResponseException(
+                            response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()), file);
             }
         }
         catch(IOException e) {

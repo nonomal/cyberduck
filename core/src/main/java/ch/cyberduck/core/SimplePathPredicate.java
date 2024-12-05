@@ -20,8 +20,6 @@ import ch.cyberduck.core.unicode.UnicodeNormalizer;
 
 import org.apache.commons.lang3.StringUtils;
 
-import java.util.Objects;
-
 public class SimplePathPredicate implements CacheReference<Path> {
 
     private static final UnicodeNormalizer normalizer = new NFCNormalizer();
@@ -53,7 +51,7 @@ public class SimplePathPredicate implements CacheReference<Path> {
 
     @Override
     public int hashCode() {
-        return Objects.hash(type, path);
+        return this.toString().hashCode();
     }
 
     @Override
@@ -73,7 +71,7 @@ public class SimplePathPredicate implements CacheReference<Path> {
         if(directory.path.equals(String.valueOf(Path.DELIMITER))) {
             return true;
         }
-        return StringUtils.startsWith(path, PathNormalizer.parent(directory.path, Path.DELIMITER));
+        return StringUtils.startsWith(path, directory.path + Path.DELIMITER);
     }
 
     @Override

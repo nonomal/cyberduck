@@ -18,6 +18,7 @@ package ch.cyberduck.core.manta;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
+import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.NotfoundException;
@@ -86,7 +87,7 @@ public class MantaReadFeatureTest extends AbstractMantaTest {
         final Path test = new Path(drive, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new MantaTouchFeature(session).touch(test, new TransferStatus());
 
-        final Local local = new Local(System.getProperty("java.io.tmpdir"), new AlphanumericRandomStringService().random());
+        final Local local = new Local(PROPERTIES.get("java.io.tmpdir"), new AlphanumericRandomStringService().random());
 
         final int BYTES_TOTAL = 10;//00;
         final int BYTES_OFFSET = 1;//00;
@@ -100,7 +101,7 @@ public class MantaReadFeatureTest extends AbstractMantaTest {
                 test,
                 local,
                 new BandwidthThrottle(BandwidthThrottle.UNLIMITED),
-                new DisabledStreamListener(),
+                new DisabledProgressListener(), new DisabledStreamListener(),
                 new TransferStatus().withLength(content.length),
                 new DisabledConnectionCallback());
         final TransferStatus status = new TransferStatus();
@@ -126,14 +127,14 @@ public class MantaReadFeatureTest extends AbstractMantaTest {
         final Path test = new Path(drive, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new MantaTouchFeature(session).touch(test, new TransferStatus());
 
-        final Local local = new Local(System.getProperty("java.io.tmpdir"), new AlphanumericRandomStringService().random());
+        final Local local = new Local(PROPERTIES.get("java.io.tmpdir"), new AlphanumericRandomStringService().random());
         final byte[] content = RandomUtils.nextBytes(1000);
         final OutputStream out = local.getOutputStream(false);
         assertNotNull(out);
         IOUtils.write(content, out);
         out.close();
         new DefaultUploadFeature<>(new MantaWriteFeature(session)).upload(
-                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledStreamListener(),
+                test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledProgressListener(), new DisabledStreamListener(),
                 new TransferStatus().withLength(content.length),
                 new DisabledConnectionCallback());
         final TransferStatus status = new TransferStatus();

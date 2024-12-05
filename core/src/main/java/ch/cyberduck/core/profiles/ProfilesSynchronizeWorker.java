@@ -22,6 +22,8 @@ import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.preferences.SupportDirectoryFinderFactory;
+import ch.cyberduck.core.transfer.download.CompareFilter;
+import ch.cyberduck.core.transfer.symlink.DisabledDownloadSymlinkResolver;
 import ch.cyberduck.core.worker.Worker;
 
 import org.apache.logging.log4j.LogManager;
@@ -52,7 +54,7 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
      */
     public ProfilesSynchronizeWorker(final ProtocolFactory registry, final ProfilesFinder.Visitor visitor) {
         this(registry, LocalFactory.get(SupportDirectoryFinderFactory.get().find(),
-            PreferencesFactory.get().getProperty("profiles.folder.name")), visitor);
+                PreferencesFactory.get().getProperty("profiles.folder.name")), visitor);
     }
 
     public ProfilesSynchronizeWorker(final ProtocolFactory registry, final Local directory, final ProfilesFinder.Visitor visitor) {
@@ -64,7 +66,7 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
     @Override
     public Set<ProfileDescription> initialize() {
         try {
-            return new LocalProfilesFinder(registry, directory).find();
+            return new LocalProfilesFinder(registry, directory, ProtocolFactory.BUNDLED_PROFILE_PREDICATE).find();
         }
         catch(BackgroundException e) {
             return Collections.emptySet();
@@ -75,9 +77,11 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
     public Set<ProfileDescription> run(final Session<?> session) throws BackgroundException {
         final Set<ProfileDescription> returned = new HashSet<>();
         // Find all locally installed profiles
-        final Set<ProfileDescription> installed = new LocalProfilesFinder(registry, directory).find();
+        final LocalProfilesFinder localProfilesFinder = new LocalProfilesFinder(registry, directory, ProtocolFactory.BUNDLED_PROFILE_PREDICATE);
+        final Set<ProfileDescription> installed = localProfilesFinder.find();
         // Find all profiles from repository
-        final Set<ProfileDescription> remote = new RemoteProfilesFinder(registry, session).find();
+        final RemoteProfilesFinder remoteProfilesFinder = new RemoteProfilesFinder(registry, session, this.filter(session));
+        final Set<ProfileDescription> remote = remoteProfilesFinder.find();
         final ProfileMatcher matcher = new ChecksumProfileMatcher(remote);
         // Iterate over every installed profile and find match in repository
         installed.forEach(local -> {
@@ -85,7 +89,7 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
             final Optional<ProfileDescription> match = matcher.compare(local);
             if(match.isPresent()) {
                 // Found matching checksum for profile in remote list which is not marked as latest version
-                log.warn(String.format("Override %s with latest profile verison %s", local, match));
+                log.warn("Override {} with latest profile verison {}", local, match);
                 // Remove previous version
                 local.getProfile().ifPresent(registry::unregister);
                 // Register updated profile by copying temporary file to application support
@@ -93,18 +97,14 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
                     final Local copy = registry.register(value);
                     if(null != copy) {
                         final LocalProfileDescription d = new LocalProfileDescription(registry, copy);
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Add synched profile %s", d));
-                        }
+                        log.debug("Add synched profile {}", d);
                         returned.add(d);
                         visitor.visit(d);
                     }
                 });
             }
             else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add local only profile %s", local));
-                }
+                log.debug("Add local only profile {}", local);
                 returned.add(local);
                 visitor.visit(local);
             }
@@ -114,14 +114,18 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
             if(description.isLatest()) {
                 // Check if not already added previously when syncing with local list
                 if(!returned.contains(description)) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Add remote profile %s", description));
-                    }
+                    log.debug("Add remote profile {}", description);
                     returned.add(description);
                     visitor.visit(description);
                 }
             }
         });
+        localProfilesFinder.cleanup();
+        remoteProfilesFinder.cleanup();
         return returned;
+    }
+
+    protected CompareFilter filter(final Session<?> session) {
+        return new CompareFilter(new DisabledDownloadSymlinkResolver(), session);
     }
 }

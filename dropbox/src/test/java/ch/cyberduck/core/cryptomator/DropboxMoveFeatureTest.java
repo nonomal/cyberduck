@@ -22,7 +22,6 @@ import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.DisabledPasswordCallback;
 import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.cryptomator.features.CryptoFindV6Feature;
 import ch.cyberduck.core.cryptomator.features.CryptoTouchFeature;
 import ch.cyberduck.core.dropbox.DropboxDeleteFeature;
 import ch.cyberduck.core.dropbox.DropboxDirectoryFeature;
@@ -63,7 +62,7 @@ public class DropboxMoveFeatureTest extends AbstractDropboxTest {
         final Path folder = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final Path file = new Path(folder, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         cryptomator.getFeature(session, Directory.class, new DropboxDirectoryFeature(session)).mkdir(folder, new TransferStatus());
         new CryptoTouchFeature<>(session, new DefaultTouchFeature<>(new DropboxWriteFeature(session)
@@ -73,15 +72,15 @@ public class DropboxMoveFeatureTest extends AbstractDropboxTest {
         // rename file
         final Path fileRenamed = new Path(folder, "f1", EnumSet.of(Path.Type.file));
         move.move(file, fileRenamed, new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
-        assertFalse(new CryptoFindV6Feature(session, new DropboxFindFeature(session), cryptomator).find(file));
-        assertTrue(new CryptoFindV6Feature(session, new DropboxFindFeature(session), cryptomator).find(fileRenamed));
+        assertFalse(cryptomator.getFeature(session, Find.class, new DropboxFindFeature(session)).find(file));
+        assertTrue(cryptomator.getFeature(session, Find.class, new DropboxFindFeature(session)).find(fileRenamed));
         // rename folder
         final Path folderRenamed = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         move.move(folder, folderRenamed, new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
-        assertFalse(new CryptoFindV6Feature(session, new DropboxFindFeature(session), cryptomator).find(folder));
-        assertTrue(new CryptoFindV6Feature(session, new DropboxFindFeature(session), cryptomator).find(folderRenamed));
+        assertFalse(cryptomator.getFeature(session, Find.class, new DropboxFindFeature(session)).find(folder));
+        assertTrue(cryptomator.getFeature(session, Find.class, new DropboxFindFeature(session)).find(folderRenamed));
         final Path fileRenamedInRenamedFolder = new Path(folderRenamed, "f1", EnumSet.of(Path.Type.file));
-        assertTrue(new CryptoFindV6Feature(session, new DropboxFindFeature(session), cryptomator).find(fileRenamedInRenamedFolder));
+        assertTrue(cryptomator.getFeature(session, Find.class, new DropboxFindFeature(session)).find(fileRenamedInRenamedFolder));
         cryptomator.getFeature(session, Delete.class, new DropboxDeleteFeature(session)).delete(Arrays.asList(
                 fileRenamedInRenamedFolder, folderRenamed, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }

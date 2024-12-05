@@ -74,13 +74,14 @@ public class S3ObjectListService extends S3AbstractListService implements ListSe
     protected AttributedList<Path> list(final Path directory, final ListProgressListener listener, final String delimiter, final int chunksize) throws BackgroundException {
         try {
             final String prefix = this.createPrefix(directory);
+            log.debug("List with prefix {}", prefix);
             // If this optional, Unicode string parameter is included with your request,
             // then keys that contain the same string between the prefix and the first
             // occurrence of the delimiter will be rolled up into a single result
             // element in the CommonPrefixes collection. These rolled-up keys are
             // not returned elsewhere in the response.
             final Path bucket = containerService.getContainer(directory);
-            final AttributedList<Path> children = new AttributedList<>();
+            final AttributedList<Path> objects = new AttributedList<>();
             // Null if listing is complete
             String priorLastKey = null;
             boolean hasDirectoryPlaceholder = bucket.isRoot() || containerService.isContainer(directory);
@@ -91,22 +92,17 @@ public class S3ObjectListService extends S3AbstractListService implements ListSe
                         bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), prefix, delimiter,
                         chunksize, priorLastKey, false);
 
-                final StorageObject[] objects = chunk.getObjects();
-                for(StorageObject object : objects) {
+                for(StorageObject object : chunk.getObjects()) {
                     final String key = URIEncoder.decode(object.getKey());
-                    if(String.valueOf(Path.DELIMITER).equals(PathNormalizer.normalize(key))) {
-                        log.warn(String.format("Skipping prefix %s", key));
-                        continue;
-                    }
                     if(new SimplePathPredicate(PathNormalizer.compose(bucket, key)).test(directory)) {
-                        // Placeholder object, skip
+                        log.debug("Skip placeholder key {}", key);
                         hasDirectoryPlaceholder = true;
                         continue;
                     }
                     final EnumSet<Path.Type> types = object.getKey().endsWith(String.valueOf(Path.DELIMITER))
                             ? EnumSet.of(Path.Type.directory) : EnumSet.of(Path.Type.file);
                     final Path f;
-                    final PathAttributes attr = new S3AttributesAdapter().toAttributes(object);
+                    final PathAttributes attr = new S3AttributesAdapter(session.getHost()).toAttributes(object);
                     // Copy bucket location
                     attr.setRegion(bucket.attributes().getRegion());
                     if(null == delimiter) {
@@ -118,16 +114,13 @@ public class S3ObjectListService extends S3AbstractListService implements ListSe
                     if(metadata) {
                         f.withAttributes(attributes.find(f));
                     }
-                    children.add(f);
+                    objects.add(f);
                 }
                 final String[] prefixes = chunk.getCommonPrefixes();
                 for(String common : prefixes) {
-                    if(String.valueOf(Path.DELIMITER).equals(common)) {
-                        log.warn(String.format("Skipping prefix %s", common));
-                        continue;
-                    }
-                    final String key = PathNormalizer.normalize(URIEncoder.decode(common));
-                    if(new Path(bucket, key, EnumSet.of(Path.Type.directory)).equals(directory)) {
+                    log.debug("Handle common prefix {}", common);
+                    final String key = StringUtils.chomp(URIEncoder.decode(common), String.valueOf(Path.DELIMITER));
+                    if(new SimplePathPredicate(PathNormalizer.compose(bucket, key)).test(directory)) {
                         continue;
                     }
                     final Path f;
@@ -141,16 +134,17 @@ public class S3ObjectListService extends S3AbstractListService implements ListSe
                         f = new Path(directory.isDirectory() ? directory : directory.getParent(), PathNormalizer.name(key),
                                 EnumSet.of(Path.Type.directory, Path.Type.placeholder), attr);
                     }
-                    children.add(f);
+                    objects.add(f);
                 }
                 priorLastKey = null != chunk.getPriorLastKey() ? URIEncoder.decode(chunk.getPriorLastKey()) : null;
-                listener.chunk(directory, children);
+                listener.chunk(directory, objects);
             }
             while(priorLastKey != null);
-            if(!hasDirectoryPlaceholder && children.isEmpty()) {
+            if(!hasDirectoryPlaceholder && objects.isEmpty()) {
                 // Only for AWS
                 if(S3Session.isAwsHostname(session.getHost().getHostname())) {
                     if(StringUtils.isEmpty(RequestEntityRestStorageService.findBucketInHostname(session.getHost()))) {
+                        log.warn("No placeholder found for directory {}", directory);
                         throw new NotfoundException(directory.getAbsolute());
                     }
                 }
@@ -164,7 +158,7 @@ public class S3ObjectListService extends S3AbstractListService implements ListSe
                     }
                 }
             }
-            return children;
+            return objects;
         }
         catch(ServiceException e) {
             throw new S3ExceptionMappingService().map("Listing directory {0} failed", e, directory);

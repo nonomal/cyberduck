@@ -1,15 +1,12 @@
-﻿using ch.cyberduck.core.ctera;
-using ch.cyberduck.core.preferences;
+﻿using ch.cyberduck.core.preferences;
 using Ch.Cyberduck.Ui.Controller;
 using Ch.Cyberduck.Ui.Core.Contracts;
-using Ch.Cyberduck.Ui.Core.Preferences;
 using StructureMap;
 using System;
 using System.IO;
 using System.ServiceModel;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Web;
 using System.Windows.Forms;
 
 namespace Ch.Cyberduck.Ui
@@ -22,8 +19,8 @@ namespace Ch.Cyberduck.Ui
             bool newInstance;
             Mutex mutex = new Mutex(true, "iterate/cyberduck.io", out newInstance);
 
-            var preferences = new ApplicationPreferences();
-            PreferencesFactory.set(preferences);
+            StructureMapBootstrapper.Bootstrap();
+            PreferencesFactory.set(ObjectFactory.GetInstance<Preferences>());
             var argsTask = Task.Run(async () =>
             {
                 using (var channel = new ChannelFactory<ICyberduck>(new NetNamedPipeBinding(), new EndpointAddress("net.pipe://localhost/iterate/cyberduck.io")))
@@ -97,7 +94,6 @@ namespace Ch.Cyberduck.Ui
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
 
-                StructureMapBootstrapper.Bootstrap();
                 Application.Run(ObjectFactory.GetInstance<MainController>());
             }
             else

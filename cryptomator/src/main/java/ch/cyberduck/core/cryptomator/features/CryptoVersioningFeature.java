@@ -26,6 +26,8 @@ import ch.cyberduck.core.features.Vault;
 import ch.cyberduck.core.features.Versioning;
 import ch.cyberduck.core.vault.DecryptingListProgressListener;
 
+import java.util.EnumSet;
+
 public class CryptoVersioningFeature implements Versioning {
 
     private final Session<?> session;
@@ -49,13 +51,18 @@ public class CryptoVersioningFeature implements Versioning {
     }
 
     @Override
+    public boolean save(final Path file) throws BackgroundException {
+        return delegate.save(file);
+    }
+
+    @Override
     public void revert(final Path file) throws BackgroundException {
         delegate.revert(vault.encrypt(session, file));
     }
 
     @Override
-    public boolean isRevertable(final Path file) {
-        return delegate.isRevertable(file);
+    public EnumSet<Flags> features(final Path file) {
+        return delegate.features(file);
     }
 
     @Override

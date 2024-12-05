@@ -22,12 +22,19 @@ import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.DefaultPathContainerService;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 import ch.cyberduck.core.preferences.PreferencesFactory;
+import ch.cyberduck.core.synchronization.ChecksumComparisonService;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
 import ch.cyberduck.core.text.DefaultLexicographicOrderComparator;
 
 import java.util.Comparator;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class SwiftProtocol extends AbstractProtocol {
     @Override
     public String getName() {
@@ -70,10 +77,18 @@ public class SwiftProtocol extends AbstractProtocol {
     }
 
     @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.custom;
+    }
+
+    @Override
     @SuppressWarnings("unchecked")
     public <T> T getFeature(final Class<T> type) {
         if(type == PathContainerService.class) {
             return (T) new DefaultPathContainerService();
+        }
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(new ChecksumComparisonService(), ComparisonService.disabled);
         }
         return super.getFeature(type);
     }

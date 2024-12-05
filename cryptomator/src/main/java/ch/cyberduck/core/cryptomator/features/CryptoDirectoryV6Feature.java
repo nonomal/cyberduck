@@ -39,16 +39,14 @@ public class CryptoDirectoryV6Feature<Reply> implements Directory<Reply> {
 
     private final Session<?> session;
     private final Write<Reply> writer;
-    private final Find find;
     private final Directory<Reply> delegate;
     private final CryptoVault vault;
     private final RandomStringService random = new UUIDRandomStringService();
 
     public CryptoDirectoryV6Feature(final Session<?> session, final Directory<Reply> delegate,
-                                    final Write<Reply> writer, final Find find, final CryptoVault cryptomator) {
+                                    final Write<Reply> writer, final CryptoVault cryptomator) {
         this.session = session;
         this.writer = writer;
-        this.find = find;
         this.delegate = delegate;
         this.vault = cryptomator;
     }
@@ -59,18 +57,16 @@ public class CryptoDirectoryV6Feature<Reply> implements Directory<Reply> {
         final String directoryId = encrypt.attributes().getDirectoryId();
         // Create metadata file for directory
         final Path directoryMetadataFile = vault.encrypt(session, folder, true);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Write metadata %s for folder %s", directoryMetadataFile, folder));
-        }
+        log.debug("Write metadata {} for folder {}", directoryMetadataFile, folder);
         new ContentWriter(session).write(directoryMetadataFile, directoryId.getBytes(StandardCharsets.UTF_8));
         final Path intermediate = encrypt.getParent();
-        if(!find.find(intermediate)) {
-            delegate.mkdir(intermediate, new TransferStatus().withRegion(status.getRegion()));
+        if(!session._getFeature(Find.class).find(intermediate)) {
+            session._getFeature(Directory.class).mkdir(intermediate, new TransferStatus().withRegion(status.getRegion()));
         }
         // Write header
         final FileHeader header = vault.getFileHeaderCryptor().create();
         status.setHeader(vault.getFileHeaderCryptor().encryptHeader(header));
-        status.setNonces(new RandomNonceGenerator());
+        status.setNonces(new RandomNonceGenerator(vault.getNonceSize()));
         final Path target = delegate.withWriter(new CryptoWriteFeature<>(session, writer, vault)).mkdir(encrypt, status);
         // Implementation may return new copy of attributes without encryption attributes
         target.attributes().setDirectoryId(directoryId);
@@ -88,8 +84,8 @@ public class CryptoDirectoryV6Feature<Reply> implements Directory<Reply> {
     }
 
     @Override
-    public CryptoDirectoryV6Feature<Reply> withWriter(final Write<Reply> writer) {
-        return this;
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        delegate.preflight(workdir, filename);
     }
 
     @Override

@@ -1,4 +1,6 @@
-package ch.cyberduck.core.googlestorage;/*
+package ch.cyberduck.core.googlestorage;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -22,16 +24,24 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.VersioningConfiguration;
 import ch.cyberduck.core.cache.LRUCache;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Versioning;
 import ch.cyberduck.core.io.DisabledStreamListener;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import java.io.IOException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
+import java.io.IOException;
+import java.util.EnumSet;
+
+import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.Bucket;
 
 public class GoogleStorageVersioningFeature implements Versioning {
+    private static final Logger log = LogManager.getLogger(GoogleStorageVersioningFeature.class);
 
     private final PathContainerService containerService;
     private final GoogleStorageSession session;
@@ -39,39 +49,54 @@ public class GoogleStorageVersioningFeature implements Versioning {
 
     public GoogleStorageVersioningFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
     public VersioningConfiguration getConfiguration(final Path file) throws BackgroundException {
-        final Path container = containerService.getContainer(file);
-        if(container.isRoot()) {
+        final Path bucket = containerService.getContainer(file);
+        if(bucket.isRoot()) {
             return VersioningConfiguration.empty();
         }
-        if(cache.contains(container)) {
-            return cache.get(container);
+        if(cache.contains(bucket)) {
+            return cache.get(bucket);
         }
         try {
-            final Bucket.Versioning versioning = session.getClient().buckets().get(container.getName()).execute().getVersioning();
+            final Storage.Buckets.Get request = session.getClient().buckets().get(bucket.getName());
+            if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                request.setUserProject(session.getHost().getCredentials().getUsername());
+            }
+            final Bucket.Versioning versioning = request.execute().getVersioning();
             final VersioningConfiguration configuration = new VersioningConfiguration(versioning != null && versioning.getEnabled());
-            cache.put(container, configuration);
+            cache.put(bucket, configuration);
             return configuration;
         }
         catch(IOException e) {
-            throw new GoogleStorageExceptionMappingService().map("Failure to read attributes of {0}", e, container);
+            try {
+                throw new GoogleStorageExceptionMappingService().map("Failure to read attributes of {0}", e, bucket);
+            }
+            catch(AccessDeniedException l) {
+                cache.put(bucket, VersioningConfiguration.empty());
+                log.warn("Missing permission to read versioning configuration for {} {}", bucket, e.getMessage());
+                return VersioningConfiguration.empty();
+            }
         }
     }
 
     @Override
     public void setConfiguration(final Path file, final PasswordCallback prompt, final VersioningConfiguration configuration) throws BackgroundException {
-        final Path container = containerService.getContainer(file);
+        final Path bucket = containerService.getContainer(file);
         try {
-            session.getClient().buckets().patch(container.getName(),
-                new Bucket().setVersioning(new Bucket.Versioning().setEnabled(configuration.isEnabled()))).execute();
-            cache.remove(container);
+            final Storage.Buckets.Patch request = session.getClient().buckets().patch(bucket.getName(),
+                    new Bucket().setVersioning(new Bucket.Versioning().setEnabled(configuration.isEnabled())));
+            if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                request.setUserProject(session.getHost().getCredentials().getUsername());
+            }
+            request.execute();
+            cache.remove(bucket);
         }
         catch(IOException e) {
-            throw new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, container);
+            throw new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, bucket);
         }
     }
 
@@ -81,17 +106,21 @@ public class GoogleStorageVersioningFeature implements Versioning {
     }
 
     @Override
-    public boolean isRevertable(final Path file) {
-        return file.attributes().isDuplicate();
-    }
-
-    @Override
     public AttributedList<Path> list(final Path file, final ListProgressListener listener) throws BackgroundException {
-        return new GoogleStorageObjectListService(session).list(file, listener).filter(new NullFilter<Path>() {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
+        return new GoogleStorageObjectListService(session).list(file, listener, String.valueOf(Path.DELIMITER),
+                new HostPreferences(session.getHost()).getInteger("googlestorage.listing.chunksize"), new VersioningConfiguration(true)).filter(new NullFilter<Path>() {
             @Override
             public boolean accept(final Path file) {
                 return file.attributes().isDuplicate();
             }
         });
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.configuration, Flags.revert, Flags.list);
     }
 }

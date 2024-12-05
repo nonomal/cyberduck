@@ -20,6 +20,7 @@ package ch.cyberduck.core.dav;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Lock;
@@ -32,6 +33,7 @@ import org.apache.http.HttpHeaders;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.EnumSet;
 
 import com.github.sardine.impl.SardineException;
 
@@ -46,17 +48,18 @@ public class DAVCopyFeature implements Copy {
     @Override
     public Path copy(final Path source, final Path copy, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
         try {
-            final String target = new DefaultUrlProvider(session.getHost()).toUrl(copy).find(DescriptiveUrl.Type.provider).getUrl();
-            if(session.getFeature(Lock.class) != null && status.getLockId() != null) {
+            final String target = new DefaultUrlProvider(session.getHost()).toUrl(copy,
+                    EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider).getUrl();
+            if(status.getLockId() != null && session.getFeature(Lock.class) != null) {
                 // Indicate that the client has knowledge of that state token
-                session.getClient().copy(new DAVPathEncoder().encode(source), target, true,
-                    Collections.singletonMap(HttpHeaders.IF, String.format("(<%s>)", status.getLockId())));
+                session.getClient().copy(new DAVPathEncoder().encode(source), target, status.isExists(),
+                        Collections.singletonMap(HttpHeaders.IF, String.format("<%s> (<%s>)", new DAVPathEncoder().encode(source), status.getLockId())));
             }
             else {
-                session.getClient().copy(new DAVPathEncoder().encode(source), target, true);
+                session.getClient().copy(new DAVPathEncoder().encode(source), target, status.isExists());
             }
             listener.sent(status.getLength());
-            return copy;
+            return copy.withAttributes(new PathAttributes(source.attributes()).withLockId(null));
         }
         catch(SardineException e) {
             throw new DAVExceptionMappingService().map("Cannot copy {0}", e, source);
@@ -67,7 +70,7 @@ public class DAVCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

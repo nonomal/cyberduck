@@ -31,6 +31,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicReference;
 
 import com.dropbox.core.DbxException;
@@ -58,12 +59,7 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
         super(new DropboxAttributesFinderFeature(session));
         this.session = session;
         this.chunksize = chunksize;
-        this.containerService = new DropboxPathContainerService(session);
-    }
-
-    @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
@@ -73,9 +69,7 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
             final UploadSessionStartUploader start = files.uploadSessionStart();
             new DefaultStreamCloser().close(start.getOutputStream());
             final String sessionId = start.finish().getSessionId();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Obtained session id %s for upload %s", sessionId, file));
-            }
+            log.debug("Obtained session id {} for upload {}", sessionId, file);
             final UploadSessionAppendV2Uploader uploader = open(files, sessionId, 0L);
             return new SegmentingUploadProxyOutputStream(file, status, files, uploader, sessionId);
         }
@@ -85,8 +79,8 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
     }
 
     @Override
-    public boolean timestamp() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp);
     }
 
     private final class SegmentingUploadProxyOutputStream extends HttpResponseOutputStream<Metadata> {
@@ -129,9 +123,7 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
          * Open next chunk
          */
         private void next() throws DbxException {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Open next segment for upload session %s for file %s", sessionId, file));
-            }
+            log.debug("Open next segment for upload session {} for file {}", sessionId, file);
             // Next segment
             uploader = open(client, sessionId, written);
             // Replace stream
@@ -156,7 +148,7 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
                 DropboxWriteFeature.this.close(uploader);
                 final UploadSessionFinishUploader finish = client.uploadSessionFinish(new UploadSessionCursor(sessionId, written),
                         CommitInfo.newBuilder(containerService.getKey(file))
-                                .withClientModified(status.getTimestamp() != null ? new Date(status.getTimestamp()) : null)
+                                .withClientModified(status.getModified() != null ? new Date(status.getModified()) : null)
                                 .withMode(WriteMode.OVERWRITE)
                                 .build()
                 );
@@ -176,16 +168,12 @@ public class DropboxWriteFeature extends AbstractHttpWriteFeature<Metadata> {
     }
 
     private UploadSessionAppendV2Uploader open(final DbxUserFilesRequests files, final String sessionId, final Long offset) throws DbxException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Open next segment for upload session %s", sessionId));
-        }
+        log.debug("Open next segment for upload session {}", sessionId);
         return files.uploadSessionAppendV2(new UploadSessionCursor(sessionId, offset));
     }
 
     private void close(final UploadSessionAppendV2Uploader uploader) throws DbxException, IOException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Close uploader %s", uploader));
-        }
+        log.debug("Close uploader {}", uploader);
         uploader.getOutputStream().close();
         uploader.finish();
     }

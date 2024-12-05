@@ -18,6 +18,7 @@ package ch.cyberduck.core.box;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.box.io.swagger.client.model.File;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Upload;
@@ -41,24 +42,19 @@ public class BoxThresholdUploadService implements Upload<File> {
         this.session = session;
         this.fileid = fileid;
         this.registry = registry;
-        this.writer = new BoxThresholdWriteFeature(session, fileid);
+        this.writer = new BoxWriteFeature(session, fileid);
     }
 
     @Override
-    public File upload(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
+    public File upload(final Path file, final Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener,
                        final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         if(this.threshold(status.getLength())) {
             if(Vault.DISABLED == registry.find(session, file)) {
-                return new BoxLargeUploadService(session, fileid, writer).upload(file, local, throttle, listener, status, callback);
+                return new BoxLargeUploadService(session, fileid, new BoxChunkedWriteFeature(session, fileid)).upload(file, local, throttle, progress, streamListener, status, callback);
             }
             // Cannot comply with chunk size requirement from server
         }
-        return new BoxSmallUploadService(session, fileid, writer).upload(file, local, throttle, listener, status, callback);
-    }
-
-    @Override
-    public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Write.Append(false).withStatus(status);
+        return new BoxSmallUploadService(session, fileid, writer).upload(file, local, throttle, progress, streamListener, status, callback);
     }
 
     @Override

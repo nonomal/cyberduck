@@ -4,19 +4,23 @@ import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ChecksumException;
 import ch.cyberduck.core.features.MultipartWrite;
 import ch.cyberduck.core.http.HttpResponseOutputStream;
+import ch.cyberduck.core.io.ChecksumCompute;
 import ch.cyberduck.core.io.ChecksumComputeFactory;
 import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.io.MemorySegementingOutputStream;
 import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.threading.BackgroundActionState;
 import ch.cyberduck.core.threading.BackgroundExceptionCallable;
 import ch.cyberduck.core.threading.DefaultRetryCallable;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpHeaders;
 import org.apache.http.entity.ByteArrayEntity;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -33,6 +37,7 @@ import java.io.OutputStream;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -61,9 +66,8 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
             final Path bucket = containerService.getContainer(file);
             multipart = session.getClient().multipartStartUpload(
                     bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), object);
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Multipart upload started for %s with ID %s", multipart.getObjectKey(), multipart.getUploadId()));
-            }
+            log.debug("Multipart upload started for {} with ID {}", multipart.getObjectKey(), multipart.getUploadId());
+            multipart.setBucketName(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
         }
         catch(ServiceException e) {
             throw new S3ExceptionMappingService().map("Upload {0} failed", e, file);
@@ -71,13 +75,11 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
         final MultipartOutputStream proxy = new MultipartOutputStream(multipart, file, status);
         return new HttpResponseOutputStream<StorageObject>(new MemorySegementingOutputStream(proxy,
                 new HostPreferences(session.getHost()).getInteger("s3.upload.multipart.size")),
-                new S3AttributesAdapter(), status) {
+                new S3AttributesAdapter(session.getHost()), status) {
             @Override
             public StorageObject getStatus() {
                 if(proxy.getResponse() != null) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Received response %s", proxy.getResponse()));
-                    }
+                    log.debug("Received response {}", proxy.getResponse());
                     object.setContentLength(proxy.getOffset());
                     object.setETag(proxy.getResponse().getEtag());
                     if(proxy.getResponse().getVersionId() != null) {
@@ -90,8 +92,8 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
+    public ChecksumCompute checksum(final Path file, final TransferStatus status) {
+        return ChecksumComputeFactory.get(HashAlgorithm.sha256);
     }
 
     private final class MultipartOutputStream extends OutputStream {
@@ -107,6 +109,9 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
         private final AtomicBoolean close = new AtomicBoolean();
         private final AtomicReference<ServiceException> canceled = new AtomicReference<>();
         private final AtomicReference<MultipartCompleted> response = new AtomicReference<>();
+
+        private final ChecksumCompute md5 = ChecksumComputeFactory.get(HashAlgorithm.md5);
+        private final ChecksumCompute sha256 = ChecksumComputeFactory.get(HashAlgorithm.sha256);
 
         private Long offset = 0L;
         private int partNumber;
@@ -125,7 +130,7 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
         @Override
         public void write(final byte[] content, final int off, final int len) throws IOException {
             try {
-                completed.add(new DefaultRetryCallable<>(session.getHost(), new BackgroundExceptionCallable<MultipartPart>() {
+                completed.add(new DefaultRetryCallable<MultipartPart>(session.getHost(), new BackgroundExceptionCallable<MultipartPart>() {
                     @Override
                     public MultipartPart call() throws BackgroundException {
                         final Map<String, String> parameters = new HashMap<>();
@@ -134,13 +139,12 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
                         final TransferStatus status = new TransferStatus().withParameters(parameters).withLength(len);
                         switch(session.getSignatureVersion()) {
                             case AWS4HMACSHA256:
-                                status.setChecksum(ChecksumComputeFactory.get(HashAlgorithm.sha256)
-                                        .compute(new ByteArrayInputStream(content, off, len), status)
-                                );
+                                status.setChecksum(sha256.compute(new ByteArrayInputStream(content, off, len), status));
                                 break;
                         }
                         status.setSegment(true);
                         final S3Object part = new S3WriteFeature(session, acl).getDetails(file, status);
+                        part.addMetadata(HttpHeaders.CONTENT_MD5, md5.compute(new ByteArrayInputStream(content, off, len), status).base64);
                         try {
                             final Path bucket = containerService.getContainer(file);
                             session.getClient().putObjectWithRequestEntityImpl(
@@ -151,15 +155,22 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
                             canceled.set(e);
                             throw new S3ExceptionMappingService().map("Upload {0} failed", e, file);
                         }
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Saved object %s with checksum %s", file, part.getETag()));
-                        }
+                        log.debug("Saved object {} with checksum {}", file, part.getETag());
                         return new MultipartPart(partNumber,
                                 null == part.getLastModifiedDate() ? new Date(System.currentTimeMillis()) : part.getLastModifiedDate(),
                                 null == part.getETag() ? StringUtils.EMPTY : part.getETag(),
                                 part.getContentLength());
                     }
-                }, overall).call());
+                }, overall) {
+                    @Override
+                    public boolean retry(final BackgroundException failure, final ProgressListener progress, final BackgroundActionState cancel) {
+                        if(super.retry(failure, progress, cancel)) {
+                            canceled.set(null);
+                            return true;
+                        }
+                        return false;
+                    }
+                }.call());
                 offset += len;
             }
             catch(BackgroundException e) {
@@ -171,23 +182,20 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
         public void close() throws IOException {
             try {
                 if(close.get()) {
-                    log.warn(String.format("Skip double close of stream %s", this));
+                    log.warn("Skip double close of stream {}", this);
                     return;
                 }
                 if(null != canceled.get()) {
-                    log.warn(String.format("Skip closing with previous failure %s", canceled.get()));
+                    log.warn("Skip closing with previous failure {}", canceled.get().getMessage());
                     return;
                 }
                 if(completed.isEmpty()) {
                     this.write(new byte[0]);
                 }
                 final MultipartCompleted complete = session.getClient().multipartCompleteUpload(multipart, completed);
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Completed multipart upload for %s with checksum %s",
-                            complete.getObjectKey(), complete.getEtag()));
-                }
+                log.debug("Completed multipart upload for {} with checksum {}", complete.getObjectKey(), complete.getEtag());
                 if(file.getType().contains(Path.Type.encrypted)) {
-                    log.warn(String.format("Skip checksum verification for %s with client side encryption enabled", file));
+                    log.warn("Skip checksum verification for {} with client side encryption enabled", file);
                 }
                 else {
                     if(S3Session.isAwsHostname(session.getHost().getHostname())) {
@@ -237,7 +245,7 @@ public class S3MultipartWriteFeature implements MultipartWrite<StorageObject> {
     }
 
     @Override
-    public boolean timestamp() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp);
     }
 }

@@ -17,6 +17,7 @@ package ch.cyberduck.core.cryptomator.features;
 
 import ch.cyberduck.core.cryptomator.CryptoOutputStream;
 import ch.cyberduck.core.cryptomator.CryptoVault;
+import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.cryptomator.random.RotatingNonceGenerator;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ChecksumException;
@@ -34,6 +35,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.commons.io.input.NullInputStream;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.cryptomator.cryptolib.api.FileHeader;
@@ -72,17 +74,16 @@ public class CryptoChecksumCompute extends AbstractChecksumCompute {
             status.setHeader(cryptomator.getFileHeaderCryptor().encryptHeader(header));
         }
         if(null == status.getNonces()) {
-            // Make nonces reusable in case we need to compute a checksum
-            status.setNonces(new RotatingNonceGenerator(cryptomator.numberOfChunks(status.getLength())));
+            status.setNonces(status.getLength() == TransferStatus.UNKNOWN_LENGTH ?
+                    new RandomNonceGenerator(cryptomator.getNonceSize()) :
+                    new RotatingNonceGenerator(cryptomator.getNonceSize(), cryptomator.numberOfChunks(status.getLength())));
         }
         return this.compute(this.normalize(in, status), status, status.getOffset(), status.getLength(), status.getHeader(), status.getNonces());
     }
 
     protected Checksum compute(final InputStream in, final StreamCancelation cancel,
                                final long offset, final long length, final ByteBuffer header, final NonceGenerator nonces) throws ChecksumException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Calculate checksum with header %s", header));
-        }
+        log.debug("Calculate checksum with header {}", header);
         try {
             final PipedOutputStream source = new PipedOutputStream();
             final CryptoOutputStream out = new CryptoOutputStream(source, cryptomator.getFileContentCryptor(),
@@ -108,7 +109,9 @@ public class CryptoChecksumCompute extends AbstractChecksumCompute {
                         Uninterruptibles.getUninterruptibly(execute);
                     }
                     catch(ExecutionException e) {
-                        Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
+                        for(Throwable cause : ExceptionUtils.getThrowableList(e)) {
+                            Throwables.throwIfInstanceOf(cause, BackgroundException.class);
+                        }
                         throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
                     }
                 }

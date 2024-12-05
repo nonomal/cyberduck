@@ -46,7 +46,7 @@ public class TripleCryptKeyPair {
     private final HostPasswordStore keychain = PasswordStoreFactory.get();
 
     public Credentials unlock(final PasswordCallback callback, final Host bookmark, final UserKeyPair keypair) throws CryptoException, BackgroundException {
-        final String passphrase = keychain.getPassword(this.getServiceName(bookmark, keypair.getUserPublicKey().getVersion()), this.getAccountName(bookmark));
+        final String passphrase = keychain.getPassword(toServiceName(bookmark, keypair.getUserPublicKey().getVersion()), toAccountName(bookmark));
         return this.unlock(callback, bookmark, keypair, passphrase);
     }
 
@@ -66,34 +66,33 @@ public class TripleCryptKeyPair {
             }
         }
         else {
-            credentials = new VaultCredentials(passphrase).withSaved(true);
+            credentials = new VaultCredentials(passphrase).withSaved(false);
         }
-        if(!Crypto.checkUserKeyPair(keypair, credentials.getPassword())) {
+        if(!Crypto.checkUserKeyPair(keypair, credentials.getPassword().toCharArray())) {
             return this.unlock(callback, bookmark, keypair, null, String.format("%s. %s", LocaleFactory.localizedString("Invalid passphrase", "Credentials"), LocaleFactory.localizedString("Enter your decryption password to access encrypted data rooms.", "SDS")));
         }
         else {
             if(credentials.isSaved()) {
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Save encryption password for %s", bookmark));
-                }
+                log.info("Save encryption password for {}", bookmark);
                 try {
-                    keychain.addPassword(this.getServiceName(bookmark, keypair.getUserPublicKey().getVersion()),
-                            this.getAccountName(bookmark), credentials.getPassword());
+                    keychain.addPassword(toServiceName(bookmark, keypair.getUserPublicKey().getVersion()),
+                            toAccountName(bookmark), credentials.getPassword());
                 }
                 catch(LocalAccessDeniedException e) {
-                    log.error(String.format("Failure %s saving credentials for %s in password store", e, bookmark));
+                    log.error("Failure {} saving credentials for {} in password store", e, bookmark);
                 }
             }
             return credentials;
         }
     }
 
-    private String getServiceName(final Host bookmark, final UserKeyPair.Version version) {
+    protected static String toServiceName(final Host bookmark, final UserKeyPair.Version version) {
         return String.format("Triple-Crypt Encryption Password (%s) - Version (%s)", bookmark.getCredentials().getUsername(), version.getValue());
     }
 
-    private String getAccountName(final Host bookmark) {
-        return new DefaultUrlProvider(bookmark).toUrl(new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory))).find(DescriptiveUrl.Type.provider).getUrl();
+    protected static String toAccountName(final Host bookmark) {
+        return new DefaultUrlProvider(bookmark).toUrl(new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory)),
+                EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider).getUrl();
     }
 
     public static PlainDataContainer createPlainDataContainer(final byte[] bytes, final int len) {

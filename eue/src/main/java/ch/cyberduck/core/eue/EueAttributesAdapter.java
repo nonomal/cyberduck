@@ -1,4 +1,6 @@
-package ch.cyberduck.core.eue;/*
+package ch.cyberduck.core.eue;
+
+/*
  * Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -20,10 +22,6 @@ public class EueAttributesAdapter implements AttributesAdapter<EueWriteFeature.C
 
     @Override
     public PathAttributes toAttributes(final EueWriteFeature.Chunk model) {
-        final PathAttributes attr = new PathAttributes();
-        attr.setFileId(model.getResourceId());
-        attr.setSize(model.getLength());
-        attr.setChecksum(model.getChecksum());
-        return attr;
+        return PathAttributes.EMPTY;
     }
 }

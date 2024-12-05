@@ -25,11 +25,10 @@ import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.io.Checksum;
+import ch.cyberduck.core.s3.S3PathContainerService;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.codec.binary.Hex;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -41,14 +40,13 @@ import com.spectralogic.ds3client.commands.HeadObjectResponse;
 import com.spectralogic.ds3client.networking.FailedRequestException;
 
 public class SpectraAttributesFinderFeature implements AttributesFinder, AttributesAdapter<HeadObjectResponse> {
-    private static final Logger log = LogManager.getLogger(SpectraAttributesFinderFeature.class);
 
     private final SpectraSession session;
     private final PathContainerService containerService;
 
     public SpectraAttributesFinderFeature(final SpectraSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new S3PathContainerService(session.getHost());
     }
 
     @Override

@@ -19,7 +19,6 @@ package ch.cyberduck.core.azure;
  */
 
 import ch.cyberduck.core.DirectoryDelimiterPathContainerService;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -58,7 +57,7 @@ public class AzureMetadataFeature implements Headers {
     }
 
     @Override
-    public Map<String, String> getDefault(final Local local) {
+    public Map<String, String> getDefault() {
         return new HostPreferences(session.getHost()).getMap("azure.metadata.default");
     }
 
@@ -72,7 +71,7 @@ public class AzureMetadataFeature implements Headers {
             }
             else {
                 final CloudBlob blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                    .getBlobReferenceFromServer(containerService.getKey(file));
+                        .getBlobReferenceFromServer(containerService.getKey(file));
                 // Populates the blob properties and metadata
                 blob.downloadAttributes(null, null, context);
                 final Map<String, String> metadata = new HashMap<String, String>(blob.getMetadata());
@@ -105,7 +104,7 @@ public class AzureMetadataFeature implements Headers {
             }
             else {
                 final CloudBlob blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                    .getBlobReferenceFromServer(containerService.getKey(file));
+                        .getBlobReferenceFromServer(containerService.getKey(file));
                 // Populates the blob properties and metadata
                 blob.downloadAttributes();
                 // Replace metadata

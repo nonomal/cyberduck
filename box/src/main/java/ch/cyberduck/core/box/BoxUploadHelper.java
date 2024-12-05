@@ -1,4 +1,6 @@
-package ch.cyberduck.core.box;/*
+package ch.cyberduck.core.box;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -15,7 +17,6 @@ package ch.cyberduck.core.box;/*
 
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.box.io.swagger.client.JSON;
 import ch.cyberduck.core.box.io.swagger.client.model.FileIdUploadSessionsBody;
@@ -67,7 +68,7 @@ public class BoxUploadHelper {
             final HttpEntityEnclosingRequestBase request;
             if(status.isExists()) {
                 request = new HttpPost(String.format("%s/files/%s/upload_sessions",
-                        client.getBasePath(), fileid.getFileId(file, new DisabledListProgressListener())));
+                        client.getBasePath(), fileid.getFileId(file)));
                 final ByteArrayOutputStream content = new ByteArrayOutputStream();
                 final FileIdUploadSessionsBody idUploadSessionsBody = new FileIdUploadSessionsBody().fileName(file.getName());
                 if(status.getLength() != TransferStatus.UNKNOWN_LENGTH) {
@@ -80,7 +81,7 @@ public class BoxUploadHelper {
                 request = new HttpPost(String.format("%s/files/upload_sessions", client.getBasePath()));
                 final ByteArrayOutputStream content = new ByteArrayOutputStream();
                 final FilesUploadSessionsBody uploadSessionsBody = new FilesUploadSessionsBody()
-                        .folderId(fileid.getFileId(file.getParent(), new DisabledListProgressListener()))
+                        .folderId(fileid.getFileId(file.getParent()))
                         .fileName(file.getName());
                 if(status.getLength() != TransferStatus.UNKNOWN_LENGTH) {
                     uploadSessionsBody.fileSize(status.getLength());
@@ -109,7 +110,10 @@ public class BoxUploadHelper {
         try {
             final HttpPost request = new HttpPost(String.format("%s/files/upload_sessions/%s/commit", client.getBasePath(), uploadSessionId));
             if(!Checksum.NONE.equals(overall.getChecksum())) {
-                request.addHeader(new BasicHeader("Digest", String.format("sha=%s", overall.getChecksum().hash)));
+                request.addHeader(new BasicHeader("Digest", String.format("sha=%s", overall.getChecksum().base64)));
+            }
+            else {
+                log.warn("Missing checksum to add SHA1 digest header");
             }
             final ByteArrayOutputStream content = new ByteArrayOutputStream();
             final UploadSessionIdCommitBody body = new UploadSessionIdCommitBody().parts(uploadParts);
@@ -120,16 +124,14 @@ public class BoxUploadHelper {
                     request.addHeader(new BasicHeader(HttpHeaders.IF_MATCH, overall.getRemote().getETag()));
                 }
                 else {
-                    log.warn(String.format("Missing remote attributes in transfer status to read current ETag for %s", file));
+                    log.warn("Missing remote attributes in transfer status to read current ETag for {}", file);
                 }
             }
             return session.getClient().execute(request, new BoxClientErrorResponseHandler<Files>() {
                 @Override
                 public Files handleResponse(final HttpResponse response) throws IOException {
                     if(response.getStatusLine().getStatusCode() == HttpStatus.SC_ACCEPTED) {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Wait for server to process chunks with response %s", response));
-                        }
+                        log.debug("Wait for server to process chunks with response {}", response);
                         this.flush(file, response, uploadSessionId);
                         return session.getClient().execute(request, this);
                     }
@@ -149,10 +151,7 @@ public class BoxUploadHelper {
                     do {
                         final HttpGet request = new HttpGet(String.format("%s/files/upload_sessions/%s", client.getBasePath(), uploadSessionId));
                         uploadSession = new JSON().getContext(null).readValue(session.getClient().execute(request).getEntity().getContent(), UploadSession.class);
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Server processed %d of %d parts",
-                                    uploadSession.getNumPartsProcessed(), uploadSession.getTotalParts()));
-                        }
+                        log.debug("Server processed {} of {} parts", uploadSession.getNumPartsProcessed(), uploadSession.getTotalParts());
                     }
                     while(!Objects.equals(uploadSession.getNumPartsProcessed(), uploadSession.getTotalParts()));
                 }

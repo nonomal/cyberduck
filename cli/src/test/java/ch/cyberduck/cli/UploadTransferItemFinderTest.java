@@ -31,36 +31,30 @@ import static org.junit.Assert.assertEquals;
 public class UploadTransferItemFinderTest {
 
     @Test
-    public void testResolveDirectory() {
+    public void testResolveFolderToFolder() {
         final Local temp = new TemporarySupportDirectoryFinder().find();
-        {
-            final TransferItem item = new UploadTransferItemFinder().resolve(new Path("/cyberduck", EnumSet.of(Path.Type.directory, Path.Type.volume)),
-                    temp);
-            assertEquals(new Path("/cyberduck/" + temp.getName(), EnumSet.of(Path.Type.directory)), item.remote);
-            assertEquals(temp, item.local);
-        }
-        {
-            final TransferItem item = new UploadTransferItemFinder().resolve(new Path("/cyberduck", EnumSet.of(Path.Type.directory)),
-                    temp);
-            assertEquals(new Path("/cyberduck/" + temp.getName(), EnumSet.of(Path.Type.directory)), item.remote);
-            assertEquals(temp, item.local);
-        }
+        final Path folder = new Path("/d", EnumSet.of(Path.Type.directory));
+        assertEquals(folder, UploadTransferItemFinder.resolve(folder, temp, false).remote);
+        assertEquals(temp, UploadTransferItemFinder.resolve(folder, temp, false).local);
+        assertEquals(new Path(folder, temp.getName(), EnumSet.of(Path.Type.directory)), UploadTransferItemFinder.resolve(folder, temp, true).remote);
+        assertEquals(temp, UploadTransferItemFinder.resolve(folder, temp, true).local);
     }
 
     @Test
-    public void testResolveFile() {
+    public void testResolveFileToFile() {
         final Local temp = new FlatTemporaryFileService().create(new AlphanumericRandomStringService().random());
-        {
-            final TransferItem item = new UploadTransferItemFinder().resolve(new Path("/cyberduck", EnumSet.of(Path.Type.file)),
-                    temp);
-            assertEquals(new Path("/cyberduck", EnumSet.of(Path.Type.file)), item.remote);
-            assertEquals(temp, item.local);
-        }
-        {
-            final TransferItem item = new UploadTransferItemFinder().resolve(new Path("/cyberduck", EnumSet.of(Path.Type.directory)),
-                    temp);
-            assertEquals(new Path("/cyberduck/"+temp.getName(), EnumSet.of(Path.Type.file)), item.remote);
-            assertEquals(temp, item.local);
-        }
+        final Path file = new Path("/f", EnumSet.of(Path.Type.file));
+        final TransferItem item = UploadTransferItemFinder.resolve(file, temp, false);
+        assertEquals(file, item.remote);
+        assertEquals(temp, item.local);
+    }
+
+    @Test
+    public void testResolveFileToFolder() {
+        final Local temp = new FlatTemporaryFileService().create(new AlphanumericRandomStringService().random());
+        final Path folder = new Path("/d", EnumSet.of(Path.Type.directory));
+        final TransferItem item = UploadTransferItemFinder.resolve(folder, temp, false);
+        assertEquals(new Path("/d/" + temp.getName(), EnumSet.of(Path.Type.file)), item.remote);
+        assertEquals(temp, item.local);
     }
 }

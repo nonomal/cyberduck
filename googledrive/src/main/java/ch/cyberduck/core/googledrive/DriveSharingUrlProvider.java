@@ -16,18 +16,18 @@ package ch.cyberduck.core.googledrive;
  */
 
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.preferences.HostPreferences;
 
 import java.io.IOException;
+import java.util.EnumSet;
 
 import com.google.api.services.drive.model.Permission;
 
-public class DriveSharingUrlProvider implements PromptUrlProvider {
+public class DriveSharingUrlProvider implements Share {
 
     private final DriveSession session;
     private final DriveFileIdProvider fileid;
@@ -47,23 +47,23 @@ public class DriveSharingUrlProvider implements PromptUrlProvider {
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final Object options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final Object options, final PasswordCallback callback) throws BackgroundException {
         final Permission permission = new Permission();
         // To make a file public you will need to assign the role reader to the type anyone
         permission.setRole("reader");
         permission.setType("anyone");
         try {
-            session.getClient().permissions().create(fileid.getFileId(file, new DisabledListProgressListener()), permission)
-                .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
+            session.getClient().permissions().create(fileid.getFileId(file), permission)
+                    .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
         }
         catch(IOException e) {
             throw new DriveExceptionMappingService(fileid).map("Failure to write attributes of {0}", e, file);
         }
-        return new DriveUrlProvider().toUrl(file).find(DescriptiveUrl.Type.http);
+        return new DriveUrlProvider().toUrl(file, EnumSet.of(DescriptiveUrl.Type.http)).find(DescriptiveUrl.Type.http);
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final Object options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final Object options, final PasswordCallback callback) throws BackgroundException {
         return DescriptiveUrl.EMPTY;
     }
 }

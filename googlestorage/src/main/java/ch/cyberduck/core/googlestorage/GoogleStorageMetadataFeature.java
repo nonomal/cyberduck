@@ -15,7 +15,6 @@ package ch.cyberduck.core.googlestorage;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -31,6 +30,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Map;
 
+import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.StorageObject;
 
 public class GoogleStorageMetadataFeature implements Headers {
@@ -41,51 +41,49 @@ public class GoogleStorageMetadataFeature implements Headers {
 
     public GoogleStorageMetadataFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
-    public Map<String, String> getDefault(final Local local) {
+    public Map<String, String> getDefault() {
         return new HostPreferences(session.getHost()).getMap("googlestorage.metadata.default");
     }
 
     @Override
     public Map<String, String> getMetadata(final Path file) throws BackgroundException {
-        if(file.isFile() || file.isPlaceholder()) {
-            try {
-                return new GoogleStorageAttributesFinderFeature(session).find(file).getMetadata();
-            }
-            catch(NotfoundException e) {
-                if(file.isPlaceholder()) {
-                    // No placeholder file may exist but we just have a common prefix
-                    return Collections.emptyMap();
-                }
-                throw e;
-            }
+        try {
+            return new GoogleStorageAttributesFinderFeature(session).find(file).getMetadata();
         }
-        return Collections.emptyMap();
+        catch(NotfoundException e) {
+            if(file.isDirectory()) {
+                // No placeholder file may exist but we just have a common prefix
+                return Collections.emptyMap();
+            }
+            throw e;
+        }
     }
 
     @Override
     public void setMetadata(final Path file, final TransferStatus status) throws BackgroundException {
-        if(file.isFile() || file.isPlaceholder()) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Write metadata %s for file %s", status, file));
+        log.debug("Write metadata {} for file {}", status, file);
+        try {
+            final Storage.Objects.Patch request = session.getClient().objects().patch(containerService.getContainer(file).getName(), containerService.getKey(file),
+                    new StorageObject().setMetadata(status.getMetadata()));
+            if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                request.setUserProject(session.getHost().getCredentials().getUsername());
             }
-            try {
-                session.getClient().objects().patch(containerService.getContainer(file).getName(), containerService.getKey(file),
-                    new StorageObject().setMetadata(status.getMetadata())).execute();
-            }
-            catch(IOException e) {
-                final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, file);
-                if(file.isPlaceholder()) {
-                    if(failure instanceof NotfoundException) {
-                        // No placeholder file may exist but we just have a common prefix
-                        return;
-                    }
+            final StorageObject object = request.execute();
+            status.setResponse(new GoogleStorageAttributesFinderFeature(session).toAttributes(object));
+        }
+        catch(IOException e) {
+            final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, file);
+            if(file.isDirectory()) {
+                if(failure instanceof NotfoundException) {
+                    // No placeholder file may exist but we just have a common prefix
+                    return;
                 }
-                throw failure;
             }
+            throw failure;
         }
     }
 }

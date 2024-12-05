@@ -21,7 +21,6 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
@@ -51,11 +50,6 @@ public class SFTPDirectoryFeature implements Directory<Void> {
         catch(IOException e) {
             throw new SFTPExceptionMappingService().map("Cannot create folder {0}", e, folder);
         }
-        return folder.withAttributes(new SFTPAttributesFinderFeature(session).find(folder));
-    }
-
-    @Override
-    public SFTPDirectoryFeature withWriter(final Write<Void> writer) {
-        return this;
+        return folder;
     }
 }

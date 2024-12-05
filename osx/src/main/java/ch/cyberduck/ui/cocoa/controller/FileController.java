@@ -23,6 +23,8 @@ import ch.cyberduck.binding.application.NSView;
 import ch.cyberduck.core.Cache;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.ProviderHelpServiceFactory;
+import ch.cyberduck.core.SimplePathPredicate;
+import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.ui.browser.UploadTargetFinder;
 
 import org.apache.commons.lang3.StringUtils;
@@ -66,15 +68,16 @@ public abstract class FileController extends AlertController {
     }
 
     @Override
-    public boolean validate() {
-        if(StringUtils.contains(inputField.stringValue(), Path.DELIMITER)) {
+    public boolean validate(final int option) {
+        final String input = StringUtils.trim(inputField.stringValue());
+        if(PreferencesFactory.get().getList("browser.filter.regex").stream().anyMatch(input::matches)) {
             return false;
         }
-        if(StringUtils.isNotBlank(inputField.stringValue())) {
-            if(cache.get(workdir).contains(new Path(workdir, inputField.stringValue(), EnumSet.of(Path.Type.file)))) {
+        if(StringUtils.isNotBlank(input)) {
+            if(cache.get(workdir).toStream().filter(new SimplePathPredicate(new Path(workdir, input, EnumSet.of(Path.Type.file)))).findAny().isPresent()) {
                 return false;
             }
-            if(cache.get(workdir).contains(new Path(workdir, inputField.stringValue(), EnumSet.of(Path.Type.directory)))) {
+            if(cache.get(workdir).toStream().filter(new SimplePathPredicate(new Path(workdir, input, EnumSet.of(Path.Type.directory)))).findAny().isPresent()) {
                 return false;
             }
             return true;
@@ -88,7 +91,7 @@ public abstract class FileController extends AlertController {
         switch(returncode) {
             case DEFAULT_OPTION:
             case ALTERNATE_OPTION:
-                this.callback(returncode, new Path(directory, inputField.stringValue(), EnumSet.of(Path.Type.file)));
+                this.callback(returncode, new Path(directory, StringUtils.trim(inputField.stringValue()), EnumSet.of(Path.Type.file)));
                 break;
         }
     }

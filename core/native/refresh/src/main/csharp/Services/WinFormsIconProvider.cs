@@ -38,22 +38,11 @@ namespace Ch.Cyberduck.Core.Refresh.Services
 
         public Image DefaultBrowser()
         {
-            if (IconCache.TryGetIcon("app:defaultbrowser", out Image image))
-            {
-                return image;
-            }
-
             if (Utils.GetSystemDefaultBrowser() is not ShellApplicationFinder.ProgIdApplication app)
             {
                 return default;
             }
-
-            uint result = ExtractIconEx(app.IconPath, app.IconIndex, out var largeIcon, out var smallIcon, 1);
-            using (smallIcon)
-            using (largeIcon)
-            {
-                return Get(largeIcon.DangerousGetHandle(), (c, s, i) => c.CacheIcon("app:defaultbrowser", s, i));
-            }
+            return GetApplication(app, 32);
         }
 
         public override Image GetDisk(Protocol protocol, int size)
@@ -65,63 +54,6 @@ namespace Ch.Cyberduck.Core.Refresh.Services
             => IconCache.TryGetIcon(protocol, size, out Image image, "Icon")
             ? image
             : Get(protocol, protocol.icon(), size, "Icon");
-
-        public Image GetPath(Path path, int size)
-        {
-            string key = "path:" + (path.isDirectory() ? "folder" : path.getExtension());
-
-            Func<(string, Func<int, Image>)> overlayFactory = default;
-            if (path.getType().contains(AbstractPath.Type.decrypted))
-            {
-                overlayFactory = () => ("unlocked", (int size) => GetResource("unlockedbadge", size));
-            }
-            else if (path.isSymbolicLink())
-            {
-                overlayFactory = () => ("alias", (int size) => GetResource("aliasbadge", size));
-            }
-            else
-            {
-                var permission = path.attributes().getPermission();
-                if (path.isFile())
-                {
-                    return string.IsNullOrWhiteSpace(path.getExtension()) && permission.isExecutable()
-                        ? GetResource("executable", size)
-                        : GetFileIcon(path.getName(), false, size >= 32, false);
-                }
-                else if (path.isDirectory())
-                {
-                    if (Permission.EMPTY != permission)
-                    {
-                        if (!permission.isExecutable())
-                        {
-                            overlayFactory = () => ("privatefolder", (int size) => GetResource("privatefolderbadge", size));
-                        }
-                        else if (!permission.isReadable() && permission.isWritable())
-                        {
-                            overlayFactory = () => ("dropfolder", (int size) => GetResource("dropfolderbadge", size));
-                        }
-                        else if (!permission.isWritable() && permission.isReadable())
-                        {
-                            overlayFactory = () => ("readonlyfolder", (int size) => GetResource("readonlyfolderbadge", size));
-                        }
-                    }
-                }
-            }
-
-            (string Class, Func<int, Image> factory) = overlayFactory?.Invoke() ?? default;
-            if (IconCache.TryGetIcon(key, out Image image, Class))
-            {
-                return image;
-            }
-
-            var baseImage = GetFileIcon(path.getExtension(), path.isDirectory(), size >= 32, false);
-            if (factory is not null)
-            {
-                var overlayed = Overlay(baseImage, factory(size), size);
-                IconCache.CacheIcon(key, size, overlayed, Class);
-            }
-            return baseImage;
-        }
 
         public Image ResizeImageDangerous(Image image, int size) => new Bitmap(image, new Size(size, size));
 
@@ -139,32 +71,7 @@ namespace Ch.Cyberduck.Core.Refresh.Services
             return bitmap;
         }
 
-        private static Image Overlay(Image original, Image overlay, int size)
-        {
-            var surface = new Bitmap(original, new Size(size, size));
-            using var graphics = Graphics.FromImage(surface);
-            graphics.DrawImage(overlay, graphics.ClipBounds);
-            return surface;
-        }
-
-        private void BuildProtocolImageList()
-        {
-            var iterator = protocols.find().iterator();
-            HashSet<string> removedKeys = new(ProtocolList.Images.Keys.OfType<string>());
-            while (iterator.hasNext())
-            {
-                var protocol = (Protocol)iterator.next();
-                var key = protocol.disk();
-                removedKeys.Remove(key);
-                ProtocolList.Images.Add(key, GetDisk(protocol, 16));
-            }
-            foreach (var item in removedKeys)
-            {
-                ProtocolList.Images.RemoveByKey(item);
-            }
-        }
-
-        private Image FindNearestFit(IEnumerable<Image> sources, int size, CacheIconCallback cacheCallback)
+        protected override Image NearestFit(IEnumerable<Image> sources, int size, CacheIconCallback cacheCallback)
         {
             var nearest = int.MaxValue;
             Image nearestFit = null;
@@ -188,6 +95,31 @@ namespace Ch.Cyberduck.Core.Refresh.Services
             return nearestFit;
         }
 
+        protected override Image Overlay(Image original, Image overlay, int size)
+        {
+            Bitmap surface = new(original, new Size(size, size));
+            using var graphics = Graphics.FromImage(surface);
+            graphics.DrawImage(overlay, graphics.ClipBounds);
+            return surface;
+        }
+
+        private void BuildProtocolImageList()
+        {
+            var iterator = protocols.find().iterator();
+            HashSet<string> removedKeys = new(ProtocolList.Images.Keys.OfType<string>());
+            while (iterator.hasNext())
+            {
+                var protocol = (Protocol)iterator.next();
+                var key = protocol.disk();
+                removedKeys.Remove(key);
+                ProtocolList.Images.Add(key, GetDisk(protocol, 16));
+            }
+            foreach (var item in removedKeys)
+            {
+                ProtocolList.Images.RemoveByKey(item);
+            }
+        }
+
         private Image Get(object key, string path, string classifier)
             => IconCache.TryGetIcon(key, out Image image, classifier)
             ? image
@@ -201,7 +133,11 @@ namespace Ch.Cyberduck.Core.Refresh.Services
         private Image Get(object key, string path, int size, string classifier, bool returnDefault)
         {
             var images = Get(key, path, classifier, returnDefault, out var image);
-            return image ?? FindNearestFit(images, size, (c, s, i) => c.CacheIcon(key, s, i, classifier));
+            return image ?? NearestFit(images, size, (c, s, i) =>
+            {
+                c.CacheIcon(key, s, i, classifier);
+                c.MarkResized(key, s, classifier);
+            });
         }
 
         private void ProfileListObserver_ProfilesChanged(object sender, EventArgs e) => BuildProtocolImageList();

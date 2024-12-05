@@ -18,6 +18,7 @@ package ch.cyberduck.ui.cocoa.delegate;
  *  dkocher@cyberduck.ch
  */
 
+import ch.cyberduck.binding.Delegate;
 import ch.cyberduck.binding.ProxyController;
 import ch.cyberduck.binding.application.NSEvent;
 import ch.cyberduck.binding.application.NSMenu;
@@ -60,9 +61,7 @@ public abstract class AbstractMenuDelegate extends ProxyController implements NS
      *               and return NO to stop the updating.
      */
     public boolean menuUpdateItemAtIndex(NSMenu menu, NSMenuItem item, NSInteger index, boolean cancel) {
-        if(log.isTraceEnabled()) {
-            log.trace("menuUpdateItemAtIndex:" + index.intValue());
-        }
+        log.trace("menuUpdateItemAtIndex:{}", index.intValue());
         if(index.intValue() == this.numberOfItemsInMenu(menu).intValue() - 1) {
             // Collection fully populated
             this.setNeedsUpdate(false);
@@ -104,9 +103,7 @@ public abstract class AbstractMenuDelegate extends ProxyController implements NS
      *         equivalent to the event characters.
      */
     public boolean menuHasKeyEquivalent_forEvent(NSMenu menu, NSEvent event) {
-        if(log.isTraceEnabled()) {
-            log.trace("menuHasKeyEquivalent_forEvent:" + menu);
-        }
+        log.trace("menuHasKeyEquivalent_forEvent:{}", menu);
         if(StringUtils.isBlank(this.getKeyEquivalent())) {
             return false;
         }
@@ -116,17 +113,15 @@ public abstract class AbstractMenuDelegate extends ProxyController implements NS
         return false;
     }
 
+    @Delegate
     public ID menuKeyEquivalentTarget_forEvent(NSMenu menu, NSEvent event) {
-        if(log.isTraceEnabled()) {
-            log.trace("menuKeyEquivalentTarget_forEvent:" + menu);
-        }
+        log.trace("menuKeyEquivalentTarget_forEvent:{}", menu);
         return this.getTarget();
     }
 
+    @Delegate
     public Selector menuKeyEquivalentAction_forEvent(NSMenu menu, NSEvent event) {
-        if(log.isTraceEnabled()) {
-            log.trace("menuKeyEquivalentAction_forEvent:" + menu);
-        }
+        log.trace("menuKeyEquivalentAction_forEvent:{}", menu);
         return this.getDefaultAction();
     }
 
@@ -134,9 +129,7 @@ public abstract class AbstractMenuDelegate extends ProxyController implements NS
      * Menu needs revalidation before being displayed the next time
      */
     public void setNeedsUpdate(boolean u) {
-        if(log.isTraceEnabled()) {
-            log.trace("setNeedsUpdate:" + u);
-        }
+        log.trace("setNeedsUpdate:{}", u);
         update.set(u);
     }
 
@@ -176,7 +169,7 @@ public abstract class AbstractMenuDelegate extends ProxyController implements NS
         item.setKeyEquivalent(key);
         if(log.isDebugEnabled()) {
             if(!item.keyEquivalent().equals(key)) {
-                log.error(String.format("Failed to attach key equivalent to menu item %s", key));
+                log.error("Failed to attach key equivalent to menu item {}", key);
             }
         }
         item.setKeyEquivalentModifierMask(modifier);

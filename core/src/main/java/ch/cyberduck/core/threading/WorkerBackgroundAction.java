@@ -18,7 +18,6 @@ package ch.cyberduck.core.threading;
  */
 
 import ch.cyberduck.core.Controller;
-import ch.cyberduck.core.LoginCallback;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -57,23 +56,14 @@ public class WorkerBackgroundAction<T> extends RegistryBackgroundAction<T> {
                                   final SessionPool session,
                                   final Worker<T> worker,
                                   final ProgressListener progress,
-                                  final AlertCallback alert,
-                                  final LoginCallback login) {
-        super(listener, session, progress, alert, login);
+                                  final AlertCallback alert) {
+        super(listener, session, progress, alert);
         this.worker = worker;
     }
 
     @Override
-    protected void reset() throws BackgroundException {
-        worker.reset();
-        super.reset();
-    }
-
-    @Override
     public T run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run worker %s", worker));
-        }
+        log.debug("Run worker {}", worker);
         try {
             result = worker.run(session);
         }
@@ -87,13 +77,11 @@ public class WorkerBackgroundAction<T> extends RegistryBackgroundAction<T> {
     @Override
     public void cleanup() {
         if(null == result) {
-            log.warn(String.format("Missing result for worker %s. Use default value.", worker));
+            log.warn("Missing result for worker {}. Use default value.", worker);
             worker.cleanup(worker.initialize());
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Cleanup worker %s", worker));
-            }
+            log.debug("Cleanup worker {}", worker);
             worker.cleanup(result);
         }
         super.cleanup();
@@ -101,9 +89,7 @@ public class WorkerBackgroundAction<T> extends RegistryBackgroundAction<T> {
 
     @Override
     public void cancel() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Cancel worker %s", worker));
-        }
+        log.debug("Cancel worker {}", worker);
         worker.cancel();
         super.cancel();
     }

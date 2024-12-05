@@ -1,8 +1,25 @@
-﻿using System;
+﻿//
+// Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
+// http://cyberduck.io/
+//
+// This program is free software; you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation; either version 2 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+//
+// Bug fixes, suggestions and comments should be sent to:
+// feedback@cyberduck.io
+//
+
+using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Windows.Win32.Foundation;
 using Windows.Win32.UI.Controls;
@@ -39,21 +56,36 @@ namespace Ch.Cyberduck.Core.TaskDialog
         }
     }
 
-    public sealed class TaskDialog
+    public sealed class TaskDialog : IDisposable
     {
         private readonly List<TASKDIALOG_BUTTON> buttons = new();
         private readonly List<TASKDIALOG_BUTTON> radioButtons = new();
+        private readonly GCRegistry registry = new();
         private bool buttonsConfigured = false;
         private TaskDialogHandler callback;
         private TASKDIALOGCONFIG config;
+        private bool disposedValue;
         private bool footerIconConfigured = false;
+        private bool hasVerification = false;
         private bool mainIconConfigured = false;
         private bool radioButtonsConfigured = false;
-        private bool hasVerification = false;
+
+        private static readonly PFTASKDIALOGCALLBACK s_callbackProcDelegate;
+
+        static TaskDialog()
+        {
+            s_callbackProcDelegate = (hwnd, msg, wParam, lParam, lpRefData) =>
+            ((TaskDialog)GCHandle.FromIntPtr(lpRefData).Target).Handler(hwnd, msg, wParam, lParam);
+        }
 
         private TaskDialog()
         {
             config.cbSize = (uint)SizeOf<TASKDIALOGCONFIG>();
+        }
+
+        ~TaskDialog()
+        {
+            Dispose(disposing: false);
         }
 
         public delegate void AddButtonCallback(MESSAGEBOX_RESULT id, in string title, bool @default);
@@ -80,7 +112,6 @@ namespace Ch.Cyberduck.Core.TaskDialog
         public TaskDialog Callback(TaskDialogHandler handler)
         {
             callback = handler;
-            config.pfCallback = Handler;
             return this;
         }
 
@@ -110,7 +141,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog Content(in string content)
         {
-            config.pszContent = content;
+            PinValue(out config.pszContent, content, registry);
             return this;
         }
 
@@ -121,6 +152,12 @@ namespace Ch.Cyberduck.Core.TaskDialog
             buttonsConfigured = true;
             DoButtons(configure, config.nDefaultButton, out config.cButtons);
             return this;
+        }
+
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
         }
 
         public TaskDialog EnableCallbackTimer()
@@ -137,7 +174,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog ExpandedInformation(in string expandedInformation)
         {
-            config.pszExpandedInformation = expandedInformation;
+            PinValue(out config.pszExpandedInformation, expandedInformation, registry);
             return this;
         }
 
@@ -145,9 +182,9 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog ExpandedInformation(in string expandedControlText, in string collapsedControlText, in string expandedInformation)
         {
-            config.pszExpandedControlText = expandedControlText;
-            config.pszCollapsedControlText = collapsedControlText;
-            config.pszExpandedInformation = expandedInformation;
+            PinValue(out config.pszExpandedControlText, expandedControlText, registry);
+            PinValue(out config.pszCollapsedControlText, collapsedControlText, registry);
+            PinValue(out config.pszExpandedInformation, expandedInformation, registry);
             return this;
         }
 
@@ -168,16 +205,6 @@ namespace Ch.Cyberduck.Core.TaskDialog
             return this;
         }
 
-        public TaskDialog FooterIcon(PCWSTR icon)
-        {
-            if (footerIconConfigured)
-                throw new InvalidOperationException();
-            footerIconConfigured = true;
-
-            config.Anonymous2.pszFooterIcon = icon;
-            return this;
-        }
-
         public TaskDialog FooterIcon(TaskDialogIcon icon)
         {
             if (footerIconConfigured)
@@ -190,7 +217,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog FooterText(string text)
         {
-            config.pszFooter = text;
+            PinValue(out config.pszFooter, text, registry);
             return this;
         }
 
@@ -202,17 +229,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog Instruction(in string instruction)
         {
-            config.pszMainInstruction = instruction;
-            return this;
-        }
-
-        public TaskDialog MainIcon(PCWSTR icon)
-        {
-            if (mainIconConfigured)
-                throw new InvalidOperationException();
-            mainIconConfigured = true;
-
-            config.Anonymous1.pszMainIcon = icon;
+            PinValue(out config.pszMainInstruction, instruction, registry);
             return this;
         }
 
@@ -253,6 +270,9 @@ namespace Ch.Cyberduck.Core.TaskDialog
             return this;
         }
 
+        /// <summary>
+        /// Shows this TaskDialog instance, and disposes any allocated resources immediately
+        /// </summary>
         public unsafe TaskDialogResult Show()
         {
             int button = default;
@@ -260,29 +280,45 @@ namespace Ch.Cyberduck.Core.TaskDialog
             BOOL verificationChecked = default;
             HRESULT result;
 
-            using var buttonMemory = MemoryPool<TASKDIALOG_BUTTON>.Shared.Rent((int)(config.cButtons + config.cRadioButtons));
-            var buttons = buttonMemory.Memory.Slice(0, (int)config.cButtons).Span;
-            var radioButtons = buttonMemory.Memory.Slice((int)config.cButtons, (int)config.cRadioButtons).Span;
-
-            for (int i = 0; i < this.buttons.Count; i++)
+            unsafe static void CopyButtons(ref TASKDIALOG_BUTTON target, List<TASKDIALOG_BUTTON> buttons, out TASKDIALOG_BUTTON* first)
             {
-                buttons[i] = this.buttons[i];
+                first = (TASKDIALOG_BUTTON*)AsPointer(ref target);
+                ref TASKDIALOG_BUTTON next = ref target;
+                foreach (var item in buttons)
+                {
+                    next = item;
+                    next = ref Add(ref next, 1);
+                }
             }
-            for (int i = 0; i < this.radioButtons.Count; i++)
-            {
-                radioButtons[i] = this.radioButtons[i];
-            }
-            config.pButtons = (TASKDIALOG_BUTTON*)AsPointer(ref GetReference(buttons));
-            config.pRadioButtons = (TASKDIALOG_BUTTON*)AsPointer(ref GetReference(radioButtons));
 
+            int buttonCount = buttons.Count;
+            int radioButtonCount = radioButtons.Count;
+            using var buttonMemory = MemoryPool<TASKDIALOG_BUTTON>.Shared.Rent(buttonCount + radioButtonCount);
+            registry.Register(buttonMemory.Memory.Pin());
+            CopyButtons(ref GetReference(buttonMemory.Memory.Slice(0, buttonCount).Span), buttons, out config.pButtons);
+            CopyButtons(ref GetReference(buttonMemory.Memory.Slice(buttonCount, radioButtonCount).Span), radioButtons, out config.pRadioButtons);
+
+            GCHandle handle = default;
             try
             {
                 Showing?.Invoke(this, EventArgs.Empty);
-                result = TaskDialogIndirect(config, &button, &radioButton, &verificationChecked);
+                TASKDIALOGCONFIG copy = config;
+                config = default;
+                copy.pfCallback = s_callbackProcDelegate;
+
+                handle = GCHandle.Alloc(this, GCHandleType.Normal);
+                copy.lpCallbackData = GCHandle.ToIntPtr(handle);
+
+                result = TaskDialogIndirect(copy, &button, &radioButton, &verificationChecked);
             }
             finally
             {
+                if (handle.IsAllocated)
+                {
+                    handle.Free();
+                }
                 Closed?.Invoke(this, EventArgs.Empty);
+                this.Dispose();
             }
             if (button == 0)
                 Marshal.ThrowExceptionForHR(result);
@@ -301,7 +337,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog Title(in string title)
         {
-            config.pszWindowTitle = title;
+            PinValue(out config.pszWindowTitle, title, registry);
             return this;
         }
 
@@ -313,12 +349,43 @@ namespace Ch.Cyberduck.Core.TaskDialog
 
         public TaskDialog VerificationText(in string verificationText, bool verificationChecked)
         {
-            config.pszVerificationText = verificationText;
+            hasVerification = true;
+            PinValue(out config.pszVerificationText, verificationText, registry);
             if (verificationChecked)
             {
                 config.dwFlags |= TDF_VERIFICATION_FLAG_CHECKED;
             }
             return this;
+        }
+
+        private static unsafe void PinValue(out PCWSTR pcwstr, string value, in GCRegistry registry)
+        {
+            PinValue(out char* ptr, value, registry);
+            pcwstr = ptr;
+        }
+
+        private static unsafe void PinValue<TIn, TOut>(out TOut* ptr, TIn value, in GCRegistry registry)
+            where TIn : class
+            where TOut : unmanaged
+        {
+            PinValue(out void* temp, value, registry);
+            ptr = (TOut*)temp;
+        }
+
+        private static unsafe void PinValue<TIn>(out nint ptr, TIn value, in GCRegistry registry)
+            where TIn : class
+        {
+            PinValue(out void* temp, value, registry);
+            ptr = (nint)temp;
+        }
+
+        private static unsafe void PinValue<TIn>(out void* ptr, TIn value, in GCRegistry registry)
+            where TIn : class
+        {
+            var alloc = GCHandle.Alloc(value, GCHandleType.Pinned);
+            var handle = new MemoryHandle((void*)alloc.AddrOfPinnedObject(), alloc);
+            registry.Register(handle);
+            ptr = handle.Pointer;
         }
 
         private static PCWSTR ToIcon(TaskDialogIcon icon) => icon switch
@@ -331,14 +398,24 @@ namespace Ch.Cyberduck.Core.TaskDialog
             _ => throw new ArgumentOutOfRangeException(nameof(icon))
         };
 
+        private void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                disposedValue = true;
+                registry.Dispose();
+            }
+        }
+
         private void DoButtons(Action<AddButtonCallback> configure, in int defaultButton, out uint count) => DoButtons(buttons, configure, defaultButton, out count);
 
-        private void DoButtons(List<TASKDIALOG_BUTTON> target, Action<AddButtonCallback> configure, in int defaultButton, out uint count)
+        private unsafe void DoButtons(List<TASKDIALOG_BUTTON> target, Action<AddButtonCallback> configure, in int defaultButton, out uint count)
         {
             MESSAGEBOX_RESULT? value = default;
             configure((MESSAGEBOX_RESULT id, in string title, bool @default) =>
             {
-                target.Add(new() { nButtonID = (int)id, pszButtonText = title });
+                PinValue(out char* pinned, title, registry);
+                target.Add(new() { nButtonID = (int)id, pszButtonText = pinned });
                 if (value.HasValue)
                 {
                     value = id;
@@ -355,7 +432,7 @@ namespace Ch.Cyberduck.Core.TaskDialog
             }
         }
 
-        private unsafe HRESULT Handler(HWND hwnd, uint msg, WPARAM wParam, LPARAM lParam, nint lpRefData)
+        private unsafe HRESULT Handler(HWND hwnd, uint msg, WPARAM wParam, LPARAM lParam)
         {
             var notification = (TASKDIALOG_NOTIFICATIONS)msg;
 
@@ -374,7 +451,26 @@ namespace Ch.Cyberduck.Core.TaskDialog
                 TDN_EXPANDO_BUTTON_CLICKED => new TaskDialogExpandoButtonClickedEventArgs(hwnd, wParam.Value != 0),
                 _ => default
             };
-            return callback(this, args) ? S_FALSE : S_OK;
+            return callback?.Invoke(this, args) == true ? S_FALSE : S_OK;
+        }
+
+        private struct GCRegistry : IDisposable
+        {
+            private readonly LinkedList<MemoryHandle> disposables = new();
+
+            public GCRegistry()
+            { }
+
+            public void Dispose()
+            {
+                while (disposables.Last is LinkedListNode<MemoryHandle> node)
+                {
+                    node.Value.Dispose();
+                    disposables.Remove(node);
+                }
+            }
+
+            public void Register(in MemoryHandle handle) => disposables.AddLast(handle);
         }
     }
 

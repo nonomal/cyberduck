@@ -35,7 +35,7 @@ public class FreenetAuthenticatedUrlProviderTest extends AbstractFreenetTest {
         final FreenetAuthenticatedUrlProvider provider = new FreenetAuthenticatedUrlProvider(new DefaultHostPasswordStore() {
             @Override
             public String getPassword(final String serviceName, final String accountName) throws LocalAccessDeniedException {
-                return System.getProperties().getProperty("freenet.password");
+                return PROPERTIES.get("freenet.password");
             }
 
             @Override
@@ -45,7 +45,7 @@ public class FreenetAuthenticatedUrlProviderTest extends AbstractFreenetTest {
 
             @Override
             public String getPassword(final Scheme scheme, final int port, final String hostname, final String user) throws LocalAccessDeniedException {
-                return System.getProperties().getProperty("freenet.password");
+                return PROPERTIES.get("freenet.password");
             }
 
             @Override

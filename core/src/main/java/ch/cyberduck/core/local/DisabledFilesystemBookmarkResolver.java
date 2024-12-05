@@ -17,15 +17,15 @@ package ch.cyberduck.core.local;
 
 import ch.cyberduck.core.Local;
 
-public class DisabledFilesystemBookmarkResolver implements FilesystemBookmarkResolver<Void> {
+public class DisabledFilesystemBookmarkResolver implements FilesystemBookmarkResolver<Object, Object> {
 
     @Override
-    public String create(final Local file) {
+    public Void create(final Local file) {
         return null;
     }
 
     @Override
-    public Void resolve(final Local file, final boolean interactive) {
+    public Object resolve(final Object file) {
         return null;
     }
 }

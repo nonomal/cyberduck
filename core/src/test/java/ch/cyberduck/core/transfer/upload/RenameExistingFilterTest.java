@@ -40,7 +40,7 @@ public class RenameExistingFilterTest {
                 return true;
             }
 
-        }, new TransferStatus().exists(true)));
+        }, new TransferStatus().exists(true), new DisabledProgressListener()));
     }
 
     @Test
@@ -146,21 +146,14 @@ public class RenameExistingFilterTest {
                             fail();
                             return null;
                         }
-
-                        @Override
-                        public Append append(final Path file, final TransferStatus status) {
-                            fail();
-                            return new Append(false);
-                        }
                     };
                 }
                 return null;
             }
         };
         final UploadFilterOptions options = new UploadFilterOptions(host).withTemporary(true);
-        final RenameExistingFilter f = new RenameExistingFilter(new DisabledUploadSymlinkResolver(), session,
+        final RenameExistingFilter f = new RenameExistingFilter(new DisabledUploadSymlinkResolver(), session, find, attributes,
             options);
-        f.withFinder(find).withAttributes(attributes);
         assertTrue(options.temporary);
         final TransferStatus status = f.prepare(file, new NullLocal("t"), new TransferStatus().exists(true), new DisabledProgressListener());
         f.apply(file, new NullLocal("t"), status, new DisabledProgressListener());
@@ -228,20 +221,13 @@ public class RenameExistingFilterTest {
                             fail();
                             return null;
                         }
-
-                        @Override
-                        public Append append(final Path file, final TransferStatus status) {
-                            fail();
-                            return new Append(false);
-                        }
                     };
                 }
                 return null;
             }
         };
-        final RenameExistingFilter f = new RenameExistingFilter(new DisabledUploadSymlinkResolver(), session,
+        final RenameExistingFilter f = new RenameExistingFilter(new DisabledUploadSymlinkResolver(), session, find, attributes,
             new UploadFilterOptions(host).withTemporary(true));
-        f.withFinder(find).withAttributes(attributes);
         final TransferStatus status = f.prepare(file, new NullLocal("/t") {
             @Override
             public boolean isDirectory() {

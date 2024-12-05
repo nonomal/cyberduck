@@ -17,7 +17,6 @@ package ch.cyberduck.core.googledrive;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.AccessDeniedException;
@@ -39,6 +38,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
 import java.text.MessageFormat;
+import java.util.EnumSet;
 
 import com.google.api.client.http.HttpHeaders;
 import com.google.api.services.drive.Drive;
@@ -59,9 +59,9 @@ public class DriveReadFeature implements Read {
     @Override
     public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         if(file.isPlaceholder()) {
-            final DescriptiveUrl link = new DriveUrlProvider().toUrl(file).find(DescriptiveUrl.Type.http);
+            final DescriptiveUrl link = new DriveUrlProvider().toUrl(file, EnumSet.of(DescriptiveUrl.Type.http)).find(DescriptiveUrl.Type.http);
             if(DescriptiveUrl.EMPTY.equals(link)) {
-                log.warn(String.format("Missing web link for file %s", file));
+                log.warn("Missing web link for file {}", file);
                 return new NullInputStream(file.attributes().getSize());
             }
             // Write web link file
@@ -79,9 +79,7 @@ public class DriveReadFeature implements Read {
                 else {
                     header = String.format("bytes=%d-%d", range.getStart(), range.getEnd());
                 }
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add range header %s for file %s", header, file));
-                }
+                log.debug("Add range header {} for file {}", header, file);
                 headers.setRange(header);
                 // Disable compression
                 headers.setAcceptEncoding("identity");
@@ -89,7 +87,7 @@ public class DriveReadFeature implements Read {
             if(file.attributes().isDuplicate()) {
                 // Read previous version
                 try {
-                    final Drive.Revisions.Get request = session.getClient().revisions().get(fileid.getFileId(file, new DisabledListProgressListener()), file.attributes().getVersionId());
+                    final Drive.Revisions.Get request = session.getClient().revisions().get(fileid.getFileId(file), file.attributes().getVersionId());
                     request.setRequestHeaders(headers);
                     return request.executeMediaAsInputStream();
                 }
@@ -100,7 +98,7 @@ public class DriveReadFeature implements Read {
             else {
                 try {
                     try {
-                        final Drive.Files.Get request = session.getClient().files().get(fileid.getFileId(file, new DisabledListProgressListener()));
+                        final Drive.Files.Get request = session.getClient().files().get(fileid.getFileId(file));
                         request.setRequestHeaders(headers);
                         request.setSupportsTeamDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable"));
                         return request.executeMediaAsInputStream();
@@ -122,7 +120,7 @@ public class DriveReadFeature implements Read {
                                 String.format("connection.unsecure.download.%s", session.getHost().getHostname()));
                     }
                     try {
-                        final Drive.Files.Get request = session.getClient().files().get(fileid.getFileId(file, new DisabledListProgressListener()));
+                        final Drive.Files.Get request = session.getClient().files().get(fileid.getFileId(file));
                         request.setAcknowledgeAbuse(true);
                         request.setRequestHeaders(headers);
                         request.setSupportsTeamDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable"));

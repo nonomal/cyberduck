@@ -1,4 +1,6 @@
-package ch.cyberduck.core.spectra;/*
+package ch.cyberduck.core.spectra;
+
+/*
  * Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -22,38 +24,45 @@ import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.LoginConnectionService;
 import ch.cyberduck.core.LoginOptions;
-import ch.cyberduck.core.Scheme;
-import ch.cyberduck.core.exception.LoginCanceledException;
+import ch.cyberduck.core.Profile;
+import ch.cyberduck.core.ProtocolFactory;
+import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DisabledX509TrustManager;
+import ch.cyberduck.test.VaultTest;
 
 import org.junit.After;
 import org.junit.Before;
 
-public class AbstractSpectraTest {
+import java.util.Collections;
+import java.util.HashSet;
+
+import static org.junit.Assert.fail;
+
+public class AbstractSpectraTest extends VaultTest {
 
     protected SpectraSession session;
 
     @After
     public void disconnect() throws Exception {
+        session.close();
     }
 
     @Before
     public void setup() throws Exception {
-        final Host host = new Host(new SpectraProtocol() {
-            @Override
-            public Scheme getScheme() {
-                return Scheme.http;
-            }
-        }, System.getProperties().getProperty("spectra.hostname"), Integer.parseInt(System.getProperties().getProperty("spectra.port")), new Credentials(
-                System.getProperties().getProperty("spectra.user"), System.getProperties().getProperty("spectra.key")
+        final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new SpectraProtocol())));
+        final Profile profile = new ProfilePlistReader(factory).read(
+                this.getClass().getResourceAsStream("/Spectra S3 (HTTPS).cyberduckprofile"));
+        final Host host = new Host(profile, PROPERTIES.get("spectra.hostname"), Integer.parseInt(PROPERTIES.get("spectra.port")), new Credentials(
+                PROPERTIES.get("spectra.user"), PROPERTIES.get("spectra.key")
         ));
         session = new SpectraSession(host, new DisabledX509TrustManager(),
                 new DefaultX509KeyManager());
         final LoginConnectionService connect = new LoginConnectionService(new DisabledLoginCallback() {
             @Override
-            public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) throws LoginCanceledException {
-                throw new LoginCanceledException();
+            public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
+                fail(reason);
+                return null;
             }
         }, new DisabledHostKeyCallback(),
                 new DisabledPasswordStore(), new DisabledProgressListener());

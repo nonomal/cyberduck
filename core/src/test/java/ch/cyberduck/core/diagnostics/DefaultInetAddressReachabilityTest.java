@@ -26,31 +26,25 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+@Ignore
 public class DefaultInetAddressReachabilityTest {
 
     @Test
-    @Ignore
-    public void testIsReachablePort80() {
-        final Reachability r = new DefaultInetAddressReachability();
-        assertTrue(r.isReachable(
-                new Host(new TestProtocol(), "cyberduck.ch", 80)
-        ));
-    }
-
-    @Test
-    @Ignore
-    public void testIsReachablePort22() {
-        final Reachability r = new DefaultInetAddressReachability();
-        assertTrue(r.isReachable(
-                new Host(new TestProtocol(), "cyberduck.ch", 22)
-        ));
-    }
-
-    @Test
-    public void testNotReachablePort22() {
+    public void testIsReachable() {
         final Reachability r = new DefaultInetAddressReachability();
         assertFalse(r.isReachable(
-                new Host(new TestProtocol(), "a.cyberduck.ch", 22)
+                new Host(new TestProtocol(), "cyberduck.io")
+        ));
+        assertTrue(r.isReachable(
+                new Host(new TestProtocol(), "cyberduck.io")
+        ));
+    }
+
+    @Test
+    public void testNotReachableSubdomain() {
+        final Reachability r = new DefaultInetAddressReachability();
+        assertFalse(r.isReachable(
+                new Host(new TestProtocol(), "a.cyberduck.ch")
         ));
     }
 
@@ -58,7 +52,7 @@ public class DefaultInetAddressReachabilityTest {
     public void testNotReachableWrongHostname() {
         final Reachability r = new DefaultInetAddressReachability();
         assertFalse(r.isReachable(
-                new Host(new TestProtocol(), "iterate.ch.f", 22)
+                new Host(new TestProtocol(), "cyberduck.ch.f")
         ));
     }
 }

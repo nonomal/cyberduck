@@ -41,16 +41,13 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
     }
 
     @Override
-    protected void reset() throws BackgroundException {
-        worker.reset();
-        super.reset();
+    public T call() throws BackgroundException {
+        return this.run();
     }
 
     @Override
     public T run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run worker %s", worker));
-        }
+        log.debug("Run worker {}", worker);
         try {
             pool.release(session, null);
             return worker.run(session);
@@ -64,13 +61,11 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
     @Override
     public void cleanup() {
         if(null == result) {
-            log.warn(String.format("Missing result for worker %s. Use default value.", worker));
+            log.warn("Missing result for worker {}. Use default value.", worker);
             worker.cleanup(worker.initialize());
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Cleanup worker %s", worker));
-            }
+            log.debug("Cleanup worker {}", worker);
             worker.cleanup(result);
         }
         super.cleanup();
@@ -78,9 +73,7 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
 
     @Override
     public void cancel() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Cancel worker %s", worker));
-        }
+        log.debug("Cancel worker {}", worker);
         worker.cancel();
         super.cancel();
     }

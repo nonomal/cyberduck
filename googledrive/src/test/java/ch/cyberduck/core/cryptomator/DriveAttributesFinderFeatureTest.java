@@ -27,10 +27,10 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathCache;
 import ch.cyberduck.core.SimplePathPredicate;
-import ch.cyberduck.core.cryptomator.features.CryptoAttributesFeature;
 import ch.cyberduck.core.cryptomator.features.CryptoFileIdProvider;
 import ch.cyberduck.core.cryptomator.features.CryptoListService;
 import ch.cyberduck.core.cryptomator.features.CryptoTouchFeature;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.googledrive.AbstractDriveTest;
@@ -67,13 +67,13 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final Path home = DriveHomeFinderService.MYDRIVE_FOLDER;
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final DriveFileIdProvider idProvider = new DriveFileIdProvider(session);
         final Path test = new CryptoTouchFeature<>(session, new DefaultTouchFeature<>(new DriveWriteFeature(session, idProvider)), new DriveWriteFeature(session, idProvider), cryptomator).touch(
                 new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
         test.attributes().setSize(0L);
-        final PathAttributes attributes = new CryptoAttributesFeature(session, new DriveAttributesFinderFeature(session, idProvider), cryptomator).find(test);
+        final PathAttributes attributes = cryptomator.getFeature(session, AttributesFinder.class, new DriveAttributesFinderFeature(session, idProvider)).find(test);
         assertNotNull(attributes);
         assertEquals(0L, attributes.getSize());
         cryptomator.getFeature(session, Delete.class, new DriveDeleteFeature(session, idProvider)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
@@ -84,13 +84,13 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final Path home = DriveHomeFinderService.MYDRIVE_FOLDER;
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final DriveFileIdProvider idProvider = new DriveFileIdProvider(session);
         final Path test = new CryptoTouchFeature<>(session, new DefaultTouchFeature<>(new DriveWriteFeature(session, idProvider)), new DriveWriteFeature(session, idProvider), cryptomator).touch(
                 new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
         test.attributes().setSize(0L);
-        final PathAttributes attributes = new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator).find(test);
+        final PathAttributes attributes = cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session)).find(test);
         assertNotNull(attributes);
         assertEquals(0L, attributes.getSize());
         cryptomator.getFeature(session, Delete.class, new DriveDeleteFeature(session, idProvider)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
@@ -101,14 +101,14 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final Path home = DriveHomeFinderService.MYDRIVE_FOLDER;
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final DriveFileIdProvider idProvider = new DriveFileIdProvider(session);
         final Path test = cryptomator.getFeature(session, Directory.class, new DriveDirectoryFeature(session, idProvider)).mkdir(
                 new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), new TransferStatus());
         final String fileId = test.attributes().getFileId();
         assertNotNull(fileId);
-        final PathAttributes attributes = new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator).find(test);
+        final PathAttributes attributes = cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session)).find(test);
         assertEquals(fileId, attributes.getFileId());
         assertEquals(fileId, cryptomator.encrypt(session, test, true).attributes().getFileId());
         cryptomator.getFeature(session, Delete.class, new DriveDeleteFeature(session, idProvider)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
@@ -119,7 +119,7 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final Path home = DriveHomeFinderService.MYDRIVE_FOLDER;
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final DriveFileIdProvider idProvider = new DriveFileIdProvider(session);
         final Path test = new CryptoTouchFeature<>(session, new DefaultTouchFeature<>(new DriveWriteFeature(session, idProvider)), new DriveWriteFeature(session, idProvider), cryptomator).touch(
@@ -130,7 +130,7 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final AttributedList<Path> list = new AttributedList<>();
         list.add(found);
         cache.put(vault, list);
-        final PathAttributes attributes = new CachingAttributesFinderFeature(cache, new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator)).find(test);
+        final PathAttributes attributes = new CachingAttributesFinderFeature(session, cache, cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session))).find(test);
         assertNotNull(attributes);
         assertEquals(0L, attributes.getSize());
         assertEquals(0L, cache.get(vault).get(0).attributes().getSize());
@@ -142,23 +142,23 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
         final Path home = DriveHomeFinderService.MYDRIVE_FOLDER;
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final DriveFileIdProvider idProvider = new DriveFileIdProvider(session);
-        assertEquals(new CryptoFileIdProvider(session, idProvider, cryptomator).getFileId(vault, new DisabledListProgressListener()),
-                idProvider.getFileId(vault, new DisabledListProgressListener()));
+        assertEquals(new CryptoFileIdProvider(session, idProvider, cryptomator).getFileId(vault),
+                idProvider.getFileId(vault));
         final Path test = cryptomator.getFeature(session, Directory.class, new DriveDirectoryFeature(session, idProvider)).mkdir(
                 new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), new TransferStatus());
         final String fileId = test.attributes().getFileId();
         assertNotNull(fileId);
         final Path found = new CryptoListService(session, new DriveListService(session, idProvider), cryptomator).list(test.getParent(), new DisabledListProgressListener()).find(new SimplePathPredicate(test));
         assertNull(found.attributes().getFileId());
-        assertEquals(fileId, new CryptoFileIdProvider(session, idProvider, cryptomator).getFileId(found, new DisabledListProgressListener()));
+        assertEquals(fileId, new CryptoFileIdProvider(session, idProvider, cryptomator).getFileId(found));
         final Cache<Path> cache = new PathCache(1);
         final AttributedList<Path> list = new AttributedList<>();
         list.add(test);
         cache.put(vault, list);
-        final PathAttributes attributes = new CachingAttributesFinderFeature(cache, new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator)).find(test);
+        final PathAttributes attributes = new CachingAttributesFinderFeature(session, cache, cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session))).find(test);
         assertEquals(fileId, attributes.getFileId());
         cryptomator.getFeature(session, Delete.class, new DriveDeleteFeature(session, idProvider)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }

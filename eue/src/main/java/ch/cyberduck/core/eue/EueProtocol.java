@@ -1,4 +1,6 @@
-package ch.cyberduck.core.eue;/*
+package ch.cyberduck.core.eue;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -14,8 +16,15 @@ package ch.cyberduck.core.eue;/*
  */
 
 import ch.cyberduck.core.AbstractProtocol;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
+import ch.cyberduck.core.synchronization.ETagComparisonService;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class EueProtocol extends AbstractProtocol {
 
     @Override
@@ -50,6 +59,19 @@ public class EueProtocol extends AbstractProtocol {
 
     @Override
     public DirectoryTimestamp getDirectoryTimestamp() {
-        return DirectoryTimestamp.explicit;
+        return DirectoryTimestamp.implicit;
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.custom;
+    }
+
+    @Override
+    public <T> T getFeature(final Class<T> type) {
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(DefaultComparisonService.forFiles(this), new ETagComparisonService());
+        }
+        return super.getFeature(type);
     }
 }

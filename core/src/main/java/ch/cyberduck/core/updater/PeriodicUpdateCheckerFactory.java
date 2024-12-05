@@ -29,31 +29,40 @@ import java.lang.reflect.InvocationTargetException;
 public class PeriodicUpdateCheckerFactory extends Factory<PeriodicUpdateChecker> {
     private static final Logger log = LogManager.getLogger(PeriodicUpdateCheckerFactory.class);
 
-    public PeriodicUpdateCheckerFactory() {
+    private Constructor<? extends PeriodicUpdateChecker> constructor;
+
+    private PeriodicUpdateCheckerFactory() {
         super("factory.updater.class");
     }
 
     public PeriodicUpdateChecker create(final Controller controller) {
         try {
-            final Constructor<? extends PeriodicUpdateChecker> constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
+            }
+            if(null == constructor) {
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledPeriodicUpdater();
         }
     }
 
-    public static PeriodicUpdateChecker get() {
+    private static PeriodicUpdateCheckerFactory singleton;
+
+    public static synchronized PeriodicUpdateChecker get() {
         return get(new SingleThreadController());
     }
 
-    public static PeriodicUpdateChecker get(final Controller controller) {
-        return new PeriodicUpdateCheckerFactory().create(controller);
+    public static synchronized PeriodicUpdateChecker get(final Controller controller) {
+        if(null == singleton) {
+            singleton = new PeriodicUpdateCheckerFactory();
+        }
+        return singleton.create(controller);
     }
 }

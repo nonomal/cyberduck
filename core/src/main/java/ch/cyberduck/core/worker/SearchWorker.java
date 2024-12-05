@@ -55,9 +55,7 @@ public class SearchWorker extends Worker<AttributedList<Path>> {
     public AttributedList<Path> run(final Session<?> session) throws BackgroundException {
         // Run recursively
         final Search feature = session.getFeature(Search.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
+        log.debug("Run with feature {}", feature);
         return this.search(feature, directory);
     }
 
@@ -72,23 +70,29 @@ public class SearchWorker extends Worker<AttributedList<Path>> {
         else {
             // Get filtered list from search
             list = search.search(workdir, new RecursiveSearchFilter(filter), new WorkerListProgressListener(this, listener));
-            if(search.isRecursive()) {
-                return list;
-            }
-            else {
+            if(!search.isRecursive()) {
                 cache.put(workdir, new AttributedList<>(list));
             }
         }
         final Set<Path> removal = new HashSet<>();
-        for(final Path file : list) {
-            if(file.isDirectory()) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Recursively search in %s", file));
+        if(search.isRecursive()) {
+            for(Path directory : list) {
+                if(directory.isDirectory()) {
+                    if(!list.toStream().filter(f -> f.isChild(directory)).findAny().isPresent()) {
+                        removal.add(directory);
+                    }
                 }
-                final AttributedList<Path> children = this.search(search, file);
-                list.addAll(children);
-                if(children.isEmpty()) {
-                    removal.add(file);
+            }
+        }
+        else {
+            for(final Path f : list) {
+                if(f.isDirectory()) {
+                    log.debug("Recursively search in {}", f);
+                    final AttributedList<Path> children = this.search(search, f);
+                    list.addAll(children);
+                    if(children.isEmpty()) {
+                        removal.add(f);
+                    }
                 }
             }
         }
@@ -136,10 +140,10 @@ public class SearchWorker extends Worker<AttributedList<Path>> {
     }
 
     private static final class RecursiveSearchFilter implements Filter<Path> {
-        private final Filter<Path> filter;
+        private final Filter<Path> proxy;
 
-        public RecursiveSearchFilter(final Filter<Path> filter) {
-            this.filter = filter;
+        public RecursiveSearchFilter(final Filter<Path> proxy) {
+            this.proxy = proxy;
         }
 
         @Override
@@ -147,23 +151,28 @@ public class SearchWorker extends Worker<AttributedList<Path>> {
             if(file.isDirectory()) {
                 return true;
             }
-            return filter.accept(file);
+            return proxy.accept(file);
         }
 
         @Override
         public Pattern toPattern() {
-            return filter.toPattern();
+            return proxy.toPattern();
+        }
+
+        @Override
+        public String toString() {
+            return proxy.toString();
         }
 
         @Override
         public int hashCode() {
-            return filter.hashCode();
+            return proxy.hashCode();
         }
 
         @Override
         public boolean equals(final Object obj) {
             if(obj instanceof Filter) {
-                return filter.equals(obj);
+                return proxy.equals(obj);
             }
             return false;
         }

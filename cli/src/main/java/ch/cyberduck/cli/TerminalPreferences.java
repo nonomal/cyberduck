@@ -15,6 +15,7 @@
 package ch.cyberduck.cli;
 
 import ch.cyberduck.core.DisabledConnectionTimeout;
+import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.cryptomator.CryptoVault;
 import ch.cyberduck.core.cryptomator.random.FastSecureRandomProvider;
@@ -46,6 +47,7 @@ public class TerminalPreferences extends Preferences {
     protected void setFactories() {
         super.setFactories();
 
+        this.setDefault("factory.local.class", Local.class.getName());
         this.setDefault("factory.certificatestore.class", TerminalCertificateStore.class.getName());
         this.setDefault("factory.logincallback.class", TerminalLoginCallback.class.getName());
         this.setDefault("factory.passwordcallback.class", TerminalPasswordCallback.class.getName());
@@ -104,7 +106,7 @@ public class TerminalPreferences extends Preferences {
             this.setDefault("queue.upload.permissions.file.default", permission.getMode());
         }
         if(input.hasOption(TerminalOptionsBuilder.Params.debug.name())) {
-            this.setLogging("debug");
+            this.configureLogging("debug");
         }
         return this;
     }

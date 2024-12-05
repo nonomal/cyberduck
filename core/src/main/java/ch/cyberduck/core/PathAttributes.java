@@ -19,6 +19,7 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.features.Encryption;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.serializer.Serializer;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -48,7 +49,7 @@ public class PathAttributes extends Attributes implements Serializable {
     /**
      * Quota of folder
      */
-    private long quota = TransferStatus.UNKNOWN_LENGTH;
+    private Quota.Space quota = Quota.unknown;
 
     /**
      * The file modification date in milliseconds
@@ -155,6 +156,14 @@ public class PathAttributes extends Attributes implements Serializable {
 
     private Map<String, String> custom = Collections.emptyMap();
 
+    private Verdict verdict;
+
+    public enum Verdict {
+        pending,
+        clean,
+        malicious
+    }
+
     public PathAttributes() {
     }
 
@@ -183,6 +192,7 @@ public class PathAttributes extends Attributes implements Serializable {
         link = DescriptiveUrl.EMPTY == copy.link ? DescriptiveUrl.EMPTY : new DescriptiveUrl(copy.link);
         metadata = new HashMap<>(copy.metadata);
         custom = new HashMap<>(copy.custom);
+        verdict = copy.verdict;
         vault = copy.vault;
         decrypted = copy.decrypted;
         encrypted = copy.encrypted;
@@ -190,12 +200,13 @@ public class PathAttributes extends Attributes implements Serializable {
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
+    public <T> T serialize(final Serializer<T> dict) {
         if(size != -1) {
             dict.setStringForKey(String.valueOf(size), "Size");
         }
-        if(quota != -1) {
-            dict.setStringForKey(String.valueOf(quota), "Quota");
+        if(quota != Quota.unknown) {
+            // Set remaining quota
+            dict.setStringForKey(String.valueOf(quota.available), "Quota");
         }
         if(modified != -1) {
             dict.setStringForKey(String.valueOf(modified), "Modified");
@@ -212,6 +223,12 @@ public class PathAttributes extends Attributes implements Serializable {
         if(permission != Permission.EMPTY) {
             dict.setObjectForKey(permission, "Permission");
         }
+        if(owner != null) {
+            dict.setStringForKey(owner, "Owner");
+        }
+        if(group != null) {
+            dict.setStringForKey(group, "Group");
+        }
         if(acl != Acl.EMPTY) {
             dict.setObjectForKey(acl, "Acl");
         }
@@ -225,6 +242,9 @@ public class PathAttributes extends Attributes implements Serializable {
             final Map<String, String> wrapper = new HashMap<>();
             wrapper.put("Algorithm", checksum.algorithm.name());
             wrapper.put("Hash", checksum.hash);
+            if(null != checksum.base64) {
+                wrapper.put("Base64", checksum.base64);
+            }
             dict.setMapForKey(wrapper, "Checksum");
         }
         if(StringUtils.isNotBlank(versionId)) {
@@ -232,6 +252,9 @@ public class PathAttributes extends Attributes implements Serializable {
         }
         if(StringUtils.isNotBlank(fileId)) {
             dict.setStringForKey(fileId, "File Id");
+        }
+        if(StringUtils.isNotBlank(displayname)) {
+            dict.setStringForKey(displayname, "Display Name");
         }
         if(StringUtils.isNotBlank(lockId)) {
             dict.setStringForKey(lockId, "Lock Id");
@@ -250,7 +273,7 @@ public class PathAttributes extends Attributes implements Serializable {
         }
         if(vault != null) {
             if(vault.attributes() == this) {
-                log.debug(String.format("Skip serializing vault attribute %s to avoid recursion", vault));
+                log.debug("Skip serializing vault attribute {} to avoid recursion", vault);
             }
             else {
                 dict.setObjectForKey(vault, "Vault");
@@ -258,6 +281,9 @@ public class PathAttributes extends Attributes implements Serializable {
         }
         if(!custom.isEmpty()) {
             dict.setMapForKey(custom, "Custom");
+        }
+        if(verdict != null) {
+            dict.setStringForKey(verdict.name(), "Verdict");
         }
         return dict.getSerialized();
     }
@@ -282,15 +308,15 @@ public class PathAttributes extends Attributes implements Serializable {
         return this;
     }
 
-    public long getQuota() {
+    public Quota.Space getQuota() {
         return quota;
     }
 
-    public void setQuota(final long quota) {
+    public void setQuota(final Quota.Space quota) {
         this.quota = quota;
     }
 
-    public PathAttributes withQuota(final long quota) {
+    public PathAttributes withQuota(final Quota.Space quota) {
         this.setQuota(quota);
         return this;
     }
@@ -316,6 +342,11 @@ public class PathAttributes extends Attributes implements Serializable {
 
     public void setCreationDate(final long millis) {
         this.created = millis;
+    }
+
+    public PathAttributes withCreationDate(final long millis) {
+        this.setCreationDate(millis);
+        return this;
     }
 
     @Override
@@ -378,7 +409,6 @@ public class PathAttributes extends Attributes implements Serializable {
         this.group = g;
     }
 
-    @Override
     public Checksum getChecksum() {
         return checksum;
     }
@@ -465,6 +495,11 @@ public class PathAttributes extends Attributes implements Serializable {
 
     public PathAttributes withFileId(final String fileId) {
         this.setFileId(fileId);
+        return this;
+    }
+
+    public PathAttributes withDisplayname(final String displayname) {
+        this.setDisplayname(displayname);
         return this;
     }
 
@@ -557,6 +592,11 @@ public class PathAttributes extends Attributes implements Serializable {
         this.hidden = hidden;
     }
 
+    public PathAttributes withHidden(final boolean hidden) {
+        this.setHidden(hidden);
+        return this;
+    }
+
     public Map<String, String> getMetadata() {
         return metadata;
     }
@@ -603,6 +643,19 @@ public class PathAttributes extends Attributes implements Serializable {
         return this;
     }
 
+    public Verdict getVerdict() {
+        return verdict;
+    }
+
+    public void setVerdict(final Verdict verdict) {
+        this.verdict = verdict;
+    }
+
+    public PathAttributes withVerdict(final Verdict verdict) {
+        this.setVerdict(verdict);
+        return this;
+    }
+
     @Override
     public boolean equals(final Object o) {
         if(this == o) {
@@ -636,10 +689,7 @@ public class PathAttributes extends Attributes implements Serializable {
         if(!Objects.equals(revision, that.revision)) {
             return false;
         }
-        if(!Objects.equals(region, that.region)) {
-            return false;
-        }
-        if(!Objects.equals(custom, that.custom)) {
+        if(!Objects.equals(verdict, that.verdict)) {
             return false;
         }
         return true;
@@ -655,8 +705,7 @@ public class PathAttributes extends Attributes implements Serializable {
         result = 31 * result + (versionId != null ? versionId.hashCode() : 0);
         result = 31 * result + (fileId != null ? fileId.hashCode() : 0);
         result = 31 * result + (revision != null ? revision.hashCode() : 0);
-        result = 31 * result + (region != null ? region.hashCode() : 0);
-        result = 31 * result + (custom != null ? custom.hashCode() : 0);
+        result = 31 * result + (verdict != null ? verdict.hashCode() : 0);
         return result;
     }
 
@@ -684,6 +733,7 @@ public class PathAttributes extends Attributes implements Serializable {
         sb.append(", region='").append(region).append('\'');
         sb.append(", metadata=").append(metadata).append('\'');
         sb.append(", custom=").append(custom).append('\'');
+        sb.append(", verdict=").append(verdict).append('\'');
         sb.append('}');
         return sb.toString();
     }

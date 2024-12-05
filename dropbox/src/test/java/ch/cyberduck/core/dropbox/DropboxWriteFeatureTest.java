@@ -54,6 +54,7 @@ public class DropboxWriteFeatureTest extends AbstractDropboxTest {
     public void testReadWrite() throws Exception {
         final DropboxWriteFeature write = new DropboxWriteFeature(session);
         final TransferStatus status = new TransferStatus();
+        status.setModified(1700638960509L);
         final byte[] content = RandomUtils.nextBytes(66800);
         status.setLength(content.length);
         final Path test = new Path(new DefaultHomeFinderService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
@@ -65,8 +66,8 @@ public class DropboxWriteFeatureTest extends AbstractDropboxTest {
         assertTrue(new DropboxFindFeature(session).find(test));
         final PathAttributes attributes = new DropboxListService(session).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes();
         assertEquals(status.getResponse(), attributes);
+        assertEquals(1700638960000L, attributes.getModificationDate());
         assertEquals(content.length, attributes.getSize());
-        assertEquals(content.length, write.append(test, status.withRemote(attributes)).size, 0L);
         {
             final InputStream in = new DropboxReadFeature(session).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
             final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);
@@ -101,7 +102,6 @@ public class DropboxWriteFeatureTest extends AbstractDropboxTest {
         assertTrue(new DropboxFindFeature(session).find(test));
         final PathAttributes attributes = new DropboxListService(session).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes();
         assertEquals(content.length, attributes.getSize());
-        assertEquals(content.length, write.append(test, status.withRemote(attributes)).size, 0L);
         {
             final InputStream in = new DropboxReadFeature(session).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
             final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);

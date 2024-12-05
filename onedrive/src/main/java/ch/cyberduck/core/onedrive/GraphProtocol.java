@@ -18,6 +18,8 @@ package ch.cyberduck.core.onedrive;
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Scheme;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
 
 public abstract class GraphProtocol extends AbstractProtocol {
     @Override
@@ -33,6 +35,11 @@ public abstract class GraphProtocol extends AbstractProtocol {
     @Override
     public boolean isHostnameConfigurable() {
         return false;
+    }
+
+    @Override
+    public String getDefaultHostname() {
+        return "graph.microsoft.com";
     }
 
     @Override
@@ -54,5 +61,18 @@ public abstract class GraphProtocol extends AbstractProtocol {
     @Override
     public String disk() {
         return "onedrive.tiff";
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
+    }
+
+    @Override
+    public <T> T getFeature(final Class<T> type) {
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(DefaultComparisonService.forFiles(this), ComparisonService.disabled);
+        }
+        return super.getFeature(type);
     }
 }

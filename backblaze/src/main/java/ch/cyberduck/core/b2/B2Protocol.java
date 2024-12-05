@@ -17,11 +17,17 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
+import ch.cyberduck.core.synchronization.VersionIdComparisonService;
 import ch.cyberduck.core.text.DefaultLexicographicOrderComparator;
 
 import java.util.Comparator;
+import com.google.auto.service.AutoService;
 
+@AutoService(Protocol.class)
 public class B2Protocol extends AbstractProtocol {
 
     @Override
@@ -70,8 +76,18 @@ public class B2Protocol extends AbstractProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public Comparator<String> getListComparator() {
         return new DefaultLexicographicOrderComparator();
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
     }
 
     @Override
@@ -79,6 +95,9 @@ public class B2Protocol extends AbstractProtocol {
     public <T> T getFeature(final Class<T> type) {
         if(type == PathContainerService.class) {
             return (T) new B2PathContainerService();
+        }
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(new VersionIdComparisonService(), ComparisonService.disabled);
         }
         return super.getFeature(type);
     }

@@ -39,9 +39,9 @@ import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Symlink;
 import ch.cyberduck.core.features.Upload;
+import ch.cyberduck.core.features.Versioning;
 import ch.cyberduck.core.filter.UploadRegexFilter;
 import ch.cyberduck.core.io.BandwidthThrottle;
-import ch.cyberduck.core.io.DelegateStreamListener;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.shared.DefaultAttributesFinderFeature;
@@ -126,15 +126,11 @@ public class UploadTransfer extends Transfer {
     @Override
     public List<TransferItem> list(final Session<?> session, final Path remote,
                                    final Local directory, final ListProgressListener listener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("List children for %s", directory));
-        }
+        log.debug("List children for {}", directory);
         if(directory.isSymbolicLink()) {
             final Symlink symlink = session.getFeature(Symlink.class);
             if(new UploadSymlinkResolver(symlink, roots).resolve(directory)) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Do not list children for symbolic link %s", directory));
-                }
+                log.debug("Do not list children for symbolic link {}", directory);
                 // We can resolve the target of the symbolic link and will create a link on the remote system
                 // using the symlink feature of the session
                 return Collections.emptyList();
@@ -150,49 +146,42 @@ public class UploadTransfer extends Transfer {
 
     @Override
     public AbstractUploadFilter filter(final Session<?> source, final Session<?> destination, final TransferAction action, final ProgressListener listener) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Filter transfer with action %s and options %s", action, options));
-        }
+        log.debug("Filter transfer with action {} and options {}", action, options);
         final Symlink symlink = source.getFeature(Symlink.class);
         final UploadSymlinkResolver resolver = new UploadSymlinkResolver(symlink, roots);
         final Find find;
         final AttributesFinder attributes;
         if(roots.size() > 1 || roots.stream().filter(item -> item.remote.isDirectory()).findAny().isPresent()) {
-            find = new CachingFindFeature(cache, source.getFeature(Find.class, new DefaultFindFeature(source)));
-            attributes = new CachingAttributesFinderFeature(cache,
-                    source.getFeature(AttributesFinder.class, new DefaultAttributesFinderFeature(source)));
+            find = new CachingFindFeature(source, cache, source.getFeature(Find.class, new DefaultFindFeature(source)));
+            attributes = new CachingAttributesFinderFeature(source, cache, source.getFeature(AttributesFinder.class, new DefaultAttributesFinderFeature(source)));
         }
         else {
-            find = new CachingFindFeature(cache, source.getFeature(Find.class));
-            attributes = new CachingAttributesFinderFeature(cache, source.getFeature(AttributesFinder.class));
+            find = new CachingFindFeature(source, cache, source.getFeature(Find.class));
+            attributes = new CachingAttributesFinderFeature(source, cache, source.getFeature(AttributesFinder.class));
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Determined features %s and %s", find, attributes));
-        }
+        log.debug("Determined features {} and {}", find, attributes);
         if(action.equals(TransferAction.resume)) {
-            return new ResumeFilter(resolver, source, options).withFinder(find).withAttributes(attributes);
+            return new ResumeFilter(resolver, source, find, attributes, options);
         }
         if(action.equals(TransferAction.rename)) {
-            return new RenameFilter(resolver, source, options).withFinder(find).withAttributes(attributes);
+            return new RenameFilter(resolver, source, find, attributes, options);
         }
         if(action.equals(TransferAction.renameexisting)) {
-            return new RenameExistingFilter(resolver, source, options).withFinder(find).withAttributes(attributes);
+            return new RenameExistingFilter(resolver, source, find, attributes, options);
         }
         if(action.equals(TransferAction.skip)) {
-            return new SkipFilter(resolver, source, options).withFinder(find).withAttributes(attributes);
+            return new SkipFilter(resolver, source, find, attributes, options);
         }
         if(action.equals(TransferAction.comparison)) {
-            return new CompareFilter(resolver, source, options, listener).withFinder(find).withAttributes(attributes);
+            return new CompareFilter(resolver, source, find, attributes, options);
         }
-        return new OverwriteFilter(resolver, source, options).withFinder(find).withAttributes(attributes);
+        return new OverwriteFilter(resolver, source, find, attributes, options);
     }
 
     @Override
     public TransferAction action(final Session<?> source, final Session<?> destination, final boolean resumeRequested, final boolean reloadRequested,
                                  final TransferPrompt prompt, final ListProgressListener listener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Find transfer action for Resume=%s,Reload=%s", resumeRequested, reloadRequested));
-        }
+        log.debug("Find transfer action with prompt {}", prompt);
         if(resumeRequested) {
             // Force resume by user or retry of failed transfer
             return TransferAction.resume;
@@ -209,7 +198,7 @@ public class UploadTransfer extends Transfer {
         }
         if(action.equals(TransferAction.callback)) {
             for(TransferItem upload : roots) {
-                if(new CachingFindFeature(cache, source.getFeature(Find.class, new DefaultFindFeature(source))).find(upload.remote)) {
+                if(new CachingFindFeature(source, cache, source.getFeature(Find.class, new DefaultFindFeature(source))).find(upload.remote)) {
                     // Found remote file
                     if(upload.remote.isDirectory()) {
                         if(this.list(source, upload.remote, upload.local, listener).isEmpty()) {
@@ -221,7 +210,7 @@ public class UploadTransfer extends Transfer {
                     return prompt.prompt(upload);
                 }
             }
-            // No files exist yet therefore it is most straightforward to use the overwrite action
+            // No files exist, yet therefore it is most straightforward to use the overwrite action
             return TransferAction.overwrite;
         }
         return action;
@@ -232,13 +221,9 @@ public class UploadTransfer extends Transfer {
                     final TransferPathFilter filter, final TransferErrorCallback error, final ProgressListener progress, final ConnectionCallback callback) throws BackgroundException {
         final Bulk<?> feature = source.getFeature(Bulk.class);
         final Object id = feature.pre(Type.upload, files, callback);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Obtained bulk id %s for transfer %s", id, this));
-        }
+        log.debug("Obtained bulk id {} for transfer {}", id, this);
         super.pre(source, destination, files, filter, error, progress, callback);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Filter for directories in transfer %s", this));
-        }
+        log.debug("Filter for directories in transfer {}", this);
         // Create all directories first
         final List<Map.Entry<TransferItem, TransferStatus>> directories = files.entrySet().stream()
                 .filter(item -> item.getKey().remote.isDirectory())
@@ -262,9 +247,7 @@ public class UploadTransfer extends Transfer {
             final Path file = entry.getKey().remote;
             final TransferStatus status = entry.getValue();
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Skip existing directory %s", file));
-                }
+                log.warn("Skip existing directory {}", file);
                 continue;
             }
             status.validate();
@@ -280,7 +263,7 @@ public class UploadTransfer extends Transfer {
             catch(BackgroundException e) {
                 if(error.prompt(entry.getKey(), status, e, files.size())) {
                     // Continue
-                    log.warn(String.format("Ignore transfer failure %s", e));
+                    log.warn("Ignore transfer failure {}", e.getMessage());
                 }
                 else {
                     throw new TransferCanceledException(e);
@@ -292,36 +275,46 @@ public class UploadTransfer extends Transfer {
     @Override
     public void post(final Session<?> source, final Session<?> destination, final Map<TransferItem, TransferStatus> files,
                      final TransferErrorCallback error, final ProgressListener listener, final ConnectionCallback callback) throws BackgroundException {
-        final Bulk<?> feature = source.getFeature(Bulk.class);
+        final Bulk<?> bulk = source.getFeature(Bulk.class);
         try {
-            feature.post(Type.upload, files, callback);
+            bulk.post(Type.upload, files, callback);
             super.post(source, destination, files, error, listener, callback);
         }
         catch(BackgroundException e) {
             final Optional<Map.Entry<TransferItem, TransferStatus>> entry = files.entrySet().stream().findFirst();
             if(entry.isPresent()) {
                 final Map.Entry<TransferItem, TransferStatus> item = entry.get();
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Prompt with failure %s for item %s only", e, item.getKey()));
-                }
+                log.warn("Prompt with failure {} for item {} only", e, item.getKey());
                 if(error.prompt(item.getKey(), item.getValue(), e, files.size())) {
                     // Continue
-                    log.warn(String.format("Ignore transfer failure %s", e));
+                    log.warn("Ignore transfer failure {}", e.getMessage());
                 }
                 else {
                     throw new TransferCanceledException(e);
                 }
             }
         }
+        if(options.versioning) {
+            // Cleanup of previous files
+            switch(source.getHost().getProtocol().getVersioningMode()) {
+                case custom:
+                    final Versioning versioning = source.getFeature(Versioning.class);
+                    if(versioning != null) {
+                        for(TransferItem item : files.keySet()) {
+                            if(versioning.getConfiguration(item.remote).isEnabled()) {
+                                versioning.cleanup(item.remote, callback);
+                            }
+                        }
+                    }
+            }
+        }
     }
 
     @Override
     public void transfer(final Session<?> source, final Session<?> destination, final Path file, final Local local, final TransferOptions options,
-                         final TransferStatus overall, final TransferStatus segment, final ConnectionCallback connectionCallback,
-                         final ProgressListener listener, final StreamListener streamListener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Transfer file %s with options %s", file, options));
-        }
+                         final TransferStatus segment, final ConnectionCallback prompt,
+                         final ProgressListener progress, final StreamListener listener) throws BackgroundException {
+        log.debug("Transfer file {} with options {} and status {}", file, options, segment);
         if(local.isSymbolicLink()) {
             final Symlink feature = source.getFeature(Symlink.class);
             final UploadSymlinkResolver symlinkResolver
@@ -330,19 +323,17 @@ public class UploadTransfer extends Transfer {
                 // Make relative symbolic link
                 final String target = symlinkResolver.relativize(local.getAbsolute(),
                         local.getSymlinkTarget().getAbsolute());
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Create symbolic link from %s to %s", file, target));
-                }
+                log.debug("Create symbolic link from {} to {}", file, target);
                 feature.symlink(file, target);
                 return;
             }
         }
         if(file.isFile()) {
-            listener.message(MessageFormat.format(LocaleFactory.localizedString("Uploading {0}", "Status"),
+            progress.message(MessageFormat.format(LocaleFactory.localizedString("Uploading {0}", "Status"),
                     file.getName()));
             // Transfer
             final Upload upload = source.getFeature(Upload.class);
-            final Object reply = upload.upload(file, local, bandwidth, new UploadStreamListener(this, streamListener), segment, connectionCallback);
+            final Object reply = upload.upload(file, local, bandwidth, progress, listener, segment, prompt);
         }
     }
 
@@ -357,20 +348,5 @@ public class UploadTransfer extends Transfer {
     public void stop() {
         cache.clear();
         super.stop();
-    }
-
-    private static final class UploadStreamListener extends DelegateStreamListener {
-        private final UploadTransfer transfer;
-
-        public UploadStreamListener(final UploadTransfer transfer, final StreamListener delegate) {
-            super(delegate);
-            this.transfer = transfer;
-        }
-
-        @Override
-        public void sent(final long bytes) {
-            transfer.addTransferred(bytes);
-            super.sent(bytes);
-        }
     }
 }

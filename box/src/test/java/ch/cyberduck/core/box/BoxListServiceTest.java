@@ -34,7 +34,7 @@ import static ch.cyberduck.core.AbstractPath.Type.directory;
 import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
-public class BoxListServiceTest extends AbtractBoxTest {
+public class BoxListServiceTest extends AbstractBoxTest {
 
     @Test
     public void testListRoot() throws Exception {
@@ -44,6 +44,7 @@ public class BoxListServiceTest extends AbtractBoxTest {
                 directory, new DisabledListProgressListener());
         assertFalse(list.isEmpty());
         for(Path f : list) {
+            assertEquals(f.attributes(), new BoxAttributesFinderFeature(session, fileid).find(f, new DisabledListProgressListener()));
             assertSame(directory, f.getParent());
             assertNotEquals(TransferStatus.UNKNOWN_LENGTH, f.attributes().getSize());
             assertNotNull(f.attributes().getFileId());

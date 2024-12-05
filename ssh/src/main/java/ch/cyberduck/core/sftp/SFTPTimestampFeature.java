@@ -20,14 +20,13 @@ package ch.cyberduck.core.sftp;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Timestamp;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
 
 import net.schmizz.sshj.sftp.FileAttributes;
 
-public class SFTPTimestampFeature extends DefaultTimestampFeature implements Timestamp {
+public class SFTPTimestampFeature implements Timestamp {
 
     private final SFTPSession session;
 
@@ -38,16 +37,17 @@ public class SFTPTimestampFeature extends DefaultTimestampFeature implements Tim
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
         try {
-            // We must both set the accessed and modified time. See AttribFlags.SSH_FILEXFER_ATTR_V3_ACMODTIME
-            // All times are represented as seconds from Jan 1, 1970 in UTC.
-            final FileAttributes attrs = new FileAttributes.Builder().withAtimeMtime(
-                System.currentTimeMillis() / 1000, status.getTimestamp() / 1000
-            ).build();
-            session.sftp().setAttributes(file.getAbsolute(), attrs);
+            if(null != status.getModified()) {
+                // We must both set the accessed and modified time. See AttribFlags.SSH_FILEXFER_ATTR_V3_ACMODTIME
+                // All times are represented as seconds from Jan 1, 1970 in UTC.
+                final long atime = Timestamp.toSeconds(System.currentTimeMillis());
+                final long mtime = Timestamp.toSeconds(status.getModified() != null ? status.getModified() : System.currentTimeMillis());
+                final FileAttributes attrs = new FileAttributes.Builder().withAtimeMtime(atime / 1000, mtime / 1000).build();
+                session.sftp().setAttributes(file.getAbsolute(), attrs);
+            }
         }
         catch(IOException e) {
             throw new SFTPExceptionMappingService().map("Cannot change timestamp of {0}", e, file);
         }
-
     }
 }

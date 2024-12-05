@@ -31,8 +31,6 @@ import java.util.Set;
 public final class BackgroundActionRegistry extends Collection<BackgroundAction> implements BackgroundActionListener {
     private static final Logger log = LogManager.getLogger(BackgroundActionRegistry.class);
 
-    private static final long serialVersionUID = 1721336643608575003L;
-
     private static BackgroundActionRegistry global = null;
 
     private static final Object lock = new Object();
@@ -78,7 +76,7 @@ public final class BackgroundActionRegistry extends Collection<BackgroundAction>
     @Override
     public synchronized void cancel(final BackgroundAction action) {
         if(action.isRunning()) {
-            log.debug(String.format("Skip removing action %s currently running", action));
+            log.debug("Skip removing action {} currently running", action);
         }
         else {
             this.remove(action);
@@ -99,10 +97,10 @@ public final class BackgroundActionRegistry extends Collection<BackgroundAction>
 
     @Override
     public synchronized boolean remove(final Object action) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Remove action %s", action));
+        log.debug("Remove action {}", action);
+        if(!running.remove(action)) {
+            log.warn("Failure finding action {} in running tasks", action);
         }
-        running.remove(action);
         if(super.remove(action)) {
             ((BackgroundAction) action).removeListener(this);
         }

@@ -1,4 +1,6 @@
-package ch.cyberduck.core.freenet;/*
+package ch.cyberduck.core.freenet;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -30,7 +32,6 @@ import ch.cyberduck.core.http.HttpExceptionMappingService;
 import ch.cyberduck.core.http.UserAgentHttpRequestInitializer;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.proxy.ProxyFactory;
-import ch.cyberduck.core.proxy.ProxyHostUrlProvider;
 import ch.cyberduck.core.ssl.DefaultTrustManagerHostnameCallback;
 import ch.cyberduck.core.ssl.KeychainX509KeyManager;
 import ch.cyberduck.core.ssl.KeychainX509TrustManager;
@@ -48,7 +49,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.net.URI;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.api.client.auth.oauth2.PasswordTokenRequest;
@@ -84,7 +84,7 @@ public class FreenetAuthenticatedUrlProvider implements WebUrlProvider {
                         CertificateStoreFactory.get());
                 final CloseableHttpClient client = new HttpConnectionPoolBuilder(
                         target, new ThreadLocalHostnameDelegatingTrustManager(trust, target.getHostname()), key, ProxyFactory.get()
-                ).build(ProxyFactory.get().find(new ProxyHostUrlProvider().get(target)), new DisabledTranscriptListener(), new DisabledLoginCallback())
+                ).build(ProxyFactory.get(), new DisabledTranscriptListener(), new DisabledLoginCallback())
                         .setUserAgent(new FreenetUserAgentProvider().get())
                         .build();
                 final String username = bookmark.getCredentials().getUsername();
@@ -96,7 +96,7 @@ public class FreenetAuthenticatedUrlProvider implements WebUrlProvider {
                     password = bookmark.getCredentials().getPassword();
                 }
                 if(null == password) {
-                    log.warn(String.format("No password found for %s", bookmark));
+                    log.warn("No password found for {}", bookmark);
                     return DescriptiveUrl.EMPTY;
                 }
                 response = new PasswordTokenRequest(new ApacheHttpTransport(client),
@@ -107,14 +107,14 @@ public class FreenetAuthenticatedUrlProvider implements WebUrlProvider {
                         .set("webLogin", Boolean.TRUE)
                         .execute();
                 final FreenetTemporaryLoginResponse login = this.getLoginSession(client, response.getAccessToken());
-                return new DescriptiveUrl(URI.create(login.urls.login), DescriptiveUrl.Type.authenticated);
+                return new DescriptiveUrl(login.urls.login, DescriptiveUrl.Type.authenticated);
             }
             catch(IOException e) {
                 throw new HttpExceptionMappingService().map(e);
             }
         }
         catch(BackgroundException e) {
-            log.warn(String.format("Failure %s retrieving authenticated URL for %s", e, bookmark));
+            log.warn("Failure {} retrieving authenticated URL for {}", e, bookmark);
             return DescriptiveUrl.EMPTY;
         }
     }

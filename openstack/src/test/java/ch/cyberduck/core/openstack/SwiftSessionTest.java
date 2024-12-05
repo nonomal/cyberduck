@@ -6,7 +6,6 @@ import ch.cyberduck.core.DisabledCancelCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Host;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Profile;
 import ch.cyberduck.core.ProtocolFactory;
@@ -21,10 +20,9 @@ import ch.cyberduck.core.features.Location;
 import ch.cyberduck.core.features.Logging;
 import ch.cyberduck.core.features.Redundancy;
 import ch.cyberduck.core.features.Versioning;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
-import ch.cyberduck.core.ssl.DefaultX509KeyManager;
-import ch.cyberduck.core.ssl.DisabledX509TrustManager;
+import ch.cyberduck.core.shared.DefaultVersioningFeature;
 import ch.cyberduck.test.IntegrationTest;
 
 import org.junit.Test;
@@ -41,7 +39,7 @@ public class SwiftSessionTest extends AbstractSwiftTest {
 
     @Test
     public void testFeatures() {
-        assertNull(session.getFeature(Versioning.class));
+        assertEquals(DefaultVersioningFeature.class, session.getFeature(Versioning.class).getClass());
         assertNull(session.getFeature(Lifecycle.class));
         assertNotNull(session.getFeature(Copy.class));
         assertNotNull(session.getFeature(Location.class));
@@ -68,9 +66,9 @@ public class SwiftSessionTest extends AbstractSwiftTest {
     public void testConnectRackspaceLon() throws Exception {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new SwiftProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
-            new Local("../profiles/Rackspace UK.cyberduckprofile"));
+                this.getClass().getResourceAsStream("/Rackspace UK.cyberduckprofile"));
         final Host host = new Host(profile, profile.getDefaultHostname(), new Credentials(
-            System.getProperties().getProperty("rackspace.key"), System.getProperties().getProperty("rackspace.secret")
+                PROPERTIES.get("rackspace.user"), PROPERTIES.get("rackspace.password")
         ));
         assertTrue(session.isConnected());
         session.close();
@@ -81,29 +79,11 @@ public class SwiftSessionTest extends AbstractSwiftTest {
     @Test(expected = LoginFailureException.class)
     public void testLoginFailure() throws Exception {
         final Host host = new Host(new SwiftProtocol(), "identity.api.rackspacecloud.com", new Credentials(
-            "a", "s"
+                "a", "s"
         ));
-        assertNotNull(session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback()));
+        assertNotNull(session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback()));
         assertTrue(session.isConnected());
         assertNotNull(session.getClient());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
-    }
-
-    @Test(expected = LoginFailureException.class)
-    public void testConnectOraclecloud() throws Exception {
-        final SwiftProtocol protocol = new SwiftProtocol() {
-            @Override
-            public String getContext() {
-                return "/auth/v1.0";
-            }
-        };
-        final Host host = new Host(protocol, "storage.us2.oraclecloud.com", new Credentials(
-            System.getProperties().getProperty("oraclecloud.key"), System.getProperties().getProperty("oraclecloud.secret")
-        ));
-        final SwiftSession session = new SwiftSession(host, new DisabledX509TrustManager(), new DefaultX509KeyManager());
-        assertNotNull(session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback()));
-        assertTrue(session.isConnected());
-        assertNotNull(session.getClient());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
     }
 }

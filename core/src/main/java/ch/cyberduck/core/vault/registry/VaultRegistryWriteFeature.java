@@ -26,6 +26,8 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.vault.VaultRegistry;
 import ch.cyberduck.core.vault.VaultUnlockCancelException;
 
+import java.util.EnumSet;
+
 public class VaultRegistryWriteFeature<T> implements Write<T> {
 
     private final Session<?> session;
@@ -44,18 +46,8 @@ public class VaultRegistryWriteFeature<T> implements Write<T> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return registry.find(session, file).getFeature(session, Write.class, proxy).append(file, status);
-    }
-
-    @Override
-    public boolean random() {
-        return proxy.random();
-    }
-
-    @Override
-    public boolean timestamp() {
-        return proxy.timestamp();
+    public EnumSet<Flags> features(final Path file) {
+        return proxy.features(file);
     }
 
     @Override
@@ -66,6 +58,11 @@ public class VaultRegistryWriteFeature<T> implements Write<T> {
         catch(VaultUnlockCancelException e) {
             return proxy.checksum(file, status);
         }
+    }
+
+    @Override
+    public void preflight(final Path file) throws BackgroundException {
+        registry.find(session, file).getFeature(session, Write.class, proxy).preflight(file);
     }
 
     @Override

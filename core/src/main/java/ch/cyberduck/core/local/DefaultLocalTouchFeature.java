@@ -45,26 +45,19 @@ public class DefaultLocalTouchFeature implements Touch {
             catch(NoSuchFileException e) {
                 final Local parent = file.getParent();
                 new DefaultLocalDirectoryFeature().mkdir(parent);
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Created folder %s", parent));
-                }
+                log.debug("Created folder {}", parent);
                 Files.createFile(Paths.get(file.getAbsolute()));
             }
             catch(FileAlreadyExistsException e) {
-                log.warn(String.format("File %s already exists", file));
-                if(Files.isDirectory(Paths.get(file.getAbsolute()))) {
-                    throw new LocalAccessDeniedException(MessageFormat.format(
+                log.warn("File {} already exists", file);
+                throw new LocalAccessDeniedException(MessageFormat.format(
                         LocaleFactory.localizedString("Cannot create {0}", "Error"), file.getAbsolute()), e);
-                }
-                return;
             }
         }
         catch(IOException e) {
             throw new LocalAccessDeniedException(MessageFormat.format(
                 LocaleFactory.localizedString("Cannot create {0}", "Error"), file.getAbsolute()), e);
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Created file %s", file));
-        }
+        log.debug("Created file {}", file);
     }
 }

@@ -18,6 +18,7 @@ package ch.cyberduck.core.s3;
  * feedback@cyberduck.io
  */
 
+import ch.cyberduck.core.Host;
 import ch.cyberduck.core.preferences.HostPreferences;
 
 import org.apache.commons.lang3.StringUtils;
@@ -48,15 +49,17 @@ public class S3PresignedUrlProvider {
             switch(session.getSignatureVersion()) {
                 case AWS4HMACSHA256:
                     // Region is required for AWS4-HMAC-SHA256 signature
-                    region = "us-east-1";
+                    region = S3LocationFeature.DEFAULT_REGION.getIdentifier();
             }
         }
-        return new RestS3Service(new AWSCredentials(StringUtils.strip(
-            session.getHost().getCredentials().getUsername()
-        ), StringUtils.strip(secret))) {
+        final Host bookmark = session.getHost();
+        return new RestS3Service(new AWSCredentials(StringUtils.strip(bookmark.getCredentials().getUsername()), StringUtils.strip(secret))) {
             @Override
             public String getEndpoint() {
-                return session.getHost().getHostname();
+                if(S3Session.isAwsHostname(bookmark.getHostname())) {
+                    return bookmark.getProtocol().getDefaultHostname();
+                }
+                return bookmark.getHostname();
             }
 
             @Override
@@ -66,6 +69,6 @@ public class S3PresignedUrlProvider {
         }.createSignedUrlUsingSignatureVersion(
                 session.getSignatureVersion().toString(),
                 region, method, bucket, key, null, null, expiry / 1000, false, true,
-                new HostPreferences(session.getHost()).getBoolean("s3.bucket.virtualhost.disable"));
+                new HostPreferences(bookmark).getBoolean("s3.bucket.virtualhost.disable"));
     }
 }

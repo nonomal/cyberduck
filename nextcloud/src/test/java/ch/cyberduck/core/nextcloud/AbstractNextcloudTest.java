@@ -27,10 +27,10 @@ import ch.cyberduck.core.LoginOptions;
 import ch.cyberduck.core.Profile;
 import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.Scheme;
-import ch.cyberduck.core.dav.DAVSession;
 import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DefaultX509TrustManager;
+import ch.cyberduck.test.VaultTest;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,9 +40,9 @@ import java.util.HashSet;
 
 import static org.junit.Assert.fail;
 
-public class AbstractNextcloudTest {
+public class AbstractNextcloudTest extends VaultTest {
 
-    protected DAVSession session;
+    protected NextcloudSession session;
 
     @After
     public void disconnect() throws Exception {
@@ -54,9 +54,9 @@ public class AbstractNextcloudTest {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new NextcloudProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
                 this.getClass().getResourceAsStream("/Nextcloud.cyberduckprofile"));
-        final Host host = new Host(profile, System.getProperties().getProperty("nextcloud.host"), 443, System.getProperties().getProperty("nextcloud.path"),
-                new Credentials(System.getProperties().getProperty("nextcloud.user"), System.getProperties().getProperty("nextcloud.password")));
-        session = new DAVSession(host, new DefaultX509TrustManager(), new DefaultX509KeyManager());
+        final Host host = new Host(profile, PROPERTIES.get("nextcloud.hostname"),
+                new Credentials(PROPERTIES.get("nextcloud.user"), PROPERTIES.get("nextcloud.password")));
+        session = new NextcloudSession(host, new DefaultX509TrustManager(), new DefaultX509KeyManager());
         final LoginConnectionService login = new LoginConnectionService(new DisabledLoginCallback() {
             @Override
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {

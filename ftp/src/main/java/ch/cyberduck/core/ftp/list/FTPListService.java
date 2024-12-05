@@ -117,7 +117,7 @@ public class FTPListService implements ListService {
     }
 
     protected void remove(final Command command) {
-        log.warn(String.format("Remove %s from listing strategies", command));
+        log.warn("Remove {} from listing strategies", command);
         implementations.remove(command);
     }
 
@@ -198,10 +198,9 @@ public class FTPListService implements ListService {
                             target.setType(EnumSet.of(Path.Type.file));
                         }
                     }
-                    if(verified.add(file)) {
-                        // Make sure we remove and add because hash code will change
-                        removal.add(file);
-                    }
+                    verified.add(file);
+                    // Make sure we remove and add because hash code will change
+                    removal.add(file);
                 }
             }
             list.removeAll(removal);

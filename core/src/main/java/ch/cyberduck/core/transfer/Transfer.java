@@ -43,6 +43,7 @@ import org.apache.logging.log4j.Logger;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -68,6 +69,9 @@ public abstract class Transfer implements Serializable {
      */
     private AtomicLong transferred;
 
+    /**
+     * Security scoped bookmarks obtained for file to upload or parent folder for downloads
+     */
     private final Map<Local, Object> locks = new HashMap<>();
 
     public abstract Type getType();
@@ -171,7 +175,7 @@ public abstract class Transfer implements Serializable {
 
     public abstract Transfer withCache(final Cache<Path> cache);
 
-    public <T> T serialize(final Serializer dict) {
+    public <T> T serialize(final Serializer<T> dict) {
         dict.setStringForKey(this.getType().name(), "Type");
         dict.setObjectForKey(host, "Host");
         dict.setListForKey(roots, "Items");
@@ -195,9 +199,7 @@ public abstract class Transfer implements Serializable {
      * @param bytesPerSecond Maximum number of bytes to transfer by second
      */
     public void setBandwidth(final float bytesPerSecond) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Throttle bandwidth to %s bytes per second", bytesPerSecond));
-        }
+        log.debug("Throttle bandwidth to {} bytes per second", bytesPerSecond);
         bandwidth.setRate(bytesPerSecond);
     }
 
@@ -228,10 +230,10 @@ public abstract class Transfer implements Serializable {
 
     public DescriptiveUrl getRemote() {
         if(this.roots.size() == 1) {
-            return new DefaultUrlProvider(host).toUrl(this.getRoot().remote).find(DescriptiveUrl.Type.provider);
+            return new DefaultUrlProvider(host).toUrl(this.getRoot().remote, EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider);
         }
         else {
-            return new DefaultUrlProvider(host).toUrl(this.getRoot().remote.getParent()).find(DescriptiveUrl.Type.provider);
+            return new DefaultUrlProvider(host).toUrl(this.getRoot().remote.getParent(), EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider);
         }
     }
 
@@ -325,7 +327,7 @@ public abstract class Transfer implements Serializable {
                 }
             }
             catch(LocalAccessDeniedException e) {
-                log.warn(String.format("Failure obtaining lock for %s. %s", item.local, e));
+                log.warn("Failure obtaining lock for {}. {}", item.local, e);
             }
         }
     }
@@ -358,22 +360,19 @@ public abstract class Transfer implements Serializable {
     /**
      * The actual transfer implementation
      *
-     * @param source             Connection to source server of transfer
-     * @param destination        Connection to target server of transfer
-     * @param file               Remote file path
-     * @param local              Local file reference
-     * @param options            Quarantine option
-     * @param overall            Overall transfer status
-     * @param segment            Segment transfer status
-     * @param connectionCallback Prompt for alerts to user
-     * @param progressListener   Progress messages listener
-     * @param streamListener     Byte count listener
+     * @param source      Connection to source server of transfer
+     * @param destination Connection to target server of transfer
+     * @param file        Remote file path
+     * @param local       Local file reference
+     * @param options     Quarantine option
+     * @param segment     Segment transfer status
+     * @param prompt      Prompt for alerts to user
+     * @param progress    Progress messages listener
+     * @param listener    Byte count listener
      */
     public abstract void transfer(Session<?> source, Session<?> destination, Path file, Local local,
-                                  TransferOptions options, final TransferStatus overall, TransferStatus segment,
-                                  ConnectionCallback connectionCallback,
-                                  ProgressListener progressListener,
-                                  StreamListener streamListener) throws BackgroundException;
+                                  TransferOptions options, TransferStatus segment,
+                                  ConnectionCallback prompt, ProgressListener progress, StreamListener listener) throws BackgroundException;
 
     public void start() {
         state = State.running;
@@ -397,9 +396,7 @@ public abstract class Transfer implements Serializable {
      * Recalculate the size of the <code>queue</code>
      */
     public synchronized void reset() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Reset status for %s", this));
-        }
+        log.debug("Reset status for {}", this);
         transferred = null;
         size = null;
         reset = true;
@@ -440,9 +437,7 @@ public abstract class Transfer implements Serializable {
         if(bytes > 0) {
             size.addAndGet(bytes);
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Size set to %d bytes", size.get()));
-        }
+        log.debug("Size set to {} bytes", size.get());
     }
 
     /**
@@ -462,9 +457,7 @@ public abstract class Transfer implements Serializable {
         }
         // Allow decrement for failed segments
         transferred.addAndGet(bytes);
-        if(log.isTraceEnabled()) {
-            log.trace(String.format("Transferred set to %d bytes", transferred.get()));
-        }
+        log.trace("Transferred set to {} bytes", transferred.get());
     }
 
     public String getUuid() {

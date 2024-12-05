@@ -591,7 +591,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             // 
             this.shareMainMenuItem.Index = 13;
             this.shareMainMenuItem.Text = "Share…";
-            // 
+            //
             // editMainMenuItem
             // 
             this.editMainMenuItem.Index = 15;
@@ -1280,7 +1280,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.shareToolStripMenuItem.Name = "shareToolStripMenuItem";
             this.shareToolStripMenuItem.Size = new System.Drawing.Size(199, 22);
             this.shareToolStripMenuItem.Text = "Share…";
-            // 
+            //
             // editWithToolStripMenuItem
             // 
             this.editWithToolStripMenuItem.Name = "editWithToolStripMenuItem";
@@ -2225,7 +2225,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.shareContextToolStripMenuItem.Name = "shareContextToolStripMenuItem";
             this.shareContextToolStripMenuItem.Size = new System.Drawing.Size(192, 22);
             this.shareContextToolStripMenuItem.Text = "Share…";
-            // 
+            //
             // infoContextToolStripMenuItem
             // 
             this.infoContextToolStripMenuItem.Name = "infoContextToolStripMenuItem";
@@ -2564,12 +2564,15 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.browser.AllColumns.Add(this.treeColumnStorageClass);
             this.browser.AllColumns.Add(this.treeColumnVersion);
             this.browser.AllColumns.Add(this.treeColumnChecksum);
+            this.browser.AllowColumnReorder = true;
+            this.browser.AllowDrop = true;
             this.browser.BorderStyle = System.Windows.Forms.BorderStyle.None;
             this.browser.CellEditActivation = BrightIdeasSoftware.ObjectListView.CellEditActivateMode.F2Only;
             this.browser.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
             this.treeColumnName,
             this.treeColumnSize,
             this.treeColumnModified});
+            this.browser.Cursor = System.Windows.Forms.Cursors.Default;
             this.browser.Dock = System.Windows.Forms.DockStyle.Fill;
             this.browser.FullRowSelect = true;
             this.browser.HideSelection = false;
@@ -2577,11 +2580,13 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.browser.IsSimpleDragSource = true;
             this.browser.Location = new System.Drawing.Point(0, 0);
             this.browser.Name = "browser";
-            this.browser.OwnerDraw = true;
             this.browser.ShowGroups = false;
-            this.browser.Size = new System.Drawing.Size(1028, 444);
+            this.browser.ShowImagesOnSubItems = true;
+            this.browser.Size = new System.Drawing.Size(1028, 473);
             this.browser.TabIndex = 15;
             this.browser.UseCompatibleStateImageBehavior = false;
+            this.browser.UseOverlays = false;
+            this.browser.UseTranslucentSelection = true;
             this.browser.View = System.Windows.Forms.View.Details;
             this.browser.VirtualMode = true;
             this.browser.Expanding += new System.EventHandler<BrightIdeasSoftware.TreeBranchExpandingEventArgs>(this.browser_Expanding);
@@ -2594,97 +2599,98 @@ namespace Ch.Cyberduck.Ui.Winforms
             // 
             // treeColumnName
             // 
-            this.treeColumnName.CellPadding = null;
+            this.treeColumnName.CellEditUseWholeCell = true;
             this.treeColumnName.FillsFreeSpace = true;
+            this.treeColumnName.Tag = "filename";
             this.treeColumnName.Text = "Filename";
             this.treeColumnName.Width = 180;
             // 
             // treeColumnSize
             // 
-            this.treeColumnSize.CellPadding = null;
             this.treeColumnSize.HeaderTextAlign = System.Windows.Forms.HorizontalAlignment.Right;
             this.treeColumnSize.IsEditable = false;
+            this.treeColumnSize.Tag = "size";
             this.treeColumnSize.Text = "Size";
             this.treeColumnSize.TextAlign = System.Windows.Forms.HorizontalAlignment.Right;
             // 
             // treeColumnModified
             // 
-            this.treeColumnModified.CellPadding = null;
             this.treeColumnModified.IsEditable = false;
             this.treeColumnModified.IsTileViewColumn = true;
+            this.treeColumnModified.Tag = "modified";
             this.treeColumnModified.Text = "Modified";
             this.treeColumnModified.Width = 145;
             // 
             // treeColumnOwner
             // 
-            this.treeColumnOwner.CellPadding = null;
             this.treeColumnOwner.DisplayIndex = 3;
             this.treeColumnOwner.IsEditable = false;
             this.treeColumnOwner.IsVisible = false;
+            this.treeColumnOwner.Tag = "owner";
             this.treeColumnOwner.Text = "Owner";
             // 
             // treeColumnGroup
             // 
-            this.treeColumnGroup.CellPadding = null;
             this.treeColumnGroup.DisplayIndex = 4;
             this.treeColumnGroup.IsEditable = false;
             this.treeColumnGroup.IsVisible = false;
+            this.treeColumnGroup.Tag = "group";
             this.treeColumnGroup.Text = "Group";
             // 
             // treeColumnPermissions
             // 
-            this.treeColumnPermissions.CellPadding = null;
             this.treeColumnPermissions.DisplayIndex = 5;
             this.treeColumnPermissions.IsEditable = false;
             this.treeColumnPermissions.IsVisible = false;
+            this.treeColumnPermissions.Tag = "permission";
             this.treeColumnPermissions.Text = "Permissions";
             // 
             // treeColumnKind
             // 
-            this.treeColumnKind.CellPadding = null;
             this.treeColumnKind.DisplayIndex = 6;
             this.treeColumnKind.IsEditable = false;
             this.treeColumnKind.IsVisible = false;
+            this.treeColumnKind.Tag = "kind";
             this.treeColumnKind.Text = "Kind";
             // 
             // treeColumnExtension
             // 
-            this.treeColumnExtension.CellPadding = null;
             this.treeColumnExtension.DisplayIndex = 7;
             this.treeColumnExtension.IsEditable = false;
             this.treeColumnExtension.IsVisible = false;
+            this.treeColumnExtension.Tag = "extension";
             this.treeColumnExtension.Text = "Extension";
             // 
             // treeColumnRegion
             // 
-            this.treeColumnRegion.CellPadding = null;
             this.treeColumnRegion.DisplayIndex = 10;
             this.treeColumnRegion.IsEditable = false;
             this.treeColumnRegion.IsVisible = false;
+            this.treeColumnRegion.Tag = "region";
             this.treeColumnRegion.Text = "Region";
             // 
             // treeColumnStorageClass
             // 
-            this.treeColumnStorageClass.CellPadding = null;
             this.treeColumnStorageClass.DisplayIndex = 8;
             this.treeColumnStorageClass.IsEditable = false;
             this.treeColumnStorageClass.IsVisible = false;
+            this.treeColumnStorageClass.Tag = "storageclass";
             this.treeColumnStorageClass.Text = "Storage Class";
             // 
             // treeColumnVersion
             // 
-            this.treeColumnVersion.CellPadding = null;
             this.treeColumnVersion.DisplayIndex = 9;
             this.treeColumnVersion.IsEditable = false;
             this.treeColumnVersion.IsVisible = false;
+            this.treeColumnVersion.Tag = "version";
             this.treeColumnVersion.Text = "Version";
             // 
             // treeColumnChecksum
             // 
-            this.treeColumnChecksum.CellPadding = null;
             this.treeColumnChecksum.DisplayIndex = 10;
             this.treeColumnChecksum.IsEditable = false;
             this.treeColumnChecksum.IsVisible = false;
+            this.treeColumnChecksum.Tag = "checksum";
             this.treeColumnChecksum.Text = "Checksum";
             // 
             // transcriptBox
@@ -2714,16 +2720,18 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.bookmarkListView.AllColumns.Add(this.bookmarkDescriptionColumn);
             this.bookmarkListView.AllColumns.Add(this.activeColumn);
             this.bookmarkListView.BorderStyle = System.Windows.Forms.BorderStyle.None;
+            this.bookmarkListView.CellEditUseWholeCell = false;
             this.bookmarkListView.Columns.AddRange(new System.Windows.Forms.ColumnHeader[] {
             this.bookmarkImageColumn,
             this.bookmarkDescriptionColumn,
             this.activeColumn});
+            this.bookmarkListView.Cursor = System.Windows.Forms.Cursors.Default;
             this.bookmarkListView.Dock = System.Windows.Forms.DockStyle.Fill;
             this.bookmarkListView.FullRowSelect = true;
+            this.bookmarkListView.HeaderStyle = System.Windows.Forms.ColumnHeaderStyle.None;
             this.bookmarkListView.HideSelection = false;
             this.bookmarkListView.Location = new System.Drawing.Point(0, 0);
             this.bookmarkListView.Name = "bookmarkListView";
-            this.bookmarkListView.OwnerDraw = true;
             this.bookmarkListView.RowHeight = 37;
             this.bookmarkListView.ShowGroups = false;
             this.bookmarkListView.Size = new System.Drawing.Size(0, 0);
@@ -2736,7 +2744,6 @@ namespace Ch.Cyberduck.Ui.Winforms
             // bookmarkImageColumn
             // 
             this.bookmarkImageColumn.AspectName = "";
-            this.bookmarkImageColumn.CellPadding = null;
             this.bookmarkImageColumn.IsEditable = false;
             this.bookmarkImageColumn.Text = "";
             this.bookmarkImageColumn.Width = 32;
@@ -2744,13 +2751,11 @@ namespace Ch.Cyberduck.Ui.Winforms
             // bookmarkDescriptionColumn
             // 
             this.bookmarkDescriptionColumn.AspectName = "";
-            this.bookmarkDescriptionColumn.CellPadding = null;
             this.bookmarkDescriptionColumn.Text = "";
             this.bookmarkDescriptionColumn.Width = 200;
             // 
             // activeColumn
             // 
-            this.activeColumn.CellPadding = null;
             this.activeColumn.Text = "";
             // 
             // actionToolStrip
@@ -3244,7 +3249,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             // 
             this.shareBrowserContextMenuItem.Index = 11;
             this.shareBrowserContextMenuItem.Text = "Share…";
-            // 
+            //
             // editBrowserContextMenuItem
             // 
             this.editBrowserContextMenuItem.Index = 13;
@@ -3437,7 +3442,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             this.requestFilesToolStripMenuItem.Name = "requestFilesToolStripMenuItem";
             this.requestFilesToolStripMenuItem.Size = new System.Drawing.Size(199, 22);
             this.requestFilesToolStripMenuItem.Text = "Request files…";
-            // 
+            //
             // BrowserForm
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(7F, 15F);

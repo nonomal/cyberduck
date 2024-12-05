@@ -15,8 +15,8 @@ package ch.cyberduck.core.s3;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.Host;
 import ch.cyberduck.core.features.Location;
-import ch.cyberduck.core.preferences.HostPreferences;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.Header;
@@ -24,53 +24,59 @@ import org.apache.http.HttpRequest;
 import org.apache.http.HttpResponse;
 import org.apache.http.ProtocolException;
 import org.apache.http.client.RedirectException;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpPut;
 import org.apache.http.client.methods.HttpUriRequest;
 import org.apache.http.client.methods.RequestBuilder;
 import org.apache.http.impl.client.DefaultRedirectStrategy;
 import org.apache.http.protocol.HttpContext;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.jets3t.service.ServiceException;
+import org.jets3t.service.utils.ServiceUtils;
 
 public class S3BucketRegionRedirectStrategy extends DefaultRedirectStrategy {
     private static final Logger log = LogManager.getLogger(S3BucketRegionRedirectStrategy.class);
 
     private final RequestEntityRestStorageService service;
-    private final S3Session session;
-    private final RequestEntityRestStorageService authorizer;
+    private final Host host;
 
-    public S3BucketRegionRedirectStrategy(final RequestEntityRestStorageService service, final S3Session session, final RequestEntityRestStorageService authorizer) {
+    public S3BucketRegionRedirectStrategy(final RequestEntityRestStorageService service, final Host host) {
+        super(new String[] {
+                HttpHead.METHOD_NAME,
+                HttpGet.METHOD_NAME,
+                HttpPost.METHOD_NAME,
+                HttpPut.METHOD_NAME
+        });
         this.service = service;
-        this.session = session;
-        this.authorizer = authorizer;
+        this.host = host;
     }
 
     @Override
     public HttpUriRequest getRedirect(final HttpRequest request, final HttpResponse response, final HttpContext context) throws ProtocolException {
         if(response.containsHeader("x-amz-bucket-region")) {
-            if(new HostPreferences(session.getHost()).getBoolean("s3.bucket.virtualhost.disable")) {
-                throw new RedirectException(response.getFirstHeader("x-amz-bucket-region").getValue());
-            }
             final Header header = response.getFirstHeader("x-amz-bucket-region");
-            log.warn(String.format("Received redirect response %s with %s", response, header));
+            log.warn("Received redirect response {} with {}", response, header);
+            if(service.getDisableDnsBuckets()) {
+                final String message = String.format("Virtual host style requests are disabled but received redirect response %s with x-amz-bucket-region %s",
+                        response, response.getFirstHeader("x-amz-bucket-region"));
+                log.warn(message);
+                throw new RedirectException(message);
+            }
+            final String region = header.getValue();
             final String uri = StringUtils.replaceEach(request.getRequestLine().getUri(),
-                    session.getHost().getProtocol().getRegions().stream().map(Location.Name::getIdentifier).toArray(String[]::new),
-                    session.getHost().getProtocol().getRegions().stream().map(location -> header.getValue()).toArray(String[]::new));
+                    host.getProtocol().getRegions().stream().map(Location.Name::getIdentifier).toArray(String[]::new),
+                    host.getProtocol().getRegions().stream().map(location -> region).toArray(String[]::new));
             final HttpUriRequest redirect = RequestBuilder.copy(request).setUri(uri).build();
-            log.warn(String.format("Retry request with URI %s", redirect.getURI()));
-            try {
-                authorizer.authorizeHttpRequest(redirect, context, null);
-            }
-            catch(ServiceException e) {
-                throw new RedirectException(e.getMessage(), e);
-            }
+            log.warn("Retry request with URI {}", redirect.getURI());
+            final String bucketName = ServiceUtils.findBucketNameInHostOrPath(redirect.getURI(),
+                    RequestEntityRestStorageService.createRegionSpecificEndpoint(host, region));
+            log.debug("Determined bucket {} from request {}", bucketName, request);
             // Update cache with new region
-            final String bucketName = RequestEntityRestStorageService.findBucketInHostname(session.getHost());
             if(bucketName != null) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Cache region %s for bucket %s", header.getValue(), bucketName));
-                }
-                service.getRegionEndpointCache().putRegionForBucketName(bucketName, header.getValue());
+                log.debug("Cache region {} for bucket {}", region, bucketName);
+                service.getRegionEndpointCache().putRegionForBucketName(bucketName, region);
             }
             return redirect;
         }

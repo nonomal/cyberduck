@@ -16,13 +16,14 @@ package ch.cyberduck.core.b2;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.VersioningConfiguration;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
@@ -41,10 +42,16 @@ public class B2DeleteFeature implements Delete {
 
     private final B2Session session;
     private final B2VersionIdProvider fileid;
+    private final VersioningConfiguration versioning;
 
     public B2DeleteFeature(final B2Session session, final B2VersionIdProvider fileid) {
+        this(session, fileid, new VersioningConfiguration(new HostPreferences(session.getHost()).getBoolean("b2.listing.versioning.enable")));
+    }
+
+    public B2DeleteFeature(final B2Session session, final B2VersionIdProvider fileid, final VersioningConfiguration versioning) {
         this.session = session;
         this.fileid = fileid;
+        this.versioning = versioning;
     }
 
     @Override
@@ -62,36 +69,45 @@ public class B2DeleteFeature implements Delete {
                     // Delete /.bzEmpty if any
                     final String placeholder;
                     try {
-                        placeholder = fileid.getVersionId(file, new DisabledListProgressListener());
+                        placeholder = fileid.getVersionId(file);
                     }
                     catch(NotfoundException e) {
-                        log.warn(String.format("Ignore failure %s deleting placeholder file for %s", e, file));
+                        log.warn("Ignore failure {} deleting placeholder file for {}", e, file);
+                        continue;
+                    }
+                    if(null == placeholder) {
                         continue;
                     }
                     try {
                         session.getClient().deleteFileVersion(containerService.getKey(file), placeholder);
                     }
                     catch(B2ApiException e) {
-                        log.warn(String.format("Ignore failure %s deleting placeholder file for %s", e.getMessage(), file));
+                        log.warn("Ignore failure {} deleting placeholder file for {}", e.getMessage(), file);
                     }
                     catch(IOException e) {
-                        throw new DefaultIOExceptionMappingService().map(e);
+                        throw new DefaultIOExceptionMappingService().map("Cannot delete {0}", e, file);
                     }
                 }
                 else if(file.isFile()) {
                     try {
-                        if(null == file.attributes().getVersionId()) {
+                        if(!versioning.isEnabled() || null == file.attributes().getVersionId()) {
                             // Add hide marker
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Add hide marker %s of %s", file.attributes().getVersionId(), file));
+                            log.debug("Add hide marker {} of {}", file.attributes().getVersionId(), file);
+                            try {
+                                session.getClient().hideFile(fileid.getVersionId(containerService.getContainer(file)), containerService.getKey(file));
                             }
-                            session.getClient().hideFile(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()), containerService.getKey(file));
+                            catch(B2ApiException e) {
+                                if("already_hidden".equalsIgnoreCase(e.getCode())) {
+                                    log.warn("Ignore failure {} hiding file {} already hidden", e.getMessage(), file);
+                                }
+                                else {
+                                    throw e;
+                                }
+                            }
                         }
                         else {
                             // Delete specific version
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Delete version %s of %s", file.attributes().getVersionId(), file));
-                            }
+                            log.debug("Delete version {} of {}", file.attributes().getVersionId(), file);
                             session.getClient().deleteFileVersion(containerService.getKey(file), file.attributes().getVersionId());
                         }
                     }
@@ -99,7 +115,7 @@ public class B2DeleteFeature implements Delete {
                         throw new B2ExceptionMappingService(fileid).map("Cannot delete {0}", e, file);
                     }
                     catch(IOException e) {
-                        throw new DefaultIOExceptionMappingService().map(e);
+                        throw new DefaultIOExceptionMappingService().map("Cannot delete {0}", e, file);
                     }
                 }
                 fileid.cache(file, null);
@@ -110,14 +126,14 @@ public class B2DeleteFeature implements Delete {
                 if(containerService.isContainer(file)) {
                     callback.delete(file);
                     // Finally delete bucket itself
-                    session.getClient().deleteBucket(fileid.getVersionId(file, new DisabledListProgressListener()));
+                    session.getClient().deleteBucket(fileid.getVersionId(file));
                 }
             }
             catch(B2ApiException e) {
                 throw new B2ExceptionMappingService(fileid).map("Cannot delete {0}", e, file);
             }
             catch(IOException e) {
-                throw new DefaultIOExceptionMappingService().map(e);
+                throw new DefaultIOExceptionMappingService().map("Cannot delete {0}", e, file);
             }
         }
     }

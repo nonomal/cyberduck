@@ -23,11 +23,14 @@ import ch.cyberduck.core.DisabledPasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.io.Checksum;
+import ch.cyberduck.core.storegate.io.swagger.client.model.RootFolder;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
 
 import org.apache.commons.lang3.RandomUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -48,6 +51,17 @@ public class StoregateAttributesFinderFeatureTest extends AbstractStoregateTest 
     }
 
     @Test
+    public void testDefaultPaths() throws Exception {
+        final StoregateIdProvider nodeid = new StoregateIdProvider(session);
+        for(Path container : new StoregateListService(session, nodeid).list(Home.ROOT, new DisabledListProgressListener())) {
+            assertEquals(container.attributes(), new StoregateAttributesFinderFeature(session, nodeid).find(container));
+        }
+        for(RootFolder root : session.roots()) {
+            assertNotEquals(PathAttributes.EMPTY, new StoregateAttributesFinderFeature(session, nodeid).find(new Path(root.getPath(), EnumSet.of(Path.Type.directory))));
+        }
+    }
+
+    @Test
     public void testFind() throws Exception {
         final StoregateIdProvider nodeid = new StoregateIdProvider(session);
         final Path room = new StoregateDirectoryFeature(session, nodeid).mkdir(
@@ -57,6 +71,8 @@ public class StoregateAttributesFinderFeatureTest extends AbstractStoregateTest 
         final Path test = new StoregateTouchFeature(session, nodeid).touch(
                 new Path(room, String.format("%s", new AlphanumericRandomStringService().random()), EnumSet.of(Path.Type.file)), new TransferStatus());
         final PathAttributes attr = new StoregateAttributesFinderFeature(session, nodeid).find(test);
+        assertEquals(attr, new StoregateAttributesFinderFeature(session, nodeid).find(new Path(test.getParent(), StringUtils.upperCase(test.getName()), test.getType())));
+        assertEquals(attr, new StoregateAttributesFinderFeature(session, nodeid).find(new Path(test.getParent(), StringUtils.lowerCase(test.getName()), test.getType())));
         assertNotEquals(0L, attr.getModificationDate());
         assertEquals(Checksum.NONE, attr.getChecksum());
         assertNull(attr.getETag());

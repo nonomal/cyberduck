@@ -22,6 +22,7 @@ import ch.cyberduck.core.AbstractExceptionMappingService;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConflictException;
+import ch.cyberduck.core.exception.ConnectionRefusedException;
 import ch.cyberduck.core.exception.ConnectionTimeoutException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.LockedException;
@@ -54,6 +55,8 @@ public abstract class HttpResponseExceptionMappingService<E extends HttpResponse
             case HttpStatus.SC_NOT_ACCEPTABLE:
                 return new AccessDeniedException(buffer.toString(), failure);
             case HttpStatus.SC_CONFLICT:
+            case HttpStatus.SC_METHOD_NOT_ALLOWED:
+            case HttpStatus.SC_PRECONDITION_FAILED:
                 return new ConflictException(buffer.toString(), failure);
             case HttpStatus.SC_NOT_FOUND:
             case HttpStatus.SC_GONE:
@@ -63,21 +66,16 @@ public abstract class HttpResponseExceptionMappingService<E extends HttpResponse
             case HttpStatus.SC_INSUFFICIENT_STORAGE:
             case HttpStatus.SC_PAYMENT_REQUIRED:
                 return new QuotaException(buffer.toString(), failure);
-            case HttpStatus.SC_UNPROCESSABLE_ENTITY:
-            case HttpStatus.SC_BAD_REQUEST:
-            case HttpStatus.SC_REQUEST_URI_TOO_LONG:
-            case HttpStatus.SC_METHOD_NOT_ALLOWED:
-            case HttpStatus.SC_NOT_IMPLEMENTED:
-                return new InteroperabilityException(buffer.toString(), failure);
             case HttpStatus.SC_REQUEST_TIMEOUT:
             case HttpStatus.SC_GATEWAY_TIMEOUT:
                 return new ConnectionTimeoutException(buffer.toString(), failure);
             case HttpStatus.SC_LOCKED:
                 return new LockedException(buffer.toString(), failure);
             case HttpStatus.SC_BAD_GATEWAY:
-            case HttpStatus.SC_INTERNAL_SERVER_ERROR:
             case HttpStatus.SC_SERVICE_UNAVAILABLE:
-            case 429:
+                return new ConnectionRefusedException(buffer.toString(), failure);
+            case HttpStatus.SC_INTERNAL_SERVER_ERROR:
+            case HttpStatus.SC_TOO_MANY_REQUESTS:
                 // Too Many Requests. Rate limiting
             case 509:
                 // Bandwidth Limit Exceeded

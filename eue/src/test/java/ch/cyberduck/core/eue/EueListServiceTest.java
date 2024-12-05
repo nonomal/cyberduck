@@ -24,10 +24,12 @@ import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.DisabledPasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.eue.io.swagger.client.model.ShareCreationResponseEntry;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.transfer.TransferStatus;
+import ch.cyberduck.core.unicode.NFDNormalizer;
 import ch.cyberduck.test.IntegrationTest;
 
 import org.apache.commons.lang3.RandomUtils;
@@ -36,6 +38,7 @@ import org.junit.experimental.categories.Category;
 
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ch.cyberduck.core.AbstractPath.Type.directory;
 import static org.junit.Assert.*;
@@ -50,11 +53,14 @@ public class EueListServiceTest extends AbstractEueSessionTest {
         final Path folder = new EueDirectoryFeature(session, fileid).mkdir(
                 new Path(root, new AlphanumericRandomStringService().random(), EnumSet.of(directory)), new TransferStatus());
         final AttributedList<Path> list = new EueListService(session, fileid).list(folder.getParent(), new DisabledListProgressListener());
-        assertTrue(list.contains(folder));
+        assertNotNull(list.find(new SimplePathPredicate(folder)));
+        for(Path bucket : list) {
+            assertEquals(bucket.attributes(), new EueAttributesFinderFeature(session, fileid).find(bucket, new DisabledListProgressListener()));
+        }
         assertNotNull(list.find(f -> f.attributes().getFileId().equals(EueResourceIdProvider.TRASH)));
         assertTrue(list.contains(new Path("Gelöschte Dateien", EnumSet.of(directory)).withAttributes(new PathAttributes().withFileId("TRASH"))));
-        assertEquals(folder.attributes().getFileId(), list.get(folder).attributes().getFileId());
-        assertSame(root, list.get(folder).getParent());
+        assertEquals(folder.attributes().getFileId(), list.find(new SimplePathPredicate(folder)).attributes().getFileId());
+        assertSame(root, list.find(new SimplePathPredicate(folder)).getParent());
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(folder), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
@@ -99,15 +105,23 @@ public class EueListServiceTest extends AbstractEueSessionTest {
         final EueResourceIdProvider fileid = new EueResourceIdProvider(session);
         final Path folder = new EueDirectoryFeature(session, fileid).mkdir(
                 new Path(new AlphanumericRandomStringService().random(), EnumSet.of(directory)), new TransferStatus());
-        assertTrue(new EueListService(session, fileid).list(folder, new DisabledListProgressListener()).isEmpty());
+        final AtomicBoolean callback = new AtomicBoolean();
+        assertTrue(new EueListService(session, fileid).list(folder, new DisabledListProgressListener() {
+            @Override
+            public void chunk(final Path parent, final AttributedList<Path> list) {
+                assertNotSame(AttributedList.EMPTY, list);
+                callback.set(true);
+            }
+        }).isEmpty());
+        assertTrue(callback.get());
         final Path subfolder = new EueDirectoryFeature(session, fileid).mkdir(
                 new Path(folder, new AlphanumericRandomStringService().random(), EnumSet.of(directory)), new TransferStatus());
         assertTrue(new EueListService(session, fileid).list(subfolder, new DisabledListProgressListener()).isEmpty());
         final AttributedList<Path> list = new EueListService(session, fileid).list(folder, new DisabledListProgressListener());
         assertFalse(list.isEmpty());
-        assertTrue(list.contains(subfolder));
-        assertEquals(subfolder.attributes().getFileId(), list.get(subfolder).attributes().getFileId());
-        assertSame(folder, list.get(subfolder).getParent());
+        assertNotNull(list.find(new SimplePathPredicate(subfolder)));
+        assertEquals(subfolder.attributes().getFileId(), list.find(new SimplePathPredicate(subfolder)).attributes().getFileId());
+        assertSame(folder, list.find(new SimplePathPredicate(subfolder)).getParent());
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(folder), new DisabledLoginCallback(), new Delete.DisabledCallback());
         assertFalse((new EueFindFeature(session, fileid).find(folder, new DisabledListProgressListener())));
         assertFalse((new EueFindFeature(session, fileid).find(subfolder, new DisabledListProgressListener())));
@@ -119,11 +133,14 @@ public class EueListServiceTest extends AbstractEueSessionTest {
         final Path folder = new EueDirectoryFeature(session, fileid).mkdir(
                 new Path(new AlphanumericRandomStringService().random(), EnumSet.of(directory)), new TransferStatus());
         assertTrue(new EueListService(session, fileid).list(folder, new DisabledListProgressListener()).isEmpty());
+        final String filename = String.format("%s%s", new AlphanumericRandomStringService().random(), new NFDNormalizer().normalize("ä"));
         final Path file = new EueTouchFeature(session, fileid)
-                .touch(new Path(folder, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus().withLength(0L));
+                .touch(new Path(folder, filename, EnumSet.of(Path.Type.file)), new TransferStatus().withLength(0L));
         final AttributedList<Path> list = new EueListService(session, fileid).list(folder, new DisabledListProgressListener());
         assertFalse(list.isEmpty());
         assertNotNull(list.find(new DefaultPathPredicate(file)));
+        // Preserving Unicode normalization
+        assertEquals(filename, list.find(new DefaultPathPredicate(file)).getName());
         assertEquals(file.attributes().getFileId(), list.get(file).attributes().getFileId());
         assertSame(folder, list.get(file).getParent());
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(folder), new DisabledLoginCallback(), new Delete.DisabledCallback());

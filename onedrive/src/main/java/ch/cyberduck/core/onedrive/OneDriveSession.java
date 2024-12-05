@@ -15,24 +15,30 @@ package ch.cyberduck.core.onedrive;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
+import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.features.Lock;
 import ch.cyberduck.core.onedrive.features.GraphLockFeature;
+import ch.cyberduck.core.shared.DefaultPathHomeFeature;
+import ch.cyberduck.core.shared.DelegatingHomeFeature;
+import ch.cyberduck.core.shared.WorkdirHomeFeature;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 
 import org.apache.commons.lang3.StringUtils;
+import org.nuxeo.onedrive.client.ODataQuery;
+import org.nuxeo.onedrive.client.types.BaseItem;
 import org.nuxeo.onedrive.client.types.Drive;
 import org.nuxeo.onedrive.client.types.DriveItem;
 import org.nuxeo.onedrive.client.types.ItemReference;
 import org.nuxeo.onedrive.client.types.User;
 
+import java.io.IOException;
 import java.util.Optional;
 
 public class OneDriveSession extends GraphSession {
@@ -52,23 +58,12 @@ public class OneDriveSession extends GraphSession {
             final ItemReference remoteParent = remoteMetadata.getParentReference();
             if(parent == null) {
                 return String.join(String.valueOf(Path.DELIMITER),
-                        remoteParent.getDriveId(), remoteParent.getId());
+                        remoteParent.getDriveId(), remoteMetadata.getId());
             }
             else {
-                // this is fix for OneDrive Business shared folders.
-                // These have an ID in their remoteMetadata, but
-                // there is an ID in parentReference as well.
-                // remoteMetadata-ID doesn't resolve in parentReference
-                // driveId, so … use that parentReference Item Id first,
-                // and if it is non-existent use the remotemetadata
-                // as fallback for regular OneDrive Consumer shared items.
-                String remoteItemId = remoteParent.getId();
-                if(StringUtils.isBlank(remoteItemId)) {
-                    remoteItemId = remoteMetadata.getId();
-                }
                 return String.join(String.valueOf(Path.DELIMITER),
                         parent.getDriveId(), metadata.getId(),
-                        remoteParent.getDriveId(), remoteItemId);
+                        remoteParent.getDriveId(), remoteMetadata.getId());
             }
         }
         else {
@@ -76,12 +71,21 @@ public class OneDriveSession extends GraphSession {
         }
     }
 
+    @Override
+    public DriveItem.Metadata getMetadata(final DriveItem item, ODataQuery query) throws IOException {
+        if (query == null) {
+            query = new ODataQuery();
+        }
+        query.select(BaseItem.Property.ParentReference, DriveItem.Property.RemoteItem);
+        return super.getMetadata(item, query);
+    }
+
     /**
      * Resolves given path to OneDriveItem
      */
     @Override
     public DriveItem getItem(final Path file, final boolean resolveLastItem) throws BackgroundException {
-        if(OneDriveListService.MYFILES_NAME.equals(file)) {
+        if(new SimplePathPredicate(OneDriveListService.MYFILES_NAME).test(file)) {
             final User.Metadata user = this.getUser();
             // creationType can be non-assigned (Microsoft Account)
             // or null, Inviation, LocalAccount or EmailVerified.
@@ -93,7 +97,7 @@ public class OneDriveSession extends GraphSession {
                 return new Drive(user.asDirectoryObject()).getRoot();
             }
         }
-        final String id = fileid.getFileId(file, new DisabledListProgressListener());
+        final String id = fileid.getFileId(file);
         if(StringUtils.isEmpty(id)) {
             throw new NotfoundException(String.format("Version ID for %s is empty", file.getAbsolute()));
         }
@@ -147,18 +151,18 @@ public class OneDriveSession extends GraphSession {
         if(containerItem.isDrive()) {
             // Is /My Files.
             // Tests whether container access is used, orelse deny access to /My Files.
-            return container || !containerItem.getContainerPath().map(file::equals).orElse(false);
+            return container || !containerItem.getContainerPath().map(new SimplePathPredicate(file)::test).orElse(false);
         }
         else {
             // Check for /Shared-path
             // Catches modification of items in /Shared
-            Optional<Boolean> predicate = containerItem.getCollectionPath().map(file::equals);
+            Optional<Boolean> predicate = containerItem.getCollectionPath().map(new SimplePathPredicate(file)::test);
             if(!container) {
                 // Append condition to /Shared-path check for
                 // If file parent is /Shared then return inaccessible below
                 // Cannot modify items in /Shared/*, but /Shared/**/*
                 // User must not be able to rename, move or copy first level of /Shared.
-                predicate = predicate.map(o -> o || containerItem.getCollectionPath().map(file.getParent()::equals).get());
+                predicate = predicate.map(o -> o || containerItem.getCollectionPath().map(new SimplePathPredicate(file.getParent())::test).get());
             }
             // Fallback to deny access for invalid paths (/Invalid).
             // Logic is upside down. Predicate determines whether to block access. Flip it.
@@ -180,15 +184,19 @@ public class OneDriveSession extends GraphSession {
     @Override
     @SuppressWarnings("unchecked")
     public <T> T _getFeature(final Class<T> type) {
+        if(type == Home.class) {
+            return (T) new DelegatingHomeFeature(new WorkdirHomeFeature(host), new DefaultPathHomeFeature(host), new OneDriveHomeFinderService());
+        }
         if(type == ListService.class) {
             return (T) new OneDriveListService(this, fileid);
         }
         if(type == Lock.class) {
+            final User.Metadata user = this.getUser();
             // this is a hack. Graph creationType can be present, but `null`, which is totally valid.
             // in order to determine whether this is a Microsoft or AAD account, we need to check for
             // a null-optional, not for non-present optional.
             //noinspection OptionalAssignedToNull
-            if(null != getUser() && null != getUser().getCreationType()) {
+            if(null != user && null != user.getCreationType()) {
                 return (T) new GraphLockFeature(this, fileid);
             }
         }

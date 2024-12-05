@@ -36,7 +36,6 @@ import ch.cyberduck.core.local.ApplicationLauncher;
 import ch.cyberduck.core.local.ApplicationLauncherFactory;
 import ch.cyberduck.core.local.ApplicationQuitCallback;
 import ch.cyberduck.core.local.FileWatcherListener;
-import ch.cyberduck.core.local.TemporaryFileService;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
 import ch.cyberduck.core.notification.NotificationService;
 import ch.cyberduck.core.notification.NotificationServiceFactory;
@@ -56,8 +55,6 @@ public abstract class AbstractEditor implements Editor {
     private static final Logger log = LogManager.getLogger(AbstractEditor.class);
 
     private final Host host;
-
-    private final TemporaryFileService temp = TemporaryFileServiceFactory.instance();
 
     /**
      * File has changed but not uploaded yet
@@ -94,7 +91,7 @@ public abstract class AbstractEditor implements Editor {
         else {
             this.file = file;
         }
-        this.temporary = temp.create(host.getUuid(), this.file);
+        this.temporary = TemporaryFileServiceFactory.instance().create(String.format("editor-%s", host.getUuid()), this.file);
         this.launcher = launcher;
         this.finder = finder;
         this.progress = listener;
@@ -110,41 +107,24 @@ public abstract class AbstractEditor implements Editor {
 
     @Override
     public void delete() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Delete edited file %s", temporary));
-        }
+        log.debug("Delete edited file {}", temporary);
         try {
             temporary.delete();
         }
         catch(AccessDeniedException | NotfoundException e) {
-            log.warn(String.format("Failure trashing edited file %s. %s", temporary, e.getMessage()));
+            log.warn("Failure trashing edited file {}. {}", temporary, e.getMessage());
         }
     }
 
     /**
      * @param application Editor application
-     * @param callback    Quit callback notified when editor application is closed
+     * @param quit        Quit callback notified when editor application is closed
      */
     @Override
-    public Worker<Transfer> open(final Application application, final ApplicationQuitCallback callback, final FileWatcherListener listener) {
-        final Local temporary = temp.create(host.getUuid(), file);
+    public Worker<Transfer> open(final Application application, final ApplicationQuitCallback quit, final FileWatcherListener listener) {
         final Worker<Transfer> worker = new EditOpenWorker(host, this, application, file,
-                temporary, progress, listener, notification) {
-            @Override
-            public void cleanup(final Transfer download) {
-                // Save checksum before edit
-                try {
-                    checksum = ChecksumComputeFactory.get(HashAlgorithm.md5).compute(temporary.getInputStream(), new TransferStatus());
-                }
-                catch(BackgroundException e) {
-                    log.warn(String.format("Error computing checksum for %s. %s", temporary, e));
-                }
-
-            }
-        };
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Download file for edit %s", temporary));
-        }
+                temporary, progress, quit, listener, notification);
+        log.debug("Download file for edit {}", temporary);
         return worker;
     }
 
@@ -154,19 +134,30 @@ public abstract class AbstractEditor implements Editor {
      * @param application Editor
      * @param file        Remote file
      * @param temporary   Temporary file
+     * @param quit
      */
-    protected void edit(final Application application, final Path file, final Local temporary, final FileWatcherListener listener) throws IOException {
-        final ApplicationQuitCallback quit = new ApplicationQuitCallback() {
+    protected void edit(final Application application, final Path file, final Local temporary,
+                        final FileWatcherListener listener, final ApplicationQuitCallback quit) throws IOException {
+        final ApplicationQuitCallback callback = new ApplicationQuitCallback() {
             @Override
             public void callback() {
+                log.debug("Received quit event for application {}", application);
+                quit.callback();
+                log.debug("Close editor for {}", file);
                 close();
                 delete();
             }
         };
+        try {
+            checksum = ChecksumComputeFactory.get(HashAlgorithm.md5).compute(temporary.getInputStream(), new TransferStatus());
+        }
+        catch(BackgroundException e) {
+            log.warn("Error computing checksum for {}. {}", temporary, e);
+        }
         if(!finder.isInstalled(application)) {
-            log.warn(String.format("No editor application configured for %s", temporary));
+            log.warn("No editor application configured for {}", temporary);
             if(launcher.open(temporary)) {
-                this.watch(application, temporary, listener, quit);
+                this.watch(application, temporary, listener, callback);
             }
             else {
                 throw new IOException(String.format("Failed to open default application for %s",
@@ -174,7 +165,7 @@ public abstract class AbstractEditor implements Editor {
             }
         }
         else if(launcher.open(temporary, application)) {
-            this.watch(application, temporary, listener, quit);
+            this.watch(application, temporary, listener, callback);
         }
         else {
             throw new IOException(String.format("Failed to open application %s for %s",
@@ -198,24 +189,18 @@ public abstract class AbstractEditor implements Editor {
             current = ChecksumComputeFactory.get(HashAlgorithm.md5).compute(temporary.getInputStream(), new TransferStatus());
         }
         catch(BackgroundException e) {
-            log.warn(String.format("Error computing checksum for %s. %s", temporary, e));
+            log.warn("Error computing checksum for {}. {}", temporary, e);
             return Worker.empty();
         }
         if(current.equals(checksum)) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("File %s not modified with checksum %s", temporary, current));
-            }
+            log.info("File {} not modified with checksum {}", temporary, current);
         }
         else {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Save new checksum %s for file %s", current, temporary));
-            }
+            log.info("Save new checksum {} for file {}", current, temporary);
             // Store current checksum
             checksum = current;
             final Worker<Transfer> worker = new EditSaveWorker(host, this, file, temporary, error, progress, notification);
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Upload changes for %s", temporary));
-            }
+            log.debug("Upload changes for {}", temporary);
             return worker;
         }
         return Worker.empty();

@@ -27,13 +27,13 @@ import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathCache;
-import ch.cyberduck.core.cryptomator.features.CryptoAttributesFeature;
-import ch.cyberduck.core.cryptomator.features.CryptoFindV6Feature;
 import ch.cyberduck.core.cryptomator.features.CryptoListService;
 import ch.cyberduck.core.cryptomator.features.CryptoReadFeature;
 import ch.cyberduck.core.cryptomator.features.CryptoWriteFeature;
 import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.sftp.AbstractSFTPTest;
 import ch.cyberduck.core.sftp.SFTPAttributesFinderFeature;
@@ -79,21 +79,20 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final Path test = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final CryptoWriteFeature<Void> writer = new CryptoWriteFeature<>(session, new SFTPWriteFeature(session), cryptomator);
         final FileHeader header = cryptomator.getFileHeaderCryptor().create();
         status.setHeader(cryptomator.getFileHeaderCryptor().encryptHeader(header));
-        status.setNonces(new RandomNonceGenerator());
+        status.setNonces(new RandomNonceGenerator(cryptomator.getNonceSize()));
         status.setChecksum(writer.checksum(test, status).compute(new ByteArrayInputStream(content), status));
         final OutputStream out = writer.write(test, status, new DisabledConnectionCallback());
         assertNotNull(out);
         new StreamCopier(status, status).transfer(new ByteArrayInputStream(content), out);
         out.close();
         assertEquals(TransferStatus.UNKNOWN_LENGTH, status.getResponse().getSize());
-        assertTrue(new CryptoFindV6Feature(session, new SFTPFindFeature(session), cryptomator).find(test));
+        assertTrue(cryptomator.getFeature(session, Find.class, new SFTPFindFeature(session)).find(test));
         assertEquals(content.length, new CryptoListService(session, new SFTPListService(session), cryptomator).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes().getSize());
-        assertEquals(content.length, writer.append(test, status.withRemote(new CryptoAttributesFeature(session, new SFTPAttributesFinderFeature(session), cryptomator).find(test))).size, 0L);
         final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);
         final InputStream in = new CryptoReadFeature(session, new SFTPReadFeature(session), cryptomator).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
         new StreamCopier(status, status).transfer(in, buffer);
@@ -111,18 +110,18 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
         final Path vault = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final Path test = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final CryptoWriteFeature<Void> writer = new CryptoWriteFeature<>(session, new SFTPWriteFeature(session), cryptomator);
         final FileHeader header = cryptomator.getFileHeaderCryptor().create();
         status.setHeader(cryptomator.getFileHeaderCryptor().encryptHeader(header));
-        status.setNonces(new RandomNonceGenerator());
+        status.setNonces(new RandomNonceGenerator(cryptomator.getNonceSize()));
         status.setChecksum(writer.checksum(test, status).compute(new ByteArrayInputStream(content), status));
         final OutputStream out = writer.write(test, status, new DisabledConnectionCallback());
         assertNotNull(out);
         new StreamCopier(status, status).transfer(new ByteArrayInputStream(content), out);
         out.close();
-        assertTrue(new CryptoFindV6Feature(session, new SFTPFindFeature(session), cryptomator).find(test));
+        assertTrue(cryptomator.getFeature(session, Find.class, new SFTPFindFeature(session)).find(test));
         final Path found = new CryptoListService(session, new SFTPListService(session), cryptomator).list(test.getParent(), new DisabledListProgressListener()).get(test);
         final Cache<Path> cache = new PathCache(1);
         final AttributedList<Path> list = new AttributedList<>();
@@ -131,19 +130,16 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
         assertEquals(content.length, cache.get(vault).get(0).attributes().getSize());
         assertEquals(content.length, found.attributes().getSize());
         {
-            final PathAttributes attributes = new CryptoAttributesFeature(session, new SFTPAttributesFinderFeature(session), cryptomator).find(test);
+            final PathAttributes attributes = cryptomator.getFeature(session, AttributesFinder.class, new SFTPAttributesFinderFeature(session)).find(test);
             assertEquals(content.length, attributes.getSize());
-            assertEquals(content.length, writer.append(test, status.withRemote(attributes)).size, 0L);
         }
         {
-            final PathAttributes attributes = new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator).find(test);
+            final PathAttributes attributes = cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session)).find(test);
             assertEquals(content.length, attributes.getSize());
-            assertEquals(content.length, writer.append(test, status.withRemote(attributes)).size, 0L);
         }
         {
-            final PathAttributes attributes = new CachingAttributesFinderFeature(cache, new CryptoAttributesFeature(session, new DefaultAttributesFinderFeature(session), cryptomator)).find(test);
+            final PathAttributes attributes = new CachingAttributesFinderFeature(session, cache, cryptomator.getFeature(session, AttributesFinder.class, new DefaultAttributesFinderFeature(session))).find(test);
             assertEquals(content.length, attributes.getSize());
-            assertEquals(content.length, writer.append(test, status.withRemote(attributes)).size, 0L);
         }
         assertEquals(content.length, cache.get(vault).get(0).attributes().getSize());
         final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);

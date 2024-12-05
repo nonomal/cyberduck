@@ -16,9 +16,12 @@ package ch.cyberduck.core.b2;
  */
 
 import ch.cyberduck.core.AlphanumericRandomStringService;
+import ch.cyberduck.core.AsciiRandomStringService;
+import ch.cyberduck.core.CachingFindFeature;
 import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathCache;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
@@ -54,9 +57,34 @@ public class B2FindFeatureTest extends AbstractB2Test {
         final Path bucket = new Path("test-cyberduck", EnumSet.of(Path.Type.directory, Path.Type.volume));
         final Path file = new Path(bucket, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file, Path.Type.upload));
         final B2StartLargeFileResponse startResponse = session.getClient().startLargeFileUpload(
-                new B2VersionIdProvider(session).getVersionId(bucket, new DisabledListProgressListener()),
+                new B2VersionIdProvider(session).getVersionId(bucket),
                 file.getName(), null, Collections.emptyMap());
         assertTrue(new B2FindFeature(session, new B2VersionIdProvider(session)).find(file));
         session.getClient().cancelLargeFileUpload(startResponse.getFileId());
+    }
+
+    @Test
+    public void testFindCommonPrefix() throws Exception {
+        final B2VersionIdProvider fileid = new B2VersionIdProvider(session);
+        final Path container = new Path("test-cyberduck", EnumSet.of(Path.Type.directory, Path.Type.volume));
+        assertTrue(new B2FindFeature(session, fileid).find(container));
+        final String prefix = new AlphanumericRandomStringService().random();
+        final Path intermediate = new Path(container, prefix, EnumSet.of(Path.Type.directory));
+        final Path test = new B2TouchFeature(session, fileid).touch(new Path(intermediate, new AsciiRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
+        assertTrue(new B2FindFeature(session, fileid).find(test));
+        assertFalse(new B2FindFeature(session, fileid).find(new Path(test.getAbsolute(), EnumSet.of(Path.Type.directory))));
+        assertTrue(new B2FindFeature(session, fileid).find(intermediate));
+        // Ignore 404 for placeholder and search for common prefix
+        assertTrue(new B2FindFeature(session, fileid).find(new Path(container, prefix, EnumSet.of(Path.Type.directory, Path.Type.placeholder))));
+        assertTrue(new B2ObjectListService(session, fileid).list(intermediate,
+                new DisabledListProgressListener()).contains(test));
+        new B2DeleteFeature(session, fileid).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
+        assertFalse(new B2FindFeature(session, fileid).find(test));
+        assertFalse(new B2FindFeature(session, fileid).find(intermediate));
+        final PathCache cache = new PathCache(1);
+        final Path directory = new Path(container, prefix, EnumSet.of(Path.Type.directory, Path.Type.placeholder));
+        assertFalse(new CachingFindFeature(session, cache, new B2FindFeature(session, fileid)).find(directory));
+        assertFalse(cache.isCached(directory));
+        assertFalse(new B2FindFeature(session, fileid).find(new Path(container, prefix, EnumSet.of(Path.Type.directory, Path.Type.placeholder))));
     }
 }

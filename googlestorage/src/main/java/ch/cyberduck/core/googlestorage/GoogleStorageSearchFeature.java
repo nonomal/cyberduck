@@ -23,6 +23,7 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Search;
 
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -39,10 +40,10 @@ public class GoogleStorageSearchFeature implements Search {
         if(workdir.isRoot()) {
             final AttributedList<Path> result = new AttributedList<>();
             final AttributedList<Path> buckets = new GoogleStorageBucketListService(session).list(workdir, listener);
-            result.addAll(filter(regex, buckets));
             for(Path bucket : buckets) {
                 result.addAll(filter(regex, new GoogleStorageObjectListService(session).list(bucket, listener, null)));
             }
+            result.addAll(filter(regex, buckets));
             return result;
         }
         try {
@@ -56,7 +57,7 @@ public class GoogleStorageSearchFeature implements Search {
     private static AttributedList<Path> filter(final Filter<Path> regex, final AttributedList<Path> objects) {
         final Set<Path> removal = new HashSet<>();
         for(final Path f : objects) {
-            if(!f.getName().contains(regex.toPattern().pattern())) {
+            if(!regex.accept(f)) {
                 removal.add(f);
             }
         }
@@ -65,8 +66,7 @@ public class GoogleStorageSearchFeature implements Search {
     }
 
     @Override
-    public boolean isRecursive() {
-        return false;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
-
 }

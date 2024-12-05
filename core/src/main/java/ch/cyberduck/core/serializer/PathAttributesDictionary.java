@@ -21,27 +21,27 @@ package ch.cyberduck.core.serializer;
 import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.DeserializerFactory;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.HashAlgorithm;
 
-import java.net.URI;
 import java.util.Collections;
 import java.util.Map;
 
-public class PathAttributesDictionary {
+public class PathAttributesDictionary<T> {
 
-    private final DeserializerFactory factory;
+    private final DeserializerFactory<T> factory;
 
     public PathAttributesDictionary() {
-        this.factory = new DeserializerFactory();
+        this.factory = new DeserializerFactory<>();
     }
 
-    public PathAttributesDictionary(final DeserializerFactory factory) {
+    public PathAttributesDictionary(final DeserializerFactory<T> factory) {
         this.factory = factory;
     }
 
-    public <T> PathAttributes deserialize(T serialized) {
-        final Deserializer dict = factory.create(serialized);
+    public PathAttributes deserialize(final T serialized) {
+        final Deserializer<T> dict = factory.create(serialized);
         final PathAttributes attributes = new PathAttributes();
         final String sizeObj = dict.stringForKey("Size");
         if(sizeObj != null) {
@@ -49,7 +49,7 @@ public class PathAttributesDictionary {
         }
         final String quotaObj = dict.stringForKey("Quota");
         if(quotaObj != null) {
-            attributes.setQuota(Long.parseLong(quotaObj));
+            attributes.setQuota(new Quota.Space(attributes.getSize(), Long.parseLong(quotaObj)));
         }
         final String modifiedObj = dict.stringForKey("Modified");
         if(modifiedObj != null) {
@@ -69,31 +69,34 @@ public class PathAttributesDictionary {
         }
         final Object permissionObj = dict.objectForKey("Permission");
         if(permissionObj != null) {
-            attributes.setPermission(new PermissionDictionary().deserialize(permissionObj));
+            attributes.setPermission(new PermissionDictionary<>().deserialize(permissionObj));
         }
+        attributes.setOwner(dict.stringForKey("Owner"));
+        attributes.setGroup(dict.stringForKey("Group"));
         final Object aclObj = dict.objectForKey("Acl");
         if(aclObj != null) {
-            attributes.setAcl(new AclDictionary().deserialize(aclObj));
+            attributes.setAcl(new AclDictionary<>().deserialize(aclObj));
         }
         if(dict.mapForKey("Link") != null) {
             final Map<String, String> link = dict.mapForKey("Link");
-            attributes.setLink(new DescriptiveUrl(URI.create(link.get("Url")), DescriptiveUrl.Type.valueOf(link.get("Type"))));
+            attributes.setLink(new DescriptiveUrl(link.get("Url"), DescriptiveUrl.Type.valueOf(link.get("Type"))));
         }
         else {
             final String linkObj = dict.stringForKey("Link");
             if(linkObj != null) {
-                attributes.setLink(new DescriptiveUrl(URI.create(linkObj), DescriptiveUrl.Type.http));
+                attributes.setLink(new DescriptiveUrl(linkObj, DescriptiveUrl.Type.http));
             }
         }
         if(dict.mapForKey("Checksum") != null) {
             final Map<String, String> checksum = dict.mapForKey("Checksum");
-            attributes.setChecksum(new Checksum(HashAlgorithm.valueOf(checksum.get("Algorithm")), checksum.get("Hash")));
+            attributes.setChecksum(new Checksum(HashAlgorithm.valueOf(checksum.get("Algorithm")), checksum.get("Hash"), checksum.get("Base64")));
         }
         else {
             attributes.setChecksum(Checksum.parse(dict.stringForKey("Checksum")));
         }
         attributes.setVersionId(dict.stringForKey("Version"));
         attributes.setFileId(dict.stringForKey("File Id"));
+        attributes.setDisplayname(dict.stringForKey("Display Name"));
         attributes.setLockId(dict.stringForKey("Lock Id"));
         final String duplicateObj = dict.stringForKey("Duplicate");
         if(duplicateObj != null) {
@@ -106,13 +109,17 @@ public class PathAttributesDictionary {
         attributes.setMetadata(Collections.emptyMap());
         attributes.setRegion(dict.stringForKey("Region"));
         attributes.setStorageClass(dict.stringForKey("Storage Class"));
-        final Object vaultObj = dict.objectForKey("Vault");
+        final T vaultObj = dict.objectForKey("Vault");
         if(vaultObj != null) {
-            attributes.setVault(new PathDictionary(factory).deserialize(vaultObj));
+            attributes.setVault(new PathDictionary<>(factory).deserialize(vaultObj));
         }
         final Map<String, String> customObj = dict.mapForKey("Custom");
         if(customObj != null) {
             attributes.setCustom(customObj);
+        }
+        final String verdictObj = dict.stringForKey("Verdict");
+        if(verdictObj != null) {
+            attributes.setVerdict(PathAttributes.Verdict.valueOf(verdictObj));
         }
         return attributes;
     }

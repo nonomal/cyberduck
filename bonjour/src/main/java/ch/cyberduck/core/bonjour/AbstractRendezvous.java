@@ -80,10 +80,11 @@ public abstract class AbstractRendezvous implements Rendezvous {
      * Defined TXT keys: u=<username> p=<password> path=<path>
      */
     private static final String SERVICE_TYPE_WEBDAV_TLS = "_webdavs._tcp";
+    private static final String SERVICE_TYPE_SMB = "_smb._tcp";
 
     public String[] getServiceTypes() {
         return new String[]{
-                SERVICE_TYPE_SFTP, SERVICE_TYPE_FTP, SERVICE_TYPE_WEBDAV, SERVICE_TYPE_WEBDAV_TLS
+                SERVICE_TYPE_SFTP, SERVICE_TYPE_FTP, SERVICE_TYPE_WEBDAV, SERVICE_TYPE_WEBDAV_TLS, SERVICE_TYPE_SMB
         };
     }
 
@@ -169,7 +170,7 @@ public abstract class AbstractRendezvous implements Rendezvous {
                        final String user, final String password, final String path) {
         final Protocol protocol = this.getProtocol(fullname);
         if(null == protocol) {
-            log.warn(String.format("Unknown service type for %s", fullname));
+            log.warn("Unknown service type for {}", fullname);
             return;
         }
         final Host host = new Host(protocol, hostname, port);
@@ -201,7 +202,10 @@ public abstract class AbstractRendezvous implements Rendezvous {
         if(fullname.contains(SERVICE_TYPE_WEBDAV_TLS)) {
             return protocols.forScheme(Scheme.davs);
         }
-        log.warn(String.format("Cannot find service type in %s", fullname));
+        if(fullname.contains(SERVICE_TYPE_SMB)) {
+            return protocols.forScheme(Scheme.smb);
+        }
+        log.warn("Cannot find service type in {}", fullname);
         return null;
     }
 
@@ -210,18 +214,14 @@ public abstract class AbstractRendezvous implements Rendezvous {
      * @param host     Bookmark
      */
     protected void add(final String fullname, final Host host) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Add resolved host %s for full name %s", host, fullname));
-        }
+        log.debug("Add resolved host {} for full name {}", host, fullname);
         if(null == services.put(fullname, host)) {
             notifier.serviceResolved(fullname, host);
         }
     }
 
     protected void remove(final String identifier) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Remove host with identifier %s", identifier));
-        }
+        log.debug("Remove host with identifier {}", identifier);
         final Host host = services.remove(identifier);
         if(null == host) {
             return;

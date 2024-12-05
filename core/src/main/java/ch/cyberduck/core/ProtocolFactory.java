@@ -37,6 +37,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -48,6 +49,12 @@ public final class ProtocolFactory {
     private static final ProtocolFactory global = new ProtocolFactory();
 
     private final Preferences preferences = PreferencesFactory.get();
+
+    public static final Predicate<Protocol> DEFAULT_PROTOCOL_PREDICATE
+            = protocol -> !protocol.isEnabled() && !protocol.isBundled();
+
+    public static final Predicate<Protocol> BUNDLED_PROFILE_PREDICATE
+            = protocol -> protocol.isEnabled() && protocol.isBundled();
 
     public static ProtocolFactory get() {
         return global;
@@ -67,10 +74,10 @@ public final class ProtocolFactory {
      */
     public ProtocolFactory(final Set<Protocol> registered) {
         this(registered,
-            LocalFactory.get(ApplicationResourcesFinderFactory.get().find(),
-                PreferencesFactory.get().getProperty("profiles.folder.name")),
-            LocalFactory.get(SupportDirectoryFinderFactory.get().find(),
-                PreferencesFactory.get().getProperty("profiles.folder.name")));
+                LocalFactory.get(ApplicationResourcesFinderFactory.get().find(),
+                        PreferencesFactory.get().getProperty("profiles.folder.name")),
+                LocalFactory.get(SupportDirectoryFinderFactory.get().find(),
+                        PreferencesFactory.get().getProperty("profiles.folder.name")));
     }
 
     /**
@@ -85,9 +92,7 @@ public final class ProtocolFactory {
     }
 
     public void register(Protocol... protocols) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Register protocols %s", Arrays.toString(protocols)));
-        }
+        log.info("Register protocols {}", Arrays.toString(protocols));
         // Order determines list in connection dropdown
         Collections.addAll(registered, protocols);
     }
@@ -96,9 +101,13 @@ public final class ProtocolFactory {
      * Load profiles embedded in bundles and installed in the application support directory.
      */
     public void load() {
-        this.load(new LocalProfilesFinder(this, bundle));
+        // Return default registered protocol specification as parent but not other profile
+        this.load(new LocalProfilesFinder(this, bundle, DEFAULT_PROTOCOL_PREDICATE));
         // Load thirdparty protocols
-        this.load(new LocalProfilesFinder(this, profiles));
+        this.load(new LocalProfilesFinder(this, profiles, BUNDLED_PROFILE_PREDICATE));
+        if(registered.isEmpty()) {
+            log.error("No connection profiles in {} or {}", bundle, profiles);
+        }
     }
 
     /**
@@ -114,7 +123,7 @@ public final class ProtocolFactory {
             }
         }
         catch(BackgroundException e) {
-            log.warn(String.format("Failure %s reading profiles from %s", finder, e));
+            log.warn("Failure {} reading profiles from {}", finder, e);
         }
     }
 
@@ -126,22 +135,19 @@ public final class ProtocolFactory {
      */
     public Local register(final Local file) {
         try {
-            final Profile profile = new ProfilePlistReader(this).read(file);
+            final Profile profile = new ProfilePlistReader(this, BUNDLED_PROFILE_PREDICATE).read(file);
             if(null == profile) {
                 log.error("Attempt to register unknown protocol");
                 return null;
             }
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Register profile %s", profile));
-            }
+            log.info("Register profile {}", profile);
             registered.add(profile);
-            preferences.setProperty(StringUtils.lowerCase(String.format("profiles.%s.%s.enabled", profile.getProtocol(), profile.getProvider())), true);
+            preferences.setProperty(StringUtils.lowerCase(String.format("profiles.%s.%s.enabled",
+                    profile.getProtocol().getIdentifier(), profile.getProvider())), true);
             if(!profiles.exists()) {
                 new DefaultLocalDirectoryFeature().mkdir(profiles);
             }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Save profile %s to %s", profile, profiles));
-            }
+            log.debug("Save profile {} to {}", profile, profiles);
             if(!file.isChild(profiles)) {
                 final Local target = LocalFactory.get(profiles, file.getName());
                 file.copy(target);
@@ -150,7 +156,7 @@ public final class ProtocolFactory {
             return file;
         }
         catch(AccessDeniedException e) {
-            log.error(String.format("Failure %s reading profile %s", e, file));
+            log.error("Failure {} reading profile {}", e, file);
             return null;
         }
     }
@@ -162,10 +168,11 @@ public final class ProtocolFactory {
      */
     public void unregister(final Profile profile) {
         if(registered.remove(profile)) {
-            preferences.setProperty(StringUtils.lowerCase(String.format("profiles.%s.%s.enabled", profile.getProtocol(), profile.getProvider())), false);
+            preferences.setProperty(StringUtils.lowerCase(String.format("profiles.%s.%s.enabled",
+                    profile.getProtocol().getIdentifier(), profile.getProvider())), false);
         }
         else {
-            log.warn(String.format("Failure removing protocol %s", profile));
+            log.warn("Failure removing protocol {}", profile);
         }
     }
 
@@ -208,31 +215,89 @@ public final class ProtocolFactory {
      * @return Matching protocol or null if no match
      */
     public Protocol forName(final List<Protocol> enabled, final String identifier, final String provider) {
-        final Protocol match =
-            // Exact match with hash code
-            enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> String.valueOf(protocol.hashCode()).equals(identifier)).findFirst().orElse(
+        int state = 0; // Acts as findFirst-guard
+        Protocol match = null;
+        final Iterable<Protocol> protocols = enabled.stream().sorted(new DeprecatedProtocolComparator())::iterator;
+        for(final Protocol protocol : protocols) {
+            if(String.valueOf(protocol.hashCode()).equals(identifier)) {
+                // Exact match with hash code
+                return protocol;
+            }
+            /*
+            All following cases are required for fallback/broader searches.
+            There may be other, better matches in the stream
+            Each state represents findFirst stream semantic, and overwrites the result of lower matches
+             */
+            else if(state < 4 && StringUtils.equals(protocol.getIdentifier(), identifier)
+                    && StringUtils.equals(protocol.getProvider(), provider)) {
                 // Matching vendor string for third party profiles
-                enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> StringUtils.equals(protocol.getIdentifier(), identifier) && StringUtils.equals(protocol.getProvider(), provider)).findFirst().orElse(
-                    // Matching vendor string usage in CLI
-                    enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> StringUtils.equals(protocol.getProvider(), identifier)).findFirst().orElse(
-                        // Fallback for bug in 6.1
-                        enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> StringUtils.equals(String.format("%s-%s", protocol.getIdentifier(), protocol.getProvider()), identifier)).findFirst().orElse(
-                                // Matching bundled first with identifier match
-                                enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> protocol.isBundled() && StringUtils.equals(protocol.getIdentifier(), identifier)).findFirst().orElse(
-                                        // Matching scheme with fallback to generic protocol type
-                                        this.forScheme(enabled, identifier, enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> StringUtils.equals(protocol.getType().name(), identifier)).findFirst().orElse(null))
-                                )
-                        )
-                    )
-                )
-            );
+                match = protocol;
+                state = 4;
+            }
+            else if(state < 3 && StringUtils.equals(protocol.getProvider(), identifier)) {
+                // Matching vendor string usage in CLI
+                match = protocol;
+                state = 3;
+            }
+            else if(state < 2 && StringUtils.equals(
+                    String.format("%s-%s", protocol.getIdentifier(), protocol.getProvider()), identifier)) {
+                // Fallback for bug in 6.1
+                match = protocol;
+                state = 2;
+            }
+            else if(state < 1 && protocol.isBundled() && StringUtils.equals(protocol.getIdentifier(), identifier)) {
+                // Matching bundled first with identifier match
+                match = protocol;
+                state = 1;
+            }
+            else if(null == match && StringUtils.equals(protocol.getType().name(), identifier)) {
+                // Fallback used in forScheme
+                match = protocol;
+            }
+        }
+        if(state == 0) {
+            // Matching scheme with fallback to generic protocol type
+            match = this.forScheme(enabled, identifier, match);
+        }
         if(null == match) {
             if(enabled.isEmpty()) {
-                log.error(String.format("List of registered protocols in %s is empty", this));
+                log.error("List of registered protocols in {} is empty", this);
             }
-            log.warn(String.format("Missing registered protocol for identifier %s", identifier));
+            log.warn("Missing registered protocol for identifier {}", identifier);
         }
         return match;
+    }
+
+    /**
+     * @param identifier Serialized protocol reference or scheme
+     * @return Matching protocol or default if no match
+     */
+    public Protocol forNameOrDefault(final String identifier) {
+        return forNameOrDefault(identifier, null);
+    }
+
+    /**
+     * @param identifier Serialized protocol reference or scheme
+     * @param provider   Custom inherited protocol definition
+     * @return Matching protocol or default if no match
+     */
+    public Protocol forNameOrDefault(final String identifier, final String provider) {
+        return forNameOrDefault(this.find(), identifier, provider);
+    }
+
+    /**
+     * @param enabled    List of protocols
+     * @param identifier Serialized protocol reference or scheme
+     * @param provider   Custom inherited protocol definition
+     * @return Matching protocol or default if no match
+     */
+    public Protocol forNameOrDefault(final List<Protocol> enabled, final String identifier, final String provider) {
+        final String defaultIdentifier = preferences.getDefault("connection.protocol.default");
+        final Protocol match = forName(enabled, identifier, provider);
+        if(null != match || Objects.equals(defaultIdentifier, identifier)) {
+            return match;
+        }
+        return forName(enabled, defaultIdentifier, null);
     }
 
     public Protocol forType(final Protocol.Type type) {
@@ -240,7 +305,7 @@ public final class ProtocolFactory {
         return this.forType(enabled, type);
     }
 
-    private Protocol forType(final List<Protocol> enabled, final Protocol.Type type) {
+    public Protocol forType(final List<Protocol> enabled, final Protocol.Type type) {
         return enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> protocol.getType().equals(type)).findFirst().orElse(null);
     }
 
@@ -266,7 +331,7 @@ public final class ProtocolFactory {
                 break;
         }
         return enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> Arrays.asList(protocol.getSchemes()).contains(filter)).findFirst().orElse(
-            enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> Arrays.asList(protocol.getSchemes()).contains(scheme)).findFirst().orElse(fallback)
+                enabled.stream().sorted(new DeprecatedProtocolComparator()).filter(protocol -> Arrays.asList(protocol.getSchemes()).contains(scheme)).findFirst().orElse(fallback)
         );
     }
 

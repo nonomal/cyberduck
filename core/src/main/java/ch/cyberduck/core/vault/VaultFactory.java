@@ -29,7 +29,7 @@ import java.lang.reflect.InvocationTargetException;
 public class VaultFactory extends Factory<Vault> {
     private static final Logger log = LogManager.getLogger(VaultFactory.class);
 
-    protected VaultFactory() {
+    private VaultFactory() {
         super("factory.vault.class");
     }
 
@@ -37,19 +37,40 @@ public class VaultFactory extends Factory<Vault> {
         return new VaultFactory().create(directory, masterkey, config, pepper);
     }
 
+    public static Vault get(final Path directory) {
+        return new VaultFactory().create(directory);
+    }
+
     private Vault create(final Path directory, final String masterkey, final String config, final byte[] pepper) {
         try {
             final Constructor<? extends Vault> constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz,
                     directory.getClass(), masterkey.getClass(), config.getClass(), pepper.getClass());
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", directory.getClass()));
+                log.warn("No matching constructor for parameters {} {} {} {}", directory.getClass(), masterkey.getClass(), config.getClass(), pepper.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(directory, masterkey, config, pepper);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
+            return Vault.DISABLED;
+        }
+    }
+
+    private Vault create(final Path directory) {
+        try {
+            final Constructor<? extends Vault> constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz,
+                    directory.getClass());
+            if(null == constructor) {
+                log.warn("No matching constructor for parameter {}", directory.getClass());
+                // Call default constructor for disabled implementations
+                return clazz.getDeclaredConstructor().newInstance();
+            }
+            return constructor.newInstance(directory);
+        }
+        catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return Vault.DISABLED;
         }
     }

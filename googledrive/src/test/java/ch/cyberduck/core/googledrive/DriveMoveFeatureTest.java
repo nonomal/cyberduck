@@ -22,9 +22,13 @@ import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.shared.DefaultFindFeature;
+import ch.cyberduck.core.shared.DefaultHomeFinderService;
+import ch.cyberduck.core.synchronization.Comparison;
+import ch.cyberduck.core.synchronization.ComparisonService;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
 
@@ -40,6 +44,15 @@ import static org.junit.Assert.*;
 @Category(IntegrationTest.class)
 public class DriveMoveFeatureTest extends AbstractDriveTest {
 
+    @Test(expected = NotfoundException.class)
+    public void testMoveNotFound() throws Exception {
+        final DriveFileIdProvider fileid = new DriveFileIdProvider(session);
+        final Path workdir = new DefaultHomeFinderService(session).find();
+        final Path test = new Path(workdir, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        final Path target = new Path(workdir, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        new DriveMoveFeature(session, fileid).move(test, target, new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
+    }
+
     @Test
     public void testMoveFile() throws Exception {
         final DriveFileIdProvider fileid = new DriveFileIdProvider(session);
@@ -52,6 +65,8 @@ public class DriveMoveFeatureTest extends AbstractDriveTest {
         final Find find = new DefaultFindFeature(session);
         assertFalse(find.find(test));
         assertTrue(find.find(target));
+        final PathAttributes targetAttr = new DriveAttributesFinderFeature(session, fileid).find(target);
+        assertEquals(Comparison.equal, session.getHost().getProtocol().getFeature(ComparisonService.class).compare(Path.Type.file, target.attributes(), targetAttr));
         new DriveDeleteFeature(session, fileid).delete(Arrays.asList(target, folder), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 

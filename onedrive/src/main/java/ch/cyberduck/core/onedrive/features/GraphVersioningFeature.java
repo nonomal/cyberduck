@@ -1,4 +1,6 @@
-package ch.cyberduck.core.onedrive.features;/*
+package ch.cyberduck.core.onedrive.features;
+
+/*
  * Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -31,6 +33,7 @@ import org.nuxeo.onedrive.client.types.DriveItem;
 import org.nuxeo.onedrive.client.types.DriveItemVersion;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -71,21 +74,20 @@ public class GraphVersioningFeature implements Versioning {
     }
 
     @Override
-    public boolean isRevertable(Path file) {
-        return true;
-    }
-
-    @Override
     public AttributedList<Path> list(Path file, ListProgressListener listener) throws BackgroundException {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
         final AttributedList<Path> versions = new AttributedList<>();
         final DriveItem item = session.getItem(file);
         try {
-            final DriveItem.Metadata parentMetadata = item.getMetadata();
+            final DriveItem.Metadata parentMetadata = session.getMetadata(item, null);
             final List<DriveItemVersion> items = Files.versions(item);
             // Versions are returned in descending order (newest to oldest)
             for(final DriveItemVersion version : items.stream().skip(1).collect(Collectors.toList())) {
                 versions.add(new Path(file).withAttributes(attributes.toAttributes(parentMetadata, version)));
             }
+            listener.chunk(file.getParent(), versions);
         }
         catch(OneDriveAPIException e) {
             throw new GraphExceptionMappingService(fileid).map("Failure to read attributes of {0}", e, file);
@@ -94,5 +96,10 @@ public class GraphVersioningFeature implements Versioning {
             throw new DefaultIOExceptionMappingService().map("Failure to read attributes of {0}", e, file);
         }
         return versions;
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.list, Flags.revert);
     }
 }

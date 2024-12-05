@@ -19,6 +19,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Read;
+import ch.cyberduck.core.s3.S3PathContainerService;
 import ch.cyberduck.core.transfer.Transfer;
 import ch.cyberduck.core.transfer.TransferStatus;
 
@@ -30,6 +31,7 @@ import java.io.SequenceInputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 
@@ -46,7 +48,7 @@ public class SpectraReadFeature implements Read {
     public SpectraReadFeature(final SpectraSession session, final SpectraBulkService bulk) {
         this.session = session;
         this.bulk = bulk;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new S3PathContainerService(session.getHost());
     }
 
     @Override
@@ -88,7 +90,7 @@ public class SpectraReadFeature implements Read {
     }
 
     @Override
-    public boolean offset(final Path file) {
-        return false;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.noneOf(Flags.class);
     }
 }

@@ -19,7 +19,6 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.date.MDTMSecondsDateFormatter;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Timestamp;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
@@ -28,7 +27,7 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.util.TimeZone;
 
-public class FTPMFMTTimestampFeature extends DefaultTimestampFeature implements Timestamp {
+public class FTPMFMTTimestampFeature implements Timestamp {
     private static final Logger log = LogManager.getLogger(FTPMFMTTimestampFeature.class);
 
     private final FTPSession session;
@@ -42,17 +41,17 @@ public class FTPMFMTTimestampFeature extends DefaultTimestampFeature implements 
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
         if(failure != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Skip setting timestamp for %s due to previous failure %s", file, failure.getMessage()));
-            }
+            log.debug("Skip setting timestamp for {} due to previous failure {}", file, failure.getMessage());
             throw new FTPExceptionMappingService().map("Cannot change timestamp of {0}", failure, file);
         }
         try {
-            final MDTMSecondsDateFormatter formatter = new MDTMSecondsDateFormatter();
-            if(!session.getClient().setModificationTime(file.getAbsolute(),
-                formatter.format(status.getTimestamp(), TimeZone.getTimeZone("UTC")))) {
-                throw failure = new FTPException(session.getClient().getReplyCode(),
-                    session.getClient().getReplyString());
+            if(null != status.getModified()) {
+                final MDTMSecondsDateFormatter formatter = new MDTMSecondsDateFormatter();
+                if(!session.getClient().setModificationTime(file.getAbsolute(),
+                        formatter.format(status.getModified(), TimeZone.getTimeZone("UTC")))) {
+                    throw failure = new FTPException(session.getClient().getReplyCode(),
+                            session.getClient().getReplyString());
+                }
             }
         }
         catch(IOException e) {

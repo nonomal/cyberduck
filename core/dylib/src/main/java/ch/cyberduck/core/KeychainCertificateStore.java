@@ -30,7 +30,6 @@ import ch.cyberduck.core.keychain.SecTrustRef;
 import ch.cyberduck.core.keychain.SecTrustResultType;
 import ch.cyberduck.core.keychain.SecurityFunctions;
 import ch.cyberduck.core.ssl.CertificateStoreX509KeyManager;
-import ch.cyberduck.core.ssl.DEREncoder;
 import ch.cyberduck.core.ssl.KeychainX509KeyManager;
 
 import org.apache.commons.codec.binary.Base64;
@@ -50,6 +49,8 @@ import java.util.List;
 
 import com.sun.jna.ptr.PointerByReference;
 
+import static ch.cyberduck.core.keychain.SecurityFunctions.errSecSuccess;
+
 public final class KeychainCertificateStore implements CertificateStore {
     private static final Logger log = LogManager.getLogger(KeychainCertificateStore.class);
 
@@ -67,16 +68,16 @@ public final class KeychainCertificateStore implements CertificateStore {
         final SecPolicyRef policyRef = SecurityFunctions.library.SecPolicyCreateSSL(true, hostname);
         final PointerByReference reference = new PointerByReference();
         err = SecurityFunctions.library.SecTrustCreateWithCertificates(toDEREncodedCertificates(certificates), policyRef, reference);
-        if(0 != err) {
-            log.error(String.format("SecTrustCreateWithCertificates returning error %d", err));
-            return false;
+        if(errSecSuccess != err) {
+            log.error("SecTrustCreateWithCertificates returning error {}", err);
+            throw new CertificateException(SecurityFunctions.library.SecCopyErrorMessageString(err, null));
         }
         final SecTrustRef trustRef = new SecTrustRef(reference.getValue());
         final SecTrustResultType trustResultType = new SecTrustResultType();
         err = SecurityFunctions.library.SecTrustEvaluate(trustRef, trustResultType);
-        if(0 != err) {
-            log.error(String.format("SecTrustEvaluate returning error %d", err));
-            return false;
+        if(errSecSuccess != err) {
+            log.error("SecTrustEvaluate returning error {}", err);
+            throw new CertificateException(SecurityFunctions.library.SecCopyErrorMessageString(err, null));
         }
         FoundationKitFunctions.library.CFRelease(trustRef);
         FoundationKitFunctions.library.CFRelease(policyRef);
@@ -85,9 +86,7 @@ public final class KeychainCertificateStore implements CertificateStore {
             case SecTrustResultType.kSecTrustResultProceed: // Accepted by user keychain setting explicitly
                 return true;
             default:
-                if(log.isDebugEnabled()) {
-                    log.debug("Evaluated recoverable trust result failure " + trustResultType.getValue());
-                }
+                log.debug("Evaluated recoverable trust result failure {}", trustResultType.getValue());
                 try {
                     prompt.prompt(hostname, certificates);
                     return true;
@@ -112,54 +111,40 @@ public final class KeychainCertificateStore implements CertificateStore {
         return prompt.prompt(bookmark.getHostname(), certificates);
     }
 
-    public static X509Certificate toX509Certificate(final SecIdentityRef identityRef) {
+    public static X509Certificate toX509Certificate(final SecIdentityRef identityRef) throws CertificateException {
         final PointerByReference reference = new PointerByReference();
         int err;
         err = SecurityFunctions.library.SecIdentityCopyCertificate(identityRef, reference);
-        if(0 != err) {
-            log.error(String.format("SecIdentityCopyCertificate returning error %d", err));
-            return null;
+        if(errSecSuccess != err) {
+            log.error("SecIdentityCopyCertificate returning error {}", err);
+            throw new CertificateException(SecurityFunctions.library.SecCopyErrorMessageString(err, null));
         }
         final SecCertificateRef certificateRef = new SecCertificateRef(reference.getValue());
-        try {
-            final CertificateFactory factory = CertificateFactory.getInstance("X.509");
-            final NSData dataRef = SecurityFunctions.library.SecCertificateCopyData(certificateRef);
-            final X509Certificate selected = (X509Certificate) factory.generateCertificate(new ByteArrayInputStream(
+        final CertificateFactory factory = CertificateFactory.getInstance("X.509");
+        final NSData dataRef = SecurityFunctions.library.SecCertificateCopyData(certificateRef);
+        final X509Certificate selected = (X509Certificate) factory.generateCertificate(new ByteArrayInputStream(
                 Base64.decodeBase64(dataRef.base64Encoding())));
-            if(log.isDebugEnabled()) {
-                log.info(String.format("Selected certificate %s", selected));
-            }
-            FoundationKitFunctions.library.CFRelease(certificateRef);
-            return selected;
+        if(log.isDebugEnabled()) {
+            log.info("Selected certificate {}", selected);
         }
-        catch(CertificateException e) {
-            log.error(String.format("Error %s creating certificate from reference", e));
-            return null;
-        }
+        FoundationKitFunctions.library.CFRelease(certificateRef);
+        return selected;
     }
 
     public static NSArray toDEREncodedCertificates(final List<X509Certificate> certificates) {
-        // Prepare the certificate chain
-        try {
-            final Object[] encoded = new DEREncoder().encode(certificates);
-        }
-        catch(CertificateException e) {
-            log.error(String.format("Failure %s DER encoding certificates %s", e, certificates));
-            return NSArray.array();
-        }
         final NSMutableArray certs = NSMutableArray.arrayWithCapacity(new NSUInteger(certificates.size()));
         for(X509Certificate certificate : certificates) {
             try {
                 final SecCertificateRef certificateRef = SecurityFunctions.library.SecCertificateCreateWithData(null,
-                    NSData.dataWithBase64EncodedString(Base64.encodeBase64String(certificate.getEncoded())));
+                        NSData.dataWithBase64EncodedString(Base64.encodeBase64String(certificate.getEncoded())));
                 if(null == certificateRef) {
-                    log.error(String.format("Error creating converting from ASN.1 DER encoded certificate %s", certificate));
+                    log.error("Error converting from ASN.1 DER encoded certificate {}", certificate);
                     continue;
                 }
                 certs.addObject(certificateRef);
             }
             catch(CertificateEncodingException e) {
-                log.error(String.format("Failure %s retrieving encoded  certificate", e));
+                log.error("Failure {} retrieving encoded certificate", e.getMessage());
             }
         }
         return certs;

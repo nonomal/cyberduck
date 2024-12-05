@@ -19,8 +19,8 @@ package ch.cyberduck.core.dav;
 
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.http.HttpExceptionMappingService;
 import ch.cyberduck.core.transfer.TransferStatus;
 
@@ -33,6 +33,10 @@ public class DAVDirectoryFeature implements Directory<String> {
     private final DAVSession session;
 
     public DAVDirectoryFeature(final DAVSession session) {
+        this(session, new DAVAttributesFinderFeature(session));
+    }
+
+    public DAVDirectoryFeature(final DAVSession session, final AttributesFinder attributes) {
         this.session = session;
     }
 
@@ -47,11 +51,6 @@ public class DAVDirectoryFeature implements Directory<String> {
         catch(IOException e) {
             throw new HttpExceptionMappingService().map(e, folder);
         }
-        return folder.withAttributes(new DAVAttributesFinderFeature(session).find(folder));
-    }
-
-    @Override
-    public DAVDirectoryFeature withWriter(final Write<String> writer) {
-        return this;
+        return folder;
     }
 }

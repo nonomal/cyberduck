@@ -31,7 +31,7 @@ public class CertificateIdentityCallbackFactory extends Factory<CertificateIdent
 
     private Constructor<? extends CertificateIdentityCallback> constructor;
 
-    protected CertificateIdentityCallbackFactory() {
+    private CertificateIdentityCallbackFactory() {
         super("factory.certificateidentitycallback.class");
     }
 
@@ -41,23 +41,28 @@ public class CertificateIdentityCallbackFactory extends Factory<CertificateIdent
                 constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             }
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledCertificateIdentityCallback();
         }
     }
+
+    private static CertificateIdentityCallbackFactory singleton;
 
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static CertificateIdentityCallback get(final Controller c) {
-        return new CertificateIdentityCallbackFactory().create(c);
+    public static synchronized CertificateIdentityCallback get(final Controller c) {
+        if(null == singleton) {
+            singleton = new CertificateIdentityCallbackFactory();
+        }
+        return singleton.create(c);
     }
 }

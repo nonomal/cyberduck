@@ -19,7 +19,6 @@ package ch.cyberduck.core.s3;
  */
 
 import ch.cyberduck.core.Acl;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
@@ -30,7 +29,7 @@ import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AclPermission;
 import ch.cyberduck.core.preferences.HostPreferences;
-import ch.cyberduck.core.shared.DefaultAclFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -47,12 +46,11 @@ import org.jets3t.service.model.StorageOwner;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-public class S3AccessControlListFeature extends DefaultAclFeature implements AclPermission {
+public class S3AccessControlListFeature implements AclPermission {
     private static final Logger log = LogManager.getLogger(S3AccessControlListFeature.class);
 
     public static final Set<? extends Acl> CANNED_LIST = new LinkedHashSet<>(Arrays.asList(
@@ -81,6 +79,7 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
             controls = session.getClient().getBucketOwnershipControls(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
             for(OwnershipControlsConfig.Rule rule : controls.getRules()) {
                 if(rule.getOwnership() == OwnershipControlsConfig.ObjectOwnership.BUCKET_OWNER_ENFORCED) {
+                    log.debug("Bucket owner enforced policy set with disabled ACLs for bucket {}", bucket);
                     return true;
                 }
             }
@@ -90,17 +89,17 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
                 throw new S3ExceptionMappingService().map("Failure to read attributes of {0}", e, bucket);
             }
             catch(NotfoundException n) {
-                // Ignore - for buckets created through the S3 console with object writer ownership we get a 404
+                // Ignore or buckets with no x-amz-object-ownership set
             }
             catch(AccessDeniedException | InteroperabilityException l) {
-                log.warn(String.format("Missing permission to read bucket ownership configuration for %s %s", bucket.getName(), e.getMessage()));
+                log.warn("Missing permission to read bucket ownership configuration for {} {}", bucket.getName(), e.getMessage());
             }
         }
         return false;
     }
 
     @Override
-    public Acl getDefault(final Path file, final Local local) throws BackgroundException {
+    public Acl getDefault(final Path file) throws BackgroundException {
         final Path bucket = containerService.getContainer(file);
         if(cache.contains(bucket)) {
             return cache.get(bucket);
@@ -112,11 +111,6 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
         final Acl preference = Acl.toAcl(new HostPreferences(session.getHost()).getProperty("s3.acl.default"));
         cache.put(bucket, preference);
         return preference;
-    }
-
-    @Override
-    public Acl getDefault(final EnumSet<Path.Type> type) {
-        return Acl.toAcl(new HostPreferences(session.getHost()).getProperty("s3.acl.default"));
     }
 
     @Override
@@ -135,12 +129,9 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
                 // for that bucket (in S3) allows you to do so.
                 acl = this.toAcl(session.getClient().getBucketAcl(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName()));
             }
-            else if(file.isFile() || file.isPlaceholder()) {
+            else {
                 acl = this.toAcl(session.getClient().getVersionedObjectAcl(file.attributes().getVersionId(),
                         bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file)));
-            }
-            else {
-                acl = Acl.EMPTY;
             }
             if(this.isBucketOwnerEnforced(bucket)) {
                 acl.setEditable(false);
@@ -149,7 +140,7 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
         }
         catch(ServiceException e) {
             final BackgroundException failure = new S3ExceptionMappingService().map("Failure to read attributes of {0}", e, file);
-            if(file.isPlaceholder()) {
+            if(file.isDirectory()) {
                 if(failure instanceof NotfoundException) {
                     // No placeholder file may exist, but we just have a common prefix
                     return Acl.EMPTY;
@@ -164,23 +155,21 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
     }
 
     @Override
-    public void setPermission(final Path file, final Acl acl) throws BackgroundException {
+    public void setPermission(final Path file, final TransferStatus status) throws BackgroundException {
         try {
             // Read owner from bucket
-            final AccessControlList list = this.toAcl(acl);
+            final AccessControlList list = this.toAcl(status.getAcl());
             final Path bucket = containerService.getContainer(file);
             if(containerService.isContainer(file)) {
                 session.getClient().putBucketAcl(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), list);
             }
             else {
-                if(file.isFile() || file.isPlaceholder()) {
-                    session.getClient().putObjectAcl(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file), list);
-                }
+                session.getClient().putObjectAcl(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file), list);
             }
         }
         catch(ServiceException e) {
             final BackgroundException failure = new S3ExceptionMappingService().map("Cannot change permissions of {0}", e, file);
-            if(file.isPlaceholder()) {
+            if(file.isDirectory()) {
                 if(failure instanceof NotfoundException) {
                     // No placeholder file may exist but we just have a common prefix
                     return;
@@ -252,11 +241,11 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
                         Permission.parsePermission(userAndRole.getRole().getName()));
             }
             else {
-                log.warn(String.format("Unsupported user %s", userAndRole.getUser()));
+                log.warn("Unsupported user {}", userAndRole.getUser());
             }
         }
         if(null == list.getOwner()) {
-            log.warn(String.format("Missing owner in %s", acl));
+            log.warn("Missing owner in {}", acl);
             return null;
         }
         return list;
@@ -288,16 +277,20 @@ public class S3AccessControlListFeature extends DefaultAclFeature implements Acl
         if(AccessControlList.REST_CANNED_BUCKET_OWNER_READ == list) {
             return Acl.CANNED_BUCKET_OWNER_READ;
         }
+        if(null == list.getOwner()) {
+            log.warn(new StringBuilder().append("Missing owner in ACL ").append(list).toString());
+            return Acl.EMPTY;
+        }
         final Acl.Owner owner = new Acl.Owner(list.getOwner().getId(), list.getOwner().getDisplayName());
         if(!owner.isValid()) {
-            log.warn(String.format("Invalid owner %s in ACL", list.getOwner()));
+            log.warn("Invalid owner {} in ACL", list.getOwner());
             return Acl.EMPTY;
         }
         final Acl acl = new Acl(owner, new Acl.Role(Permission.PERMISSION_FULL_CONTROL.toString(), false));
         for(GrantAndPermission grant : list.getGrantAndPermissions()) {
             final Acl.Role role = new Acl.Role(grant.getPermission().toString());
             if(null == grant.getGrantee()) {
-                log.warn(String.format("Missing grantee in ACL %s", grant));
+                log.warn("Missing grantee in ACL {}", grant);
                 continue;
             }
             if(grant.getGrantee() instanceof CanonicalGrantee) {

@@ -15,11 +15,14 @@ package ch.cyberduck.core.googledrive;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.SimplePathPredicate;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.exception.UnsupportedException;
+import ch.cyberduck.core.features.Trash;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
@@ -27,12 +30,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.Map;
 
 import com.google.api.services.drive.model.File;
 
-public class DriveTrashFeature implements Delete {
+public class DriveTrashFeature implements Trash {
     private static final Logger log = LogManager.getLogger(DriveTrashFeature.class);
 
     private final DriveSession session;
@@ -47,23 +52,23 @@ public class DriveTrashFeature implements Delete {
     public void delete(final Map<Path, TransferStatus> files, final PasswordCallback prompt, final Callback callback) throws BackgroundException {
         for(Path f : files.keySet()) {
             if(f.isPlaceholder()) {
-                log.warn(String.format("Ignore placeholder %s", f));
+                log.warn("Ignore placeholder {}", f);
                 continue;
             }
             try {
-                if(DriveHomeFinderService.SHARED_DRIVES_NAME.equals(f.getParent())) {
-                    session.getClient().teamdrives().delete(fileid.getFileId(f, new DisabledListProgressListener())).execute();
+                if(new SimplePathPredicate(DriveHomeFinderService.SHARED_DRIVES_NAME).test(f.getParent())) {
+                    session.getClient().teamdrives().delete(fileid.getFileId(f)).execute();
                 }
                 else {
                     if(f.attributes().isHidden()) {
-                        log.warn(String.format("Delete file %s already in trash", f));
+                        log.warn("Delete file {} already in trash", f);
                         new DriveDeleteFeature(session, fileid).delete(Collections.singletonList(f), prompt, callback);
                         continue;
                     }
                     callback.delete(f);
                     final File properties = new File();
                     properties.setTrashed(true);
-                    session.getClient().files().update(fileid.getFileId(f, new DisabledListProgressListener()), properties)
+                    session.getClient().files().update(fileid.getFileId(f), properties)
                             .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
                 }
                 fileid.cache(f, null);
@@ -75,16 +80,18 @@ public class DriveTrashFeature implements Delete {
     }
 
     @Override
-    public boolean isSupported(final Path file) {
+    public void preflight(final Path file) throws BackgroundException {
         if(file.isPlaceholder()) {
             // Disable for application/vnd.google-apps
-            return false;
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
         }
-        return !file.getType().contains(Path.Type.shared);
+        if(file.getType().contains(Path.Type.shared)) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+        }
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 }

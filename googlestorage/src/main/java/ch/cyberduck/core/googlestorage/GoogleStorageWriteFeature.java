@@ -19,7 +19,7 @@ import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
-import ch.cyberduck.core.date.RFC3339DateFormatter;
+import ch.cyberduck.core.date.ISO8601DateFormatter;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.http.AbstractHttpWriteFeature;
@@ -32,6 +32,7 @@ import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -40,7 +41,6 @@ import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.protocol.HTTP;
@@ -49,6 +49,7 @@ import org.apache.http.util.EntityUtils;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.TimeZone;
@@ -65,18 +66,21 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
     public GoogleStorageWriteFeature(final GoogleStorageSession session) {
         super(new GoogleStorageAttributesFinderFeature(session));
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
     public HttpResponseOutputStream<StorageObject> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        final DelayedHttpEntityCallable<StorageObject> command = new DelayedHttpEntityCallable<StorageObject>() {
+        final DelayedHttpEntityCallable<StorageObject> command = new DelayedHttpEntityCallable<StorageObject>(file) {
             @Override
-            public StorageObject call(final AbstractHttpEntity entity) throws BackgroundException {
+            public StorageObject call(final HttpEntity entity) throws BackgroundException {
                 try {
                     // POST /upload/storage/v1/b/myBucket/o
                     final StringBuilder uri = new StringBuilder(String.format("%supload/storage/v1/b/%s/o?uploadType=resumable",
                             session.getClient().getRootUrl(), containerService.getContainer(file).getName()));
+                    if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                        uri.append(String.format("&userProject=%s", session.getHost().getCredentials().getUsername()));
+                    }
                     if(!Acl.EMPTY.equals(status.getAcl())) {
                         if(status.getAcl().isCanned()) {
                             uri.append("&predefinedAcl=");
@@ -120,9 +124,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                     if(StringUtils.isNotBlank(status.getStorageClass())) {
                         metadata.append(String.format(", \"storageClass\": \"%s\"", status.getStorageClass()));
                     }
-                    if(null != status.getTimestamp()) {
+                    if(null != status.getModified()) {
                         metadata.append(String.format(", \"customTime\": \"%s\"",
-                                new RFC3339DateFormatter().format(status.getTimestamp(), TimeZone.getTimeZone("UTC"))));
+                                new ISO8601DateFormatter().format(status.getModified(), TimeZone.getTimeZone("UTC"))));
                     }
                     metadata.append("}");
                     request.setEntity(new StringEntity(metadata.toString(),
@@ -139,9 +143,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                             case HttpStatus.SC_OK:
                                 break;
                             default:
-                                throw new DefaultHttpResponseExceptionMappingService().map(
+                                throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                         new HttpResponseException(response.getStatusLine().getStatusCode(),
-                                                new GoogleStorageExceptionMappingService().parse(response)));
+                                                GoogleStorageExceptionMappingService.parse(response)), file);
                         }
                     }
                     finally {
@@ -160,9 +164,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                                     return session.getClient().getObjectParser().parseAndClose(new InputStreamReader(
                                             putResponse.getEntity().getContent(), StandardCharsets.UTF_8), StorageObject.class);
                                 default:
-                                    throw new DefaultHttpResponseExceptionMappingService().map(
+                                    throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                             new HttpResponseException(putResponse.getStatusLine().getStatusCode(),
-                                                    new GoogleStorageExceptionMappingService().parse(putResponse)));
+                                                    GoogleStorageExceptionMappingService.parse(putResponse)), file);
                             }
                         }
                         finally {
@@ -170,9 +174,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                         }
                     }
                     else {
-                        throw new DefaultHttpResponseExceptionMappingService().map(
+                        throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                 new HttpResponseException(response.getStatusLine().getStatusCode(),
-                                        new GoogleStorageExceptionMappingService().parse(response)));
+                                        GoogleStorageExceptionMappingService.parse(response)), file);
                     }
                 }
                 catch(IOException e) {
@@ -189,13 +193,8 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
-    public boolean timestamp() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.acl, Flags.mime);
     }
 
     @Override

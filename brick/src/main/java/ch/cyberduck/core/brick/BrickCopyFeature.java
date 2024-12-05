@@ -32,6 +32,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Collections;
+import java.util.EnumSet;
 
 public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy {
     private static final Logger log = LogManager.getLogger(BrickCopyFeature.class);
@@ -47,9 +48,7 @@ public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy 
         try {
             final BrickApiClient client = new BrickApiClient(session);
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Delete file %s to be replaced with %s", target, file));
-                }
+                log.warn("Delete file {} to be replaced with {}", target, file);
                 new BrickDeleteFeature(session).delete(Collections.singletonList(target), callback, new Delete.DisabledCallback());
             }
             final FileActionEntity entity = new FileActionsApi(client)
@@ -67,7 +66,7 @@ public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy 
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

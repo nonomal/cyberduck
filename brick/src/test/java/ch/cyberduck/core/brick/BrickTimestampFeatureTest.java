@@ -18,7 +18,9 @@ package ch.cyberduck.core.brick;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.shared.DefaultAttributesFinderFeature;
 import ch.cyberduck.core.shared.DefaultHomeFinderService;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -39,8 +41,11 @@ public class BrickTimestampFeatureTest extends AbstractBrickTest {
     public void testSetTimestampFile() throws Exception {
         final Path file = new BrickTouchFeature(session).touch(new Path(new DefaultHomeFinderService(session).find(),
             new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
-        new BrickTimestampFeature(session).setTimestamp(file, 5000L);
-        assertEquals(5000L, new BrickAttributesFinderFeature(session).find(file).getModificationDate());
+        final TransferStatus status = new TransferStatus().withModified(5000L);
+        new BrickTimestampFeature(session).setTimestamp(file, status);
+        final PathAttributes attr = new BrickAttributesFinderFeature(session).find(file);
+        assertEquals(5000L, attr.getModificationDate());
+        assertEquals(attr, status.getResponse());
         assertEquals(5000L, new DefaultAttributesFinderFeature(session).find(file).getModificationDate());
         new BrickDeleteFeature(session).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
@@ -48,10 +53,18 @@ public class BrickTimestampFeatureTest extends AbstractBrickTest {
     @Test
     public void testSetTimestampDirectory() throws Exception {
         final Path file = new BrickDirectoryFeature(session).mkdir(new Path(new DefaultHomeFinderService(session).find(),
-            new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
+            new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), new TransferStatus());
         new BrickTimestampFeature(session).setTimestamp(file, 5000L);
         assertEquals(5000L, new BrickAttributesFinderFeature(session).find(file).getModificationDate());
         assertEquals(5000L, new DefaultAttributesFinderFeature(session).find(file).getModificationDate());
         new BrickDeleteFeature(session).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
+    }
+
+    @Test
+    public void testSetTimestampRoot() throws Exception {
+        final Path file = new Path("/", EnumSet.of(Path.Type.directory, Path.Type.volume));
+        final long ts = System.currentTimeMillis();
+        new BrickTimestampFeature(session).setTimestamp(file, ts);
+        assertEquals(Timestamp.toSeconds(ts), new BrickAttributesFinderFeature(session).find(file).getModificationDate());
     }
 }

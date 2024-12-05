@@ -17,8 +17,12 @@ package ch.cyberduck.core.googledrive;
 
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.LocaleFactory;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class DriveProtocol extends AbstractProtocol {
 
     @Override
@@ -75,5 +79,10 @@ public class DriveProtocol extends AbstractProtocol {
     @Override
     public DirectoryTimestamp getDirectoryTimestamp() {
         return DirectoryTimestamp.explicit;
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
     }
 }

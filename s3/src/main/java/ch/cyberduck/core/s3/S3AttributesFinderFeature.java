@@ -59,13 +59,14 @@ public class S3AttributesFinderFeature implements AttributesFinder {
         }
         if(containerService.isContainer(file)) {
             final PathAttributes attributes = new PathAttributes();
+            log.debug("Read location for bucket {}", file);
             attributes.setRegion(new S3LocationFeature(session, session.getClient().getRegionEndpointCache()).getLocation(file).getIdentifier());
             return attributes;
         }
         if(file.getType().contains(Path.Type.upload)) {
-            final Write.Append append = new S3WriteFeature(session, acl).append(file, new TransferStatus());
+            final Write.Append append = new S3MultipartUploadService(session, new S3WriteFeature(session, acl), acl).append(file, new TransferStatus());
             if(append.append) {
-                return new PathAttributes().withSize(append.size);
+                return new PathAttributes().withSize(append.offset);
             }
             throw new NotfoundException(file.getAbsolute());
         }
@@ -73,15 +74,13 @@ public class S3AttributesFinderFeature implements AttributesFinder {
             PathAttributes attr;
             final Path bucket = containerService.getContainer(file);
             try {
-                attr = new S3AttributesAdapter().toAttributes(session.getClient().getVersionedObjectDetails(
+                attr = new S3AttributesAdapter(session.getHost()).toAttributes(session.getClient().getVersionedObjectDetails(
                         file.attributes().getVersionId(), bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file)));
             }
             catch(ServiceException e) {
                 switch(e.getResponseCode()) {
                     case 405:
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Mark file %s as delete marker", file));
-                        }
+                        log.debug("Mark file {} as delete marker", file);
                         // Only DELETE method is allowed for delete markers
                         attr = new PathAttributes();
                         attr.setCustom(Collections.singletonMap(KEY_DELETE_MARKER, Boolean.TRUE.toString()));
@@ -91,12 +90,14 @@ public class S3AttributesFinderFeature implements AttributesFinder {
                 throw new S3ExceptionMappingService().map("Failure to read attributes of {0}", e, file);
             }
             if(StringUtils.isNotBlank(attr.getVersionId())) {
+                log.debug("Determine if {} is latest version for {}", attr.getVersionId(), file);
                 // Determine if latest version
                 try {
-                    // Duplicate if not latest version
-                    final String latest = new S3AttributesAdapter().toAttributes(session.getClient().getObjectDetails(
+                    final String latest = new S3AttributesAdapter(session.getHost()).toAttributes(session.getClient().getObjectDetails(
                             bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file))).getVersionId();
                     if(null != latest) {
+                        log.debug("Found later version {} for {}", latest, file);
+                        // Duplicate if not latest version
                         attr.setDuplicate(!latest.equals(attr.getVersionId()));
                     }
                 }
@@ -114,9 +115,10 @@ public class S3AttributesFinderFeature implements AttributesFinder {
         }
         catch(NotfoundException e) {
             if(file.isDirectory()) {
+                log.debug("Search for common prefix {}", file);
                 // File may be marked as placeholder but no placeholder file exists. Check for common prefix returned.
                 try {
-                    new S3ObjectListService(session, acl).list(file, new CancellingListProgressListener(), containerService.getKey(file), 1);
+                    new S3ObjectListService(session, acl).list(file, new CancellingListProgressListener(), String.valueOf(Path.DELIMITER), 1);
                 }
                 catch(ListCanceledException l) {
                     // Found common prefix

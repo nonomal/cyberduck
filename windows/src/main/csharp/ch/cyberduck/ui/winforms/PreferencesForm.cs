@@ -40,7 +40,6 @@ namespace Ch.Cyberduck.Ui.Winforms
         private const int MaxWidth = 1000;
         private const int MinHeight = 250;
         private const int MinWidth = 450;
-        private Application _lastSelectedEditor;
 
         public PreferencesForm()
         {
@@ -56,8 +55,8 @@ namespace Ch.Cyberduck.Ui.Winforms
                 Width = newWidth;
             };
 
-            MaximumSize = new Size(MaxWidth, MaxHeight);
-            MinimumSize = new Size(MinWidth, MinHeight);
+            MaximumSize = new Size(int.MaxValue, MaxHeight);
+            MinimumSize = new Size(0, MinHeight);
 
             generalButton.Image = Images.General.Size(32);
             browserButton.Image = Images.Browser.Size(32);
@@ -68,7 +67,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             s3Button.Image = Images.S3.Size(32);
             googleCloudButton.Image = Images.GoogleStorage.Size(32);
             bandwidthButton.Image = Images.Bandwidth.Size(32);
-            connectionButton.Image = Images.Connect.Size(32);
+            connectionButton.Image = Images.Connection.Size(32);
             cryptomatorButton.Image = Images.Cryptomator.Size(32);
             updateButton.Image = Images.Update.Size(32);
             languageButton.Image = Images.Language.Size(32);
@@ -152,7 +151,6 @@ namespace Ch.Cyberduck.Ui.Winforms
             set
             {
                 editorComboBox.SelectedValue = value;
-                _lastSelectedEditor = value;
             }
         }
 
@@ -213,6 +211,12 @@ namespace Ch.Cyberduck.Ui.Winforms
         {
             get { return doubleClickEditorCheckbox.Checked; }
             set { doubleClickEditorCheckbox.Checked = value; }
+        }
+
+        public bool EnableVersioning
+        {
+            get => versioningCheckbox.Checked;
+            set => versioningCheckbox.Checked = value;
         }
 
         public bool ReturnKeyRenames
@@ -762,6 +766,7 @@ namespace Ch.Cyberduck.Ui.Winforms
         public event VoidHandler RepopulateEditorsEvent = delegate { };
         public event VoidHandler AlwaysUseDefaultEditorChangedEvent = delegate { };
         public event VoidHandler ChmodDownloadChangedEvent = delegate { };
+        public event VoidHandler EnableVersioningChangedEvent = delegate { };
         public event VoidHandler ChmodDownloadUseDefaultChangedEvent = delegate { };
         public event VoidHandler ChmodDownloadTypeChangedEvent = delegate { };
         public event VoidHandler DownloadOwnerReadChangedEvent = delegate { };
@@ -812,6 +817,7 @@ namespace Ch.Cyberduck.Ui.Winforms
         public event VoidHandler UpdateFeedChangedEvent = delegate { };
         public event VoidHandler BookmarkSizeChangedEvent = delegate { };
         public event VoidHandler CryptomatorAutoDetectVaultChangedEvent = delegate { };
+        public event VoidHandler CryptomatorUseKeychainChangedEvent = delegate { };
 
         public bool AutomaticUpdateCheck
         {
@@ -997,6 +1003,12 @@ namespace Ch.Cyberduck.Ui.Winforms
         {
             get { return cryptomatorAutoDetectCheckBox.Checked; }
             set { cryptomatorAutoDetectCheckBox.Checked = value; }
+        }
+
+        public bool VaultUseKeychain
+        {
+            get => cryptomatorUseKeychain.Checked;
+            set => cryptomatorUseKeychain.Checked = value;
         }
 
         public void PopulateLocales(IList<KeyValuePair<string, string>> locales)
@@ -1491,36 +1503,7 @@ namespace Ch.Cyberduck.Ui.Winforms
 
         private void editorComboBox_SelectionChangeCommitted(object sender, EventArgs e)
         {
-            Application selected = DefaultEditor;
-            if (selected != null && selected.getIdentifier() == null)
-            {
-                //choose dialog
-                editorOpenFileDialog.FileName = null;
-                DialogResult result = editorOpenFileDialog.ShowDialog();
-                if (result == DialogResult.OK)
-                {
-                    PreferencesFactory.get()
-                        .setProperty("editor.bundleIdentifier", editorOpenFileDialog.FileName.ToLower());
-                    RepopulateEditorsEvent();
-                }
-                else
-                {
-                    if (_lastSelectedEditor != null)
-                    {
-                        DefaultEditor = _lastSelectedEditor;
-                    }
-                    else
-                    {
-                        //dummy editor which leads to an empty selection
-                        DefaultEditor = Application.notfound;
-                    }
-                }
-            }
-            else
-            {
-                _lastSelectedEditor = DefaultEditor;
-                DefaultEditorChangedEvent();
-            }
+            DefaultEditorChangedEvent();
         }
 
         private void alwaysUseDefaultEditorCheckBox_CheckedChanged(object sender, EventArgs e)
@@ -1631,6 +1614,16 @@ namespace Ch.Cyberduck.Ui.Winforms
         public void SelectProfilesTab()
         {
             profilesButton_Click(this, EventArgs.Empty);
+        }
+
+        private void cryptomatorUseKeychain_CheckedChanged(object sender, EventArgs e)
+        {
+            CryptomatorUseKeychainChangedEvent();
+        }
+
+        private void versioningCheckbox_CheckedChanged(object sender, EventArgs e)
+        {
+            EnableVersioningChangedEvent();
         }
     }
 }

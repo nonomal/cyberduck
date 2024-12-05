@@ -15,12 +15,15 @@ package ch.cyberduck.core.dropbox;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.text.MessageFormat;
 
 import com.dropbox.core.DbxException;
 import com.dropbox.core.v2.files.CreateFolderResult;
@@ -33,14 +36,14 @@ public class DropboxDirectoryFeature implements Directory<String> {
 
     public DropboxDirectoryFeature(final DropboxSession session) {
         this.session = session;
-        this.containerService = new DropboxPathContainerService(session);
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
     public Path mkdir(final Path folder, final TransferStatus status) throws BackgroundException {
         try {
             final CreateFolderResult result = new DbxUserFilesRequests(session.getClient(folder.getParent()))
-                .createFolderV2(containerService.getKey(folder), false);
+                    .createFolderV2(containerService.getKey(folder), false);
             return folder.withAttributes(new DropboxAttributesFinderFeature(session).toAttributes(result.getMetadata()));
         }
         catch(DbxException e) {
@@ -49,12 +52,9 @@ public class DropboxDirectoryFeature implements Directory<String> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return new DropboxTouchFeature(session).isSupported(workdir, name);
-    }
-
-    @Override
-    public DropboxDirectoryFeature withWriter(final Write<String> writer) {
-        return this;
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!DropboxTouchFeature.validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
+        }
     }
 }

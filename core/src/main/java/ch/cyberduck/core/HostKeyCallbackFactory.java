@@ -29,38 +29,41 @@ import java.lang.reflect.InvocationTargetException;
 public class HostKeyCallbackFactory extends Factory<HostKeyCallback> {
     private static final Logger log = LogManager.getLogger(HostKeyCallbackFactory.class);
 
-    private Constructor<? extends HostKeyCallback> constructor;
-
-    protected HostKeyCallbackFactory() {
+    private HostKeyCallbackFactory() {
         super("factory.hostkeycallback.class");
     }
 
-    public HostKeyCallback create(final Controller c, final Protocol protocol) {
+    public HostKeyCallback create(final Controller controller, final Protocol protocol) {
         if(Scheme.sftp.equals(protocol.getScheme())) {
             try {
+                final Constructor<? extends HostKeyCallback> constructor
+                        = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
                 if(null == constructor) {
-                    constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, c.getClass());
-                }
-                if(null == constructor) {
-                    log.warn(String.format("No matching constructor for parameter %s", c.getClass()));
+                    log.warn("No matching constructor for parameter {}", controller.getClass());
                     // Call default constructor for disabled implementations
                     return clazz.getDeclaredConstructor().newInstance();
                 }
-                return constructor.newInstance(c);
+                return constructor.newInstance(controller);
             }
-            catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-                log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            catch(InstantiationException | InvocationTargetException | IllegalAccessException |
+                  NoSuchMethodException e) {
+                log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
                 return new DisabledHostKeyCallback();
             }
         }
         return new DisabledHostKeyCallback();
     }
 
+    private static HostKeyCallbackFactory singleton;
+
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static HostKeyCallback get(final Controller c, final Protocol protocol) {
-        return new HostKeyCallbackFactory().create(c, protocol);
+    public static synchronized HostKeyCallback get(final Controller c, final Protocol protocol) {
+        if(null == singleton) {
+            singleton = new HostKeyCallbackFactory();
+        }
+        return singleton.create(c, protocol);
     }
 }

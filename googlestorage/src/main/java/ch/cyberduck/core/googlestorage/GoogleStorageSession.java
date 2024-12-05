@@ -25,14 +25,18 @@ import ch.cyberduck.core.UrlProvider;
 import ch.cyberduck.core.UseragentProvider;
 import ch.cyberduck.core.cdn.DistributionConfiguration;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.*;
+import ch.cyberduck.core.http.CustomServiceUnavailableRetryStrategy;
+import ch.cyberduck.core.http.ExecutionCountServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.HttpSession;
 import ch.cyberduck.core.http.UserAgentHttpRequestInitializer;
-import ch.cyberduck.core.oauth.OAuth2AuthorizationService;
 import ch.cyberduck.core.oauth.OAuth2ErrorResponseInterceptor;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.preferences.PreferencesReader;
 import ch.cyberduck.core.proxy.ProxyFactory;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.CancelCallback;
@@ -48,34 +52,37 @@ import com.google.api.services.storage.Storage;
 
 public class GoogleStorageSession extends HttpSession<Storage> {
 
+    private final PreferencesReader preferences
+            = new HostPreferences(host);
+
     private ApacheHttpTransport transport;
     private OAuth2RequestInterceptor authorizationService;
 
-    private final Versioning versioning
-            = new GoogleStorageVersioningFeature(this);
+    private final Versioning versioning =
+            preferences.getBoolean("s3.versioning.enable") ? new GoogleStorageVersioningFeature(this) : null;
 
     public GoogleStorageSession(final Host host, final X509TrustManager trust, final X509KeyManager key) {
         super(host, trust, key);
     }
 
     @Override
-    protected Storage connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) {
+    protected Storage connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws ConnectionCanceledException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
-        authorizationService = new OAuth2RequestInterceptor(builder.build(ProxyFactory.get().find(host.getProtocol().getOAuthAuthorizationUrl()), this, prompt).build(), host.getProtocol())
+        authorizationService = new OAuth2RequestInterceptor(builder.build(proxy, this, prompt).build(), host, prompt)
                 .withRedirectUri(host.getProtocol().getOAuthRedirectUrl());
         configuration.addInterceptorLast(authorizationService);
-        configuration.setServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService, prompt));
-        this.transport = new ApacheHttpTransport(configuration.build());
+        configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                new ExecutionCountServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService))));
+        transport = new ApacheHttpTransport(configuration.build());
         final UseragentProvider ua = new PreferencesUseragentProvider();
         return new Storage.Builder(transport, new GsonFactory(), new UserAgentHttpRequestInitializer(ua))
-            .setApplicationName(ua.get())
-            .build();
+                .setApplicationName(ua.get())
+                .build();
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt,
-                      final CancelCallback cancel) throws BackgroundException {
-        authorizationService.setTokens(authorizationService.authorize(host, prompt, cancel, OAuth2AuthorizationService.FlowType.AuthorizationCode));
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+        authorizationService.validate();
     }
 
     @Override
@@ -143,7 +150,7 @@ public class GoogleStorageSession extends HttpSession<Storage> {
         if(type == UrlProvider.class) {
             return (T) new GoogleStorageUrlProvider(this);
         }
-        if(type == PromptUrlProvider.class) {
+        if(type == Share.class) {
             return (T) new GoogleStoragePublicUrlProvider(this);
         }
         if(type == Search.class) {

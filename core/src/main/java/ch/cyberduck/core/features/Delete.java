@@ -15,16 +15,29 @@ package ch.cyberduck.core.features;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.text.MessageFormat;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Delete files on server
+ */
+@Required
 public interface Delete {
+    Logger log = LogManager.getLogger(Delete.class);
+
     default void delete(List<Path> files, PasswordCallback prompt, Callback callback) throws BackgroundException {
         final Map<Path, TransferStatus> set = new LinkedHashMap<>();
         for(Path file : files) {
@@ -33,16 +46,39 @@ public interface Delete {
         this.delete(set, prompt, callback);
     }
 
+    /**
+     * Delete files on server
+     *
+     * @param files    Selected files or folders
+     * @param prompt   Callback when password is required to delete file
+     * @param callback Progress callback
+     */
     void delete(Map<Path, TransferStatus> files, PasswordCallback prompt, Callback callback) throws BackgroundException;
 
+    /**
+     * @param file File or folder
+     * @return True if the file can be deleted on the server
+     */
     default boolean isSupported(final Path file) {
-        return file.attributes().getPermission().isWritable();
+        try {
+            this.preflight(file);
+            return true;
+        }
+        catch(BackgroundException e) {
+            return false;
+        }
     }
 
+    /**
+     * @return True if the implementation supports deleting folders recursively
+     */
     default boolean isRecursive() {
-        return false;
+        return this.features().contains(Flags.recursive);
     }
 
+    /**
+     * Callback for every file deleted
+     */
     interface Callback {
         void delete(Path file);
     }
@@ -52,5 +88,29 @@ public interface Delete {
         public void delete(Path file) {
             //
         }
+    }
+
+    default void preflight(final Path file) throws BackgroundException {
+        if(!file.attributes().getPermission().isWritable()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"),
+                    file.getName())).withFile(file);
+        }
+    }
+
+    /**
+     * @return Supported features
+     */
+    default EnumSet<Flags> features() {
+        return EnumSet.noneOf(Flags.class);
+    }
+
+    /**
+     * Feature flags
+     */
+    enum Flags {
+        /**
+         * Support deleting directories recursively
+         */
+        recursive
     }
 }

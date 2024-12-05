@@ -16,13 +16,13 @@ package ch.cyberduck.core.brick;
  */
 
 import ch.cyberduck.core.ConnectionTimeoutFactory;
+import ch.cyberduck.core.HostUrlProvider;
 import ch.cyberduck.core.PreferencesUseragentProvider;
 import ch.cyberduck.core.brick.io.swagger.client.ApiClient;
 import ch.cyberduck.core.brick.io.swagger.client.ApiException;
 import ch.cyberduck.core.brick.io.swagger.client.JSON;
 import ch.cyberduck.core.brick.io.swagger.client.Pair;
 import ch.cyberduck.core.jersey.HttpComponentsProvider;
-import ch.cyberduck.core.preferences.PreferencesFactory;
 
 import org.glassfish.jersey.client.ClientConfig;
 import org.glassfish.jersey.jackson.JacksonFeature;
@@ -35,16 +35,24 @@ import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.core.GenericType;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Logger;
 
 public class BrickApiClient extends ApiClient {
 
+    static {
+        Logger.getLogger("org.glassfish.jersey.client.ClientExecutorProvidersConfigurator").setLevel(java.util.logging.Level.SEVERE);
+    }
+
+    private final BrickSession session;
+
     public BrickApiClient(final BrickSession session) {
+        this.session = session;
         this.setHttpClient(ClientBuilder.newClient(new ClientConfig()
-            .register(new InputStreamProvider())
-            .register(MultiPartFeature.class)
-            .register(new JSON())
-            .register(JacksonFeature.class)
-            .connectorProvider(new HttpComponentsProvider(session.getClient())))
+                .register(new InputStreamProvider())
+                .register(MultiPartFeature.class)
+                .register(new JSON())
+                .register(JacksonFeature.class)
+                .connectorProvider(new HttpComponentsProvider(session.getClient())))
         );
         final int timeout = ConnectionTimeoutFactory.get().getTimeout() * 1000;
         this.setConnectTimeout(timeout);
@@ -62,6 +70,7 @@ public class BrickApiClient extends ApiClient {
     @Override
     public <T> T invokeAPI(final String path, final String method, final List<Pair> queryParams, final Object body, final Map<String, String> headerParams, final Map<String, Object> formParams, final String accept, final String contentType, final String[] authNames, final GenericType<T> returnType) throws ApiException {
         try {
+            this.setBasePath(String.format("%s/api/rest/v1", new HostUrlProvider().withUsername(false).get(session.getHost())));
             return super.invokeAPI(path, method, queryParams, body, headerParams, formParams, accept, contentType, authNames, returnType);
         }
         catch(ProcessingException e) {

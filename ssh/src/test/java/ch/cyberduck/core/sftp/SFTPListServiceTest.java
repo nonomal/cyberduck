@@ -27,6 +27,7 @@ import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.transfer.TransferStatus;
+import ch.cyberduck.core.unicode.NFDNormalizer;
 import ch.cyberduck.test.IntegrationTest;
 
 import org.junit.Test;
@@ -46,7 +47,8 @@ public class SFTPListServiceTest extends AbstractSFTPTest {
     @Test
     public void testList() throws Exception {
         final Path home = new SFTPHomeDirectoryService(session).find();
-        final Path file = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        final String filename = String.format("%s%s", new AlphanumericRandomStringService().random(), new NFDNormalizer().normalize("ä"));
+        final Path file = new Path(home, filename, EnumSet.of(Path.Type.file));
         final Path symlinkRelative = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file, AbstractPath.Type.symboliclink));
         final Path symlinkAbsolute = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file, AbstractPath.Type.symboliclink));
         final Path directory = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
@@ -56,7 +58,6 @@ public class SFTPListServiceTest extends AbstractSFTPTest {
         new SFTPDirectoryFeature(session).mkdir(directory, new TransferStatus());
         final Permission permission = new Permission(Permission.Action.read_write, Permission.Action.read_write, Permission.Action.read_write);
         new SFTPUnixPermissionFeature(session).setUnixPermission(file, permission);
-
         final AttributedList<Path> list = new SFTPListService(session).list(home, new DisabledListProgressListener());
         assertTrue(list.contains(file));
         assertEquals(permission, list.get(file).attributes().getPermission());
@@ -65,9 +66,7 @@ public class SFTPListServiceTest extends AbstractSFTPTest {
         assertEquals(file, list.get(symlinkRelative).getSymlinkTarget());
         assertTrue(list.contains(symlinkAbsolute));
         assertEquals(file, list.get(symlinkAbsolute).getSymlinkTarget());
-
         new SFTPDeleteFeature(session).delete(Arrays.asList(file, symlinkAbsolute, symlinkRelative, directory), new DisabledLoginCallback(), new Delete.DisabledCallback());
-
     }
 
     @Test

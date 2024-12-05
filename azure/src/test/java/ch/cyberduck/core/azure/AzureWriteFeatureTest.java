@@ -6,7 +6,6 @@ import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.features.Delete;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.MD5ChecksumCompute;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -36,7 +35,7 @@ public class AzureWriteFeatureTest extends AbstractAzureTest {
     @Test
     public void testWriteOverrideAppendBlob() throws Exception {
         final OperationContext context
-            = new OperationContext();
+                = new OperationContext();
         final TransferStatus status = new TransferStatus();
         status.setMime("text/plain");
         final byte[] content = RandomUtils.nextBytes(513);
@@ -54,16 +53,15 @@ public class AzureWriteFeatureTest extends AbstractAzureTest {
         final Map<String, String> metadata = new AzureMetadataFeature(session, context).getMetadata(test);
         assertEquals("text/plain", metadata.get("Content-Type"));
         assertEquals("public,max-age=86400", metadata.get("Cache-Control"));
-        assertEquals(content.length, new AzureWriteFeature(session, context).append(test, status.withRemote(attributes)).size, 0L);
         final byte[] buffer = new byte[content.length];
         final InputStream in = new AzureReadFeature(session, context).read(test, new TransferStatus(), new DisabledConnectionCallback());
         IOUtils.readFully(in, buffer);
         in.close();
         assertArrayEquals(content, buffer);
         final OutputStream overwrite = new AzureWriteFeature(session, context).write(test, new TransferStatus().exists(true)
-            .withLength("overwrite".getBytes(StandardCharsets.UTF_8).length).withMetadata(Collections.singletonMap("Content-Type", "text/plain")), new DisabledConnectionCallback());
+                .withLength("overwrite".getBytes(StandardCharsets.UTF_8).length).withMetadata(Collections.singletonMap("Content-Type", "text/plain")), new DisabledConnectionCallback());
         new StreamCopier(new TransferStatus(), new TransferStatus())
-            .transfer(new ByteArrayInputStream("overwrite".getBytes(StandardCharsets.UTF_8)), overwrite);
+                .transfer(new ByteArrayInputStream("overwrite".getBytes(StandardCharsets.UTF_8)), overwrite);
         overwrite.close();
         // Test double close
         overwrite.close();
@@ -74,7 +72,7 @@ public class AzureWriteFeatureTest extends AbstractAzureTest {
     @Test
     public void testWriteOverrideBlockBlob() throws Exception {
         final OperationContext context
-            = new OperationContext();
+                = new OperationContext();
         final TransferStatus status = new TransferStatus();
         status.setMime("text/plain");
         final byte[] content = RandomUtils.nextBytes(513);
@@ -92,18 +90,15 @@ public class AzureWriteFeatureTest extends AbstractAzureTest {
         final Map<String, String> metadata = new AzureMetadataFeature(session, context).getMetadata(test);
         assertEquals("text/plain", metadata.get("Content-Type"));
         assertEquals("public,max-age=86400", metadata.get("Cache-Control"));
-        final Write.Append append = new AzureWriteFeature(session, context).append(test, status.withRemote(attributes));
-        assertFalse(append.append);
-        assertEquals(0L, append.size, 0L);
         final byte[] buffer = new byte[content.length];
         final InputStream in = new AzureReadFeature(session, context).read(test, new TransferStatus(), new DisabledConnectionCallback());
         IOUtils.readFully(in, buffer);
         in.close();
         assertArrayEquals(content, buffer);
         final OutputStream overwrite = new AzureWriteFeature(session, context).write(test, new TransferStatus().exists(true)
-            .withLength("overwrite".getBytes(StandardCharsets.UTF_8).length).withMetadata(Collections.singletonMap("Content-Type", "text/plain")), new DisabledConnectionCallback());
+                .withLength("overwrite".getBytes(StandardCharsets.UTF_8).length).withMetadata(Collections.singletonMap("Content-Type", "text/plain")), new DisabledConnectionCallback());
         new StreamCopier(new TransferStatus(), new TransferStatus())
-            .transfer(new ByteArrayInputStream("overwrite".getBytes(StandardCharsets.UTF_8)), overwrite);
+                .transfer(new ByteArrayInputStream("overwrite".getBytes(StandardCharsets.UTF_8)), overwrite);
         overwrite.close();
         // Test double close
         overwrite.close();

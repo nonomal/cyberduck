@@ -26,7 +26,7 @@ namespace Ch.Cyberduck.Ui.Controller
 {
     public delegate void DialogResponseHandler(int option, bool verificationChecked);
 
-    public interface IView : ISynchronizeInvoke
+    public interface IView : ISynchronizeInvoke, IWin32Window
     {
         bool Visible { get; set; }
         bool ReleaseWhenClose { set; }

@@ -78,7 +78,7 @@ public class S3MultipleDeleteFeature implements Delete {
                             bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), containerService.getKey(file)));
                 }
                 catch(NotfoundException ignored) {
-                    log.warn(String.format("Ignore failure deleting multipart upload %s", file));
+                    log.warn("Ignore failure deleting multipart upload {}", file);
                 }
             }
             else {
@@ -119,16 +119,17 @@ public class S3MultipleDeleteFeature implements Delete {
      * @param prompt Password input
      * @throws ch.cyberduck.core.exception.ConnectionCanceledException Authentication canceled for MFA delete
      */
-    public void delete(final Path bucket, final List<ObjectKeyAndVersion> keys, final PasswordCallback prompt)
+    protected void delete(final Path bucket, final List<ObjectKeyAndVersion> keys, final PasswordCallback prompt)
             throws BackgroundException {
         try {
-            if(versioningService != null
-                    && versioningService.getConfiguration(bucket).isMultifactor()) {
-                final Credentials factor = versioningService.getToken(prompt);
+            if(versioningService.getConfiguration(bucket).isMultifactor()) {
+                final Credentials mfa = versioningService.getToken(prompt);
+                final String multiFactorSerialNumber = mfa.getUsername();
+                final String multiFactorAuthCode = mfa.getPassword();
                 final MultipleDeleteResult result = session.getClient().deleteMultipleObjectsWithMFA(bucket.getName(),
                         keys.toArray(new ObjectKeyAndVersion[keys.size()]),
-                        factor.getUsername(),
-                        factor.getPassword(),
+                        multiFactorSerialNumber,
+                        multiFactorAuthCode,
                         // Only include errors in response
                         true);
                 if(result.hasErrors()) {

@@ -17,7 +17,6 @@ package ch.cyberduck.core.eue;
 
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.LoginOptions;
@@ -38,7 +37,7 @@ import ch.cyberduck.core.eue.io.swagger.client.model.UserSharesModel;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.exception.NotfoundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.preferences.HostPreferences;
 
 import org.apache.commons.lang3.StringUtils;
@@ -48,7 +47,7 @@ import org.apache.logging.log4j.Logger;
 
 import java.text.MessageFormat;
 
-public class EueShareFeature implements PromptUrlProvider<ShareCreationRequestModel, ShareCreationRequestModel> {
+public class EueShareFeature implements Share<ShareCreationRequestModel, ShareCreationRequestModel> {
     private static final Logger log = LogManager.getLogger(EueShareFeature.class);
 
     private static final String GUEST_E_MAIL = "!ano";
@@ -73,19 +72,19 @@ public class EueShareFeature implements PromptUrlProvider<ShareCreationRequestMo
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final ShareCreationRequestModel options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final ShareCreationRequestModel options, final PasswordCallback callback) throws BackgroundException {
         return this.toGuestUrl(file, options, callback);
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final ShareCreationRequestModel options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final ShareCreationRequestModel options, final PasswordCallback callback) throws BackgroundException {
         // Look for existing share
         return this.toGuestUrl(file, options, callback);
     }
 
     private DescriptiveUrl toGuestUrl(final Path file, final ShareCreationRequestModel options, final PasswordCallback callback) throws BackgroundException {
         // Look for existing share
-        final ShareCreationResponseEntity shareForResource = findShareForResource(session.userShares(), fileid.getFileId(file, new DisabledListProgressListener()));
+        final ShareCreationResponseEntity shareForResource = findShareForResource(session.userShares(), fileid.getFileId(file));
         if(null != shareForResource) {
             return EueShareUrlProvider.toUrl(session.getHost(), shareForResource);
         }
@@ -95,33 +94,29 @@ public class EueShareFeature implements PromptUrlProvider<ShareCreationRequestMo
     private ShareCreationResponseEntity createGuestUri(final Path file, final PasswordCallback callback, final ShareCreationRequestModel shareCreationRequestModel) throws BackgroundException {
         final EueApiClient client = new EueApiClient(session);
         final CreateShareApi createShareApi = new CreateShareApi(client);
-        final String resourceId = fileid.getFileId(file, new DisabledListProgressListener());
+        final String resourceId = fileid.getFileId(file);
         try {
             final ShareCreationRequestModel shareCreationRequestEntries = null != shareCreationRequestModel ? shareCreationRequestModel : this.createShareCreationRequestModel(file, callback);
-            for(ShareCreationRequestEntry shareCreationRequestEntry : shareCreationRequestEntries) {
-                final String shareName = shareCreationRequestEntry.getName();
-                final ShareCreationResponseModel shareCreationResponseModel = createShareApi.resourceResourceIdSharePost(resourceId, shareCreationRequestEntries, null, null);
-                if(!shareCreationResponseModel.containsKey(GUEST_E_MAIL)) {
-                    throw new NotfoundException(GUEST_E_MAIL);
-                }
-                final ShareCreationResponseEntry shareCreationResponseEntry = shareCreationResponseModel.get(GUEST_E_MAIL);
-                switch(shareCreationResponseEntry.getStatusCode()) {
-                    case HttpStatus.SC_OK:
-                    case HttpStatus.SC_CREATED:
-                        shareCreationResponseEntry.getEntity().setResourceURI(resourceId);
-                        session.userShares().add(shareCreationResponseEntry.getEntity());
-                        return shareCreationResponseEntry.getEntity();
-                    default:
-                        log.warn(String.format("Failure %s creating share for %s", shareCreationResponseEntry, file));
-                        if(null == shareCreationResponseEntry.getEntity()) {
-                            throw new EueExceptionMappingService().map(new ApiException(shareCreationResponseEntry.getReason(),
-                                    null, shareCreationResponseEntry.getStatusCode(), client.getResponseHeaders()));
-                        }
-                        throw new EueExceptionMappingService().map(new ApiException(shareCreationResponseEntry.getEntity().getError(),
-                                null, shareCreationResponseEntry.getStatusCode(), client.getResponseHeaders()));
-                }
+            final ShareCreationResponseModel shareCreationResponseModel = createShareApi.resourceResourceIdSharePost(resourceId, shareCreationRequestEntries, null, null);
+            if(!shareCreationResponseModel.containsKey(GUEST_E_MAIL)) {
+                throw new NotfoundException(GUEST_E_MAIL);
             }
-            return null;
+            final ShareCreationResponseEntry shareCreationResponseEntry = shareCreationResponseModel.get(GUEST_E_MAIL);
+            switch(shareCreationResponseEntry.getStatusCode()) {
+                case HttpStatus.SC_OK:
+                case HttpStatus.SC_CREATED:
+                    shareCreationResponseEntry.getEntity().setResourceURI(resourceId);
+                    session.userShares().add(shareCreationResponseEntry.getEntity());
+                    return shareCreationResponseEntry.getEntity();
+                default:
+                    log.warn("Failure {} creating share for {}", shareCreationResponseEntry, file);
+                    if(null == shareCreationResponseEntry.getEntity()) {
+                        throw new EueExceptionMappingService().map(new ApiException(shareCreationResponseEntry.getReason(),
+                                null, shareCreationResponseEntry.getStatusCode(), client.getResponseHeaders()));
+                    }
+                    throw new EueExceptionMappingService().map(new ApiException(shareCreationResponseEntry.getEntity().getError(),
+                            null, shareCreationResponseEntry.getStatusCode(), client.getResponseHeaders()));
+            }
         }
         catch(ApiException e) {
             throw new EueExceptionMappingService().map(e);

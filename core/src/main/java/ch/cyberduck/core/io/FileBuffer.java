@@ -20,7 +20,6 @@ import ch.cyberduck.core.Local;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.local.LocalTouchFactory;
-import ch.cyberduck.core.local.TemporaryFileService;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
 
 import org.apache.commons.io.IOUtils;
@@ -35,15 +34,13 @@ import java.nio.file.Paths;
 public class FileBuffer implements Buffer {
     private static final Logger log = LogManager.getLogger(FileBuffer.class);
 
-    private static final TemporaryFileService temp = TemporaryFileServiceFactory.get();
-
     private final Local temporary;
 
     private RandomAccessFile file;
     private Long length = 0L;
 
     public FileBuffer() {
-        this(temp.create(new AlphanumericRandomStringService().random()));
+        this(TemporaryFileServiceFactory.get().create(new AlphanumericRandomStringService().random()));
     }
 
     public FileBuffer(final Local temporary) {
@@ -55,7 +52,7 @@ public class FileBuffer implements Buffer {
         final RandomAccessFile file = random();
         file.seek(offset);
         file.write(chunk, 0, chunk.length);
-        length = Math.max(length, file.length());
+        this.length = Math.max(this.length, file.length());
         return chunk.length;
     }
 
@@ -65,14 +62,26 @@ public class FileBuffer implements Buffer {
         if(offset < file.length()) {
             file.seek(offset);
             if(chunk.length + offset > file.length()) {
-                return file.read(chunk, 0, (int) (file.length() - offset));
+                final int bufferRead = file.read(chunk, 0, (int) (file.length() - offset));
+                if(bufferRead + offset < file.length()) {
+                    // Less read than we have in file - honour read interface
+                    return bufferRead;
+                }
+                // Add null bytes up to allocated size
+                final int missing = chunk.length - bufferRead;
+                final int available = (int) Math.min(missing, this.length - file.length());
+                final int nullRead = new NullInputStream(available).read(chunk, bufferRead, available);
+                if(nullRead > 0) {
+                    return bufferRead + nullRead;
+                }
+                return bufferRead;
             }
             else {
                 return file.read(chunk, 0, chunk.length);
             }
         }
         else {
-            final NullInputStream nullStream = new NullInputStream(length);
+            final NullInputStream nullStream = new NullInputStream(this.length);
             if(nullStream.available() > 0) {
                 nullStream.skip(offset);
                 return nullStream.read(chunk, 0, chunk.length);
@@ -100,7 +109,7 @@ public class FileBuffer implements Buffer {
                 }
             }
             catch(IOException e) {
-                log.warn(String.format("Failure truncating file %s to %d", temporary, length));
+                log.warn("Failure truncating file {} to {}", temporary, length);
             }
         }
     }
@@ -115,7 +124,7 @@ public class FileBuffer implements Buffer {
                 }
             }
             catch(IOException e) {
-                log.error(String.format("Failure closing buffer %s", this));
+                log.error("Failure closing buffer {}", this);
             }
             finally {
                 try {
@@ -123,7 +132,7 @@ public class FileBuffer implements Buffer {
                     file = null;
                 }
                 catch(AccessDeniedException | NotfoundException e) {
-                    log.warn(String.format("Failure removing temporary file %s for buffer %s. Schedule for delete on exit.", temporary, this));
+                    log.warn("Failure removing temporary file {} for buffer {}. Schedule for delete on exit.", temporary, this);
                     Paths.get(temporary.getAbsolute()).toFile().deleteOnExit();
                 }
             }
@@ -148,6 +157,7 @@ public class FileBuffer implements Buffer {
     public String toString() {
         final StringBuilder sb = new StringBuilder("FileBuffer{");
         sb.append("temporary=").append(temporary);
+        sb.append(", length=").append(length);
         sb.append('}');
         return sb.toString();
     }

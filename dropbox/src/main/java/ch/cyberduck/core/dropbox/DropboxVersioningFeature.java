@@ -17,7 +17,6 @@ package ch.cyberduck.core.dropbox;
 
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.ListProgressListener;
-import ch.cyberduck.core.NullFilter;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
@@ -32,6 +31,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.EnumSet;
 import java.util.List;
 
 import com.dropbox.core.DbxException;
@@ -47,7 +47,7 @@ public class DropboxVersioningFeature implements Versioning {
 
     public DropboxVersioningFeature(final DropboxSession session) {
         this.session = session;
-        this.containerService = new DropboxPathContainerService(session);
+        this.containerService = new DropboxPathContainerService();
     }
 
 
@@ -72,35 +72,34 @@ public class DropboxVersioningFeature implements Versioning {
     }
 
     @Override
-    public boolean isRevertable(final Path file) {
-        return true;
-    }
-
-    @Override
     public AttributedList<Path> list(final Path file, final ListProgressListener listener) throws BackgroundException {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
         try {
             final AttributedList<Path> versions = new AttributedList<>();
             final ListRevisionsResult result = new DbxUserFilesRequests(session.getClient(file)).listRevisions(containerService.getKey(file));
             final List<FileMetadata> entries = result.getEntries();
             final DropboxAttributesFinderFeature attr = new DropboxAttributesFinderFeature(session);
             for(FileMetadata revision : entries) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Found revision %s", revision));
+                if(StringUtils.equals(revision.getRev(), file.attributes().getVersionId())) {
+                    continue;
                 }
+                log.debug("Found revision {}", revision);
                 final PathAttributes attributes = attr.toAttributes(revision);
                 attributes.setDuplicate(true);
-                versions.add(new Path(file.getParent(), PathNormalizer.name(revision.getName()), file.getType(),
-                        attributes));
+                versions.add(new Path(file.getParent(), PathNormalizer.name(revision.getName()), file.getType(), attributes));
+                listener.chunk(file.getParent(), versions);
             }
-            return versions.filter(new NullFilter<Path>() {
-                @Override
-                public boolean accept(final Path test) {
-                    return !StringUtils.equals(test.attributes().getVersionId(), file.attributes().getVersionId());
-                }
-            });
+            return versions;
         }
         catch(DbxException e) {
             throw new DropboxExceptionMappingService().map("Failure to read attributes of {0}", e, file);
         }
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.revert, Flags.list);
     }
 }

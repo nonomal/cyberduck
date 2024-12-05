@@ -16,9 +16,6 @@ package ch.cyberduck.core.sds;
  */
 
 import ch.cyberduck.core.CachingVersionIdProvider;
-import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DefaultPathContainerService;
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.URIEncoder;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -27,24 +24,14 @@ import ch.cyberduck.core.features.VersionIdProvider;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sds.io.swagger.client.ApiException;
 import ch.cyberduck.core.sds.io.swagger.client.api.NodesApi;
-import ch.cyberduck.core.sds.io.swagger.client.model.FileKey;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
 import ch.cyberduck.core.sds.io.swagger.client.model.NodeList;
-import ch.cyberduck.core.sds.triplecrypt.TripleCryptConverter;
 import ch.cyberduck.core.unicode.NFCNormalizer;
 import ch.cyberduck.core.unicode.UnicodeNormalizer;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.ByteBuffer;
-
-import com.dracoon.sdk.crypto.Crypto;
-import com.dracoon.sdk.crypto.model.PlainFileKey;
-import com.fasterxml.jackson.databind.ObjectWriter;
 
 public class SDSNodeIdProvider extends CachingVersionIdProvider implements VersionIdProvider {
     private static final Logger log = LogManager.getLogger(SDSNodeIdProvider.class);
@@ -60,18 +47,14 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
     }
 
     @Override
-    public String getVersionId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getVersionId(final Path file) throws BackgroundException {
         if(StringUtils.isNotBlank(file.attributes().getVersionId())) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return version %s from attributes for file %s", file.attributes().getVersionId(), file));
-            }
+            log.debug("Return version {} from attributes for file {}", file.attributes().getVersionId(), file);
             return file.attributes().getVersionId();
         }
-        final String cached = super.getVersionId(file, listener);
+        final String cached = super.getVersionId(file);
         if(cached != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return cached versionid %s for file %s", cached, file));
-            }
+            log.debug("Return cached versionid {} for file {}", cached, file);
             return cached;
         }
         return this.getNodeId(file, new HostPreferences(session.getHost()).getInteger("sds.listing.chunksize"));
@@ -94,17 +77,24 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
             int offset = 0;
             NodeList nodes;
             do {
-                nodes = new NodesApi(session.getClient()).searchNodes(
-                        URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
-                        StringUtils.EMPTY, -1, null,
-                        String.format("type:eq:%s|parentPath:eq:%s/", type, file.getParent().isRoot() ? StringUtils.EMPTY : file.getParent().getAbsolute()),
-                        null, offset, chunksize, null);
+                if(StringUtils.isNoneBlank(file.getParent().attributes().getVersionId())) {
+                    nodes = new NodesApi(session.getClient()).searchNodes(
+                            URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
+                            StringUtils.EMPTY, 0, Long.valueOf(file.getParent().attributes().getVersionId()),
+                            String.format("type:eq:%s", type),
+                            null, offset, chunksize, null);
+                }
+                else {
+                    nodes = new NodesApi(session.getClient()).searchNodes(
+                            URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
+                            StringUtils.EMPTY, -1, null,
+                            String.format("type:eq:%s|parentPath:eq:%s/", type, file.getParent().isRoot() ? StringUtils.EMPTY : file.getParent().getAbsolute()),
+                            null, offset, chunksize, null);
+                }
                 for(Node node : nodes.getItems()) {
-                    // Case insensitive
+                    // Case-insensitive
                     if(node.getName().equalsIgnoreCase(normalizer.normalize(file.getName()).toString())) {
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("Return node %s for file %s", node.getId(), file));
-                        }
+                        log.info("Return node {} for file {}", node.getId(), file);
                         return this.cache(file, node.getId().toString());
                     }
                 }
@@ -116,39 +106,5 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
         catch(ApiException e) {
             throw new SDSExceptionMappingService(this).map("Failure to read attributes of {0}", e, file);
         }
-    }
-
-    public static boolean isEncrypted(final Path file) {
-        if(file.isRoot()) {
-            return false;
-        }
-        if(file.attributes().getCustom().containsKey(SDSAttributesFinderFeature.KEY_ENCRYPTED)) {
-            return Boolean.parseBoolean(file.attributes().getCustom().get(SDSAttributesFinderFeature.KEY_ENCRYPTED));
-        }
-        final Path parent = file.getParent();
-        if(parent.attributes().getCustom().containsKey(SDSAttributesFinderFeature.KEY_ENCRYPTED)) {
-            return Boolean.parseBoolean(parent.attributes().getCustom().get(SDSAttributesFinderFeature.KEY_ENCRYPTED));
-        }
-        final Path container = new DefaultPathContainerService().getContainer(file);
-        if(container.attributes().getCustom().containsKey(SDSAttributesFinderFeature.KEY_ENCRYPTED)) {
-            return Boolean.parseBoolean(container.attributes().getCustom().get(SDSAttributesFinderFeature.KEY_ENCRYPTED));
-        }
-        return false;
-    }
-
-    public ByteBuffer getFileKey() throws BackgroundException {
-        return this.toBuffer(TripleCryptConverter.toSwaggerFileKey(Crypto.generateFileKey(PlainFileKey.Version.AES256GCM)));
-    }
-
-    public ByteBuffer toBuffer(final FileKey fileKey) throws BackgroundException {
-        final ObjectWriter writer = session.getClient().getJSON().getContext(null).writerFor(FileKey.class);
-        final ByteArrayOutputStream out = new ByteArrayOutputStream();
-        try {
-            writer.writeValue(out, fileKey);
-        }
-        catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map(e);
-        }
-        return ByteBuffer.wrap(out.toByteArray());
     }
 }

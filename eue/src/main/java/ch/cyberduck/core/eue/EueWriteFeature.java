@@ -17,7 +17,6 @@ package ch.cyberduck.core.eue;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.MimeTypeService;
 import ch.cyberduck.core.Path;
@@ -38,6 +37,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import org.apache.commons.codec.DecoderException;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -45,16 +45,13 @@ import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.BufferedHttpEntity;
 import org.apache.http.util.EntityUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.EnumSet;
 
 public class EueWriteFeature extends AbstractHttpWriteFeature<EueWriteFeature.Chunk> {
-    private static final Logger log = LogManager.getLogger(EueWriteFeature.class);
 
     public static final String RESOURCE_ID = "resourceId";
 
@@ -73,12 +70,12 @@ public class EueWriteFeature extends AbstractHttpWriteFeature<EueWriteFeature.Ch
         final String resourceId;
         if(null == status.getUrl()) {
             if(status.isExists()) {
-                resourceId = fileid.getFileId(file, new DisabledListProgressListener());
+                resourceId = fileid.getFileId(file);
                 uploadUri = EueUploadHelper.updateResource(session, resourceId, status, UploadType.SIMPLE).getUploadURI();
             }
             else {
                 final ResourceCreationResponseEntry uploadResourceCreationResponseEntry = EueUploadHelper
-                        .createResource(session, fileid.getFileId(file.getParent(), new DisabledListProgressListener()), file.getName(),
+                        .createResource(session, fileid.getFileId(file.getParent()), file.getName(),
                                 status, UploadType.SIMPLE);
                 resourceId = EueResourceIdProvider.getResourceIdFromResourceUri(uploadResourceCreationResponseEntry.getHeaders().getLocation());
                 uploadUri = uploadResourceCreationResponseEntry.getEntity().getUploadURI();
@@ -89,9 +86,9 @@ public class EueWriteFeature extends AbstractHttpWriteFeature<EueWriteFeature.Ch
             resourceId = status.getParameters().get(RESOURCE_ID);
         }
         final HttpResponseOutputStream<Chunk> stream = this.write(file, status,
-                new DelayedHttpEntityCallable<Chunk>() {
+                new DelayedHttpEntityCallable<Chunk>(file) {
                     @Override
-                    public Chunk call(final AbstractHttpEntity entity) throws BackgroundException {
+                    public Chunk call(final HttpEntity entity) throws BackgroundException {
                         try {
                             final HttpResponse response;
                             final StringBuilder uploadUriWithParameters = new StringBuilder(uploadUri);
@@ -128,10 +125,10 @@ public class EueWriteFeature extends AbstractHttpWriteFeature<EueWriteFeature.Ch
                             }
                         }
                         catch(HttpResponseException e) {
-                            throw new DefaultHttpResponseExceptionMappingService().map(e);
+                            throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed", e, file);
                         }
                         catch(IOException e) {
-                            throw new DefaultIOExceptionMappingService().map(e);
+                            throw new DefaultIOExceptionMappingService().map("Upload {0} failed", e, file);
                         }
                         catch(DecoderException e) {
                             throw new ChecksumException(LocaleFactory.localizedString("Checksum failure", "Error"), e);
@@ -154,13 +151,8 @@ public class EueWriteFeature extends AbstractHttpWriteFeature<EueWriteFeature.Ch
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
-    public boolean timestamp() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum);
     }
 
     public void cancel(final String uploadUri) throws BackgroundException {

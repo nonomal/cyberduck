@@ -37,7 +37,7 @@ public final class ConnectionControllerFactory {
         synchronized(NSApplication.sharedApplication()) {
             if(!open.containsKey(parent)) {
                 final ConnectionController c = new ConnectionController(
-                    new Host(ProtocolFactory.get().forName(PreferencesFactory.get().getProperty("connection.protocol.default")))
+                    new Host(ProtocolFactory.get().forNameOrDefault(PreferencesFactory.get().getProperty("connection.protocol.default")))
                 ) {
                     @Override
                     public void invalidate() {
@@ -55,5 +55,9 @@ public final class ConnectionControllerFactory {
                 return c;
             }
         }
+    }
+
+    public static void remove(final BrowserController controller) {
+        open.remove(controller);
     }
 }

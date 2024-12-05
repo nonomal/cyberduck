@@ -1,4 +1,6 @@
-package ch.cyberduck.core.eue;/*
+package ch.cyberduck.core.eue;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -21,44 +23,46 @@ import ch.cyberduck.core.UrlProvider;
 import ch.cyberduck.core.eue.io.swagger.client.model.ShareCreationResponseEntity;
 import ch.cyberduck.core.eue.io.swagger.client.model.UserSharesModel;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.net.URI;
 import java.util.Collections;
+import java.util.EnumSet;
 
 public class EueShareUrlProvider implements UrlProvider {
-    private static final Logger log = LogManager.getLogger(EueShareUrlProvider.class);
 
     private final Host host;
     private final UserSharesModel shares;
 
     public EueShareUrlProvider(final Host host, final UserSharesModel shares) {
         this.host = host;
-        this.shares = shares;
+        this.shares = null == shares ? new UserSharesModel() : shares;
     }
 
     @Override
-    public DescriptiveUrlBag toUrl(final Path file) {
+    public DescriptiveUrlBag toUrl(final Path file, final EnumSet<DescriptiveUrl.Type> types) {
         if(DescriptiveUrl.EMPTY == file.attributes().getLink()) {
             if(null == file.attributes().getFileId()) {
                 return DescriptiveUrlBag.empty();
             }
-            final DescriptiveUrl share = toUrl(host, EueShareFeature.findShareForResource(shares,
-                    file.attributes().getFileId()));
-            if(DescriptiveUrl.EMPTY == share) {
-                return DescriptiveUrlBag.empty();
+            if(types.contains(DescriptiveUrl.Type.signed)) {
+                final DescriptiveUrl share = toUrl(host, EueShareFeature.findShareForResource(shares,
+                        file.attributes().getFileId()));
+                if(DescriptiveUrl.EMPTY == share) {
+                    return DescriptiveUrlBag.empty();
+                }
+                return new DescriptiveUrlBag(Collections.singleton(share));
             }
-            return new DescriptiveUrlBag(Collections.singleton(share));
+            return DescriptiveUrlBag.empty();
         }
-        return new DescriptiveUrlBag(Collections.singleton(file.attributes().getLink()));
+        if(types.contains(DescriptiveUrl.Type.http)) {
+            return new DescriptiveUrlBag(Collections.singleton(file.attributes().getLink()));
+        }
+        return DescriptiveUrlBag.empty();
     }
 
     protected static DescriptiveUrl toUrl(final Host host, final ShareCreationResponseEntity shareCreationResponse) {
         if(null == shareCreationResponse) {
             return DescriptiveUrl.EMPTY;
         }
-        return new DescriptiveUrl(URI.create(EueShareFeature.toBrandedUri(shareCreationResponse.getGuestURI(),
-                host.getProperty("share.hostname"))), DescriptiveUrl.Type.signed);
+        return new DescriptiveUrl(EueShareFeature.toBrandedUri(shareCreationResponse.getGuestURI(),
+                host.getProperty("share.hostname")), DescriptiveUrl.Type.signed);
     }
 }

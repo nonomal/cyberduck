@@ -21,6 +21,7 @@ package ch.cyberduck.core.local;
 import ch.cyberduck.core.Filter;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.LocalFactory;
+import ch.cyberduck.core.NullFilter;
 import ch.cyberduck.core.io.watchservice.RegisterWatchService;
 import ch.cyberduck.core.io.watchservice.WatchServiceFactory;
 import ch.cyberduck.core.threading.DefaultThreadPool;
@@ -30,15 +31,15 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.ClosedWatchServiceException;
-import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
-import java.util.regex.Pattern;
 
 import static java.nio.file.StandardWatchEventKinds.*;
 
@@ -47,6 +48,7 @@ public final class FileWatcher {
 
     private final RegisterWatchService monitor;
     private final ThreadPool pool;
+    private final Set<Local> registered = new HashSet<>();
 
     public FileWatcher() {
         this(WatchServiceFactory.get());
@@ -54,10 +56,10 @@ public final class FileWatcher {
 
     public FileWatcher(final RegisterWatchService monitor) {
         this.monitor = monitor;
-        this.pool = new DefaultThreadPool("watcher", 1);
+        this.pool = new DefaultThreadPool("watcher");
     }
 
-    public static final class DefaultFileFilter implements Filter<Local> {
+    public static final class DefaultFileFilter extends NullFilter<Local> {
         private final Local file;
 
         public DefaultFileFilter(final Local file) {
@@ -68,23 +70,23 @@ public final class FileWatcher {
         public boolean accept(final Local f) {
             return StringUtils.equals(file.getName(), f.getName());
         }
+    }
 
-        @Override
-        public Pattern toPattern() {
-            return Pattern.compile(file.getName());
-        }
+    public CountDownLatch register(final Local file, final FileWatcherListener listener) throws IOException {
+        return this.register(file.getParent(), new DefaultFileFilter(file), listener);
     }
 
     public CountDownLatch register(final Local folder, final Filter<Local> filter, final FileWatcherListener listener) throws IOException {
-        // Make sure to canonicalize the watched folder
-        final Path canonical = new File(folder.getAbsolute()).getCanonicalFile().toPath();
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Register folder %s watching with filter %s", canonical, filter));
+        if(registered.contains(folder)) {
+            log.warn("Skip duplicate registration for {} in {}", folder, monitor);
+            return new CountDownLatch(0);
         }
-        final WatchKey key = monitor.register(canonical, new WatchEvent.Kind[]{ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY});
+        log.debug("Register folder {} watching with filter {}", folder, filter);
+        final WatchKey key = monitor.register(Paths.get(folder.getAbsolute()), new WatchEvent.Kind[]{ENTRY_CREATE, ENTRY_DELETE, ENTRY_MODIFY});
         if(!key.isValid()) {
-            throw new IOException(String.format("Failure registering for events in %s", canonical));
+            throw new IOException(String.format("Failure registering for events in %s", folder));
         }
+        registered.add(folder);
         final CountDownLatch lock = new CountDownLatch(1);
         pool.execute(new Callable<Boolean>() {
             @Override
@@ -94,28 +96,23 @@ public final class FileWatcher {
                     final WatchKey key;
                     try {
                         lock.countDown();
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Wait for key from watch service %s", monitor));
-                        }
+                        log.debug("Wait for key from watch service {}", monitor);
                         key = monitor.take();
                     }
                     catch(ClosedWatchServiceException e) {
+                        log.warn("Exit watching folder {} for closed monitor {}", folder, monitor);
                         // If this watch service is closed
                         return true;
                     }
                     catch(InterruptedException e) {
                         return false;
                     }
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Retrieved key %s from watch service %s", key, monitor));
-                    }
+                    log.debug("Retrieved key {} from watch service {}", key, monitor);
                     for(WatchEvent<?> event : key.pollEvents()) {
                         final WatchEvent.Kind<?> kind = event.kind();
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("Detected file system event %s", kind.name()));
-                        }
+                        log.info("Detected file system event {}", kind.name());
                         if(kind == OVERFLOW) {
-                            log.error(String.format("Overflow event for %s", folder));
+                            log.error("Overflow event for {}", folder);
                             continue;
                         }
                         // The filename is the context of the event. May be absolute or relative path name.
@@ -123,13 +120,14 @@ public final class FileWatcher {
                             callback(folder, event, listener);
                         }
                         else {
-                            log.warn(String.format("Ignored file system event for unknown file %s", event.context()));
+                            log.warn("Ignored file system event for unknown file {}", event.context());
                         }
                     }
                     // Reset the key -- this step is critical to receive further watch events.
                     boolean valid = key.reset();
                     if(!valid) {
                         // The key is no longer valid and the loop can exit.
+                        log.warn("Exit watching folder {}", folder);
                         return true;
                     }
                 }
@@ -147,9 +145,7 @@ public final class FileWatcher {
 
     private void callback(final Local folder, final WatchEvent<?> event, final FileWatcherListener l) {
         final WatchEvent.Kind<?> kind = event.kind();
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Process file system event %s for %s", kind.name(), event.context()));
-        }
+        log.info("Process file system event {} for {}", kind.name(), event.context());
         if(ENTRY_MODIFY == kind) {
             l.fileWritten(normalize(folder, event.context().toString()));
         }
@@ -160,7 +156,7 @@ public final class FileWatcher {
             l.fileCreated(normalize(folder, event.context().toString()));
         }
         else {
-            log.debug(String.format("Ignored file system event %s for %s", kind.name(), event.context()));
+            log.debug("Ignored file system event {} for {}", kind.name(), event.context());
         }
     }
 
@@ -168,6 +164,7 @@ public final class FileWatcher {
         try {
             monitor.close();
             pool.shutdown(false);
+            registered.clear();
         }
         catch(IOException e) {
             log.error("Failure closing file watcher monitor", e);

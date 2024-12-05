@@ -1,4 +1,6 @@
-package ch.cyberduck.core.box;/*
+package ch.cyberduck.core.box;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -15,7 +17,6 @@ package ch.cyberduck.core.box;/*
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.box.io.swagger.client.JSON;
 import ch.cyberduck.core.box.io.swagger.client.model.File;
@@ -38,7 +39,6 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.http.message.BasicHeader;
@@ -48,6 +48,7 @@ import org.joda.time.DateTime;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.EnumSet;
 
 public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
     private static final Logger log = LogManager.getLogger(BoxWriteFeature.class);
@@ -66,14 +67,14 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
 
     @Override
     public HttpResponseOutputStream<File> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        final DelayedHttpEntityCallable<File> command = new DelayedHttpEntityCallable<File>() {
+        final DelayedHttpEntityCallable<File> command = new DelayedHttpEntityCallable<File>(file) {
             @Override
-            public File call(final AbstractHttpEntity entity) throws BackgroundException {
+            public File call(final HttpEntity entity) throws BackgroundException {
                 try {
                     final HttpPost request;
                     if(status.isExists()) {
                         request = new HttpPost(String.format("%s/files/%s/content?fields=%s", client.getBasePath(),
-                                fileid.getFileId(file, new DisabledListProgressListener()),
+                                fileid.getFileId(file),
                                 String.join(",", BoxAttributesFinderFeature.DEFAULT_FIELDS)));
                     }
                     else {
@@ -90,8 +91,9 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
                     final ByteArrayOutputStream content = new ByteArrayOutputStream();
                     new JSON().getContext(null).writeValue(content, new FilescontentAttributes()
                             .name(file.getName())
-                            .parent(new FilescontentAttributesParent().id(fileid.getFileId(file.getParent(), new DisabledListProgressListener())))
-                            .contentModifiedAt(status.getTimestamp() != null ? new DateTime(status.getTimestamp()) : null)
+                            .parent(new FilescontentAttributesParent().id(fileid.getFileId(file.getParent())))
+                            .contentCreatedAt(status.getCreated() != null ? new DateTime(status.getCreated()) : null)
+                            .contentModifiedAt(status.getModified() != null ? new DateTime(status.getModified()) : null)
                     );
                     final MultipartEntityBuilder multipart = MultipartEntityBuilder.create();
                     multipart.addBinaryBody("attributes", content.toByteArray());
@@ -105,7 +107,7 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
                             request.addHeader(new BasicHeader(HttpHeaders.IF_MATCH, status.getRemote().getETag()));
                         }
                         else {
-                            log.warn(String.format("Missing remote attributes in transfer status to read current ETag for %s", file));
+                            log.warn("Missing remote attributes in transfer status to read current ETag for {}", file);
                         }
                     }
                     final Files files = session.getClient().execute(request, new BoxClientErrorResponseHandler<Files>() {
@@ -114,16 +116,14 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
                             return new JSON().getContext(null).readValue(entity.getContent(), Files.class);
                         }
                     });
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Received response %s for upload of %s", files, file));
-                    }
+                    log.debug("Received response {} for upload of {}", files, file);
                     if(files.getEntries().stream().findFirst().isPresent()) {
                         return files.getEntries().stream().findFirst().get();
                     }
                     throw new NotfoundException(file.getAbsolute());
                 }
                 catch(HttpResponseException e) {
-                    throw new DefaultHttpResponseExceptionMappingService().map(e);
+                    throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed", e, file);
                 }
                 catch(IOException e) {
                     throw new DefaultIOExceptionMappingService().map("Upload {0} failed", e, file);
@@ -144,7 +144,7 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum, Flags.mime);
     }
 }

@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -24,6 +26,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
 
+import java.util.EnumSet;
 import java.util.Map;
 
 public class BrickDeleteFeature implements Delete {
@@ -48,7 +51,7 @@ public class BrickDeleteFeature implements Delete {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 }

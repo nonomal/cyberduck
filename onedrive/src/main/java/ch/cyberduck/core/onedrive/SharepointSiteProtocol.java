@@ -15,6 +15,11 @@ package ch.cyberduck.core.onedrive;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.Protocol;
+
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class SharepointSiteProtocol extends GraphProtocol {
     @Override
     public String getIdentifier() {
@@ -27,6 +32,11 @@ public class SharepointSiteProtocol extends GraphProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public String getName() {
         return "Sharepoint Site";
     }
@@ -34,5 +44,10 @@ public class SharepointSiteProtocol extends GraphProtocol {
     @Override
     public String getPrefix() {
         return String.format("%s.%s", SharepointProtocol.class.getPackage().getName(), "SharepointSite");
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
     }
 }

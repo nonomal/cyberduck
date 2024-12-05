@@ -15,10 +15,9 @@ package ch.cyberduck.core.storegate;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
+import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.storegate.io.swagger.client.ApiException;
 import ch.cyberduck.core.storegate.io.swagger.client.api.FilesApi;
 import ch.cyberduck.core.storegate.io.swagger.client.model.UpdateFilePropertiesRequest;
@@ -26,7 +25,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.joda.time.DateTime;
 
-public class StoregateTimestampFeature extends DefaultTimestampFeature {
+public class StoregateTimestampFeature implements Timestamp {
 
     private final StoregateSession session;
     private final StoregateIdProvider fileid;
@@ -40,8 +39,13 @@ public class StoregateTimestampFeature extends DefaultTimestampFeature {
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
         try {
             final FilesApi files = new FilesApi(session.getClient());
-            files.filesUpdateFile(fileid.getFileId(file, new DisabledListProgressListener()),
-                new UpdateFilePropertiesRequest().modified(new DateTime(status.getTimestamp())));
+            status.setResponse(new StoregateAttributesFinderFeature(session, fileid).toAttributes(files.filesUpdateFile(fileid.getFileId(file),
+                                    new UpdateFilePropertiesRequest()
+                                            .created(null != status.getCreated() ? new DateTime(status.getCreated()) : null)
+                                            .modified(null != status.getModified() ? new DateTime(status.getModified()) : null)
+                            )
+                    )
+            );
         }
         catch(ApiException e) {
             throw new StoregateExceptionMappingService(fileid).map("Failure to write attributes of {0}", e, file);

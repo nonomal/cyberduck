@@ -19,11 +19,10 @@ package ch.cyberduck.core.s3;
 
 import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.ConnectionCallback;
+import ch.cyberduck.core.Header;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
-import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.features.Encryption;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.http.AbstractHttpWriteFeature;
@@ -36,19 +35,23 @@ import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import org.apache.commons.io.IOUtils;
+import org.apache.commons.io.input.ProxyInputStream;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.http.entity.AbstractHttpEntity;
+import org.apache.http.HttpEntity;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jets3t.service.ServiceException;
-import org.jets3t.service.model.MultipartPart;
-import org.jets3t.service.model.MultipartUpload;
 import org.jets3t.service.model.S3Object;
 import org.jets3t.service.model.StorageObject;
-import org.jets3t.service.utils.ServiceUtils;
 
-import java.util.List;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> implements Write<StorageObject> {
     private static final Logger log = LogManager.getLogger(S3WriteFeature.class);
@@ -58,7 +61,7 @@ public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> impl
     private final S3Session session;
 
     public S3WriteFeature(final S3Session session, final S3AccessControlListFeature acl) {
-        super(new S3AttributesAdapter());
+        super(new S3AttributesAdapter(session.getHost()));
         this.session = session;
         this.containerService = session.getFeature(PathContainerService.class);
         this.acl = acl;
@@ -67,23 +70,18 @@ public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> impl
     @Override
     public HttpResponseOutputStream<StorageObject> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final S3Object object = this.getDetails(file, status);
-        final DelayedHttpEntityCallable<StorageObject> command = new DelayedHttpEntityCallable<StorageObject>() {
+        final DelayedHttpEntityCallable<StorageObject> command = new DelayedHttpEntityCallable<StorageObject>(file) {
             @Override
-            public StorageObject call(final AbstractHttpEntity entity) throws BackgroundException {
+            public StorageObject call(final HttpEntity entity) throws BackgroundException {
                 try {
                     final RequestEntityRestStorageService client = session.getClient();
                     final Path bucket = containerService.getContainer(file);
                     client.putObjectWithRequestEntityImpl(
                             bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), object, entity, status.getParameters());
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Saved object %s with checksum %s", file, object.getETag()));
-                    }
+                    log.debug("Saved object {} with checksum {}", file, object.getETag());
                 }
                 catch(ServiceException e) {
                     throw new S3ExceptionMappingService().map("Upload {0} failed", e, file);
-                }
-                if(status.getTimestamp() != null) {
-                    object.addMetadata(S3TimestampFeature.METADATA_MODIFICATION_DATE, String.valueOf(status.getTimestamp()));
                 }
                 return object;
             }
@@ -108,10 +106,12 @@ public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> impl
         final Checksum checksum = status.getChecksum();
         if(Checksum.NONE != checksum) {
             switch(checksum.algorithm) {
-                case md5:
-                    object.setMd5Hash(ServiceUtils.fromHex(checksum.hash));
-                    break;
                 case sha256:
+                    if(!status.isSegment()) {
+                        if(new HostPreferences(session.getHost()).getBoolean("s3.upload.checksum.header")) {
+                            object.addMetadata("x-amz-checksum-sha256", checksum.base64);
+                        }
+                    }
                     object.addMetadata("x-amz-content-sha256", checksum.hash);
                     break;
             }
@@ -129,17 +129,21 @@ public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> impl
         }
         if(!Acl.EMPTY.equals(status.getAcl())) {
             if(status.getAcl().isCanned()) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Set canned ACL %s for %s", status.getAcl(), file));
-                }
+                log.debug("Set canned ACL {} for {}", status.getAcl(), file);
                 object.setAcl(acl.toAcl(status.getAcl()));
                 // Reset in status to skip setting ACL in upload filter already applied as canned ACL
                 status.setAcl(Acl.EMPTY);
             }
         }
-        if(status.getTimestamp() != null) {
+        if(status.getModified() != null) {
             // Interoperable with rsync
-            object.addMetadata(S3TimestampFeature.METADATA_MODIFICATION_DATE, String.valueOf(status.getTimestamp()));
+            final Header header = S3TimestampFeature.toHeader(S3TimestampFeature.METADATA_MODIFICATION_DATE, status.getModified());
+            object.addMetadata(String.format("%s%s", session.getRestMetadataPrefix(), header.getName()), header.getValue());
+        }
+        if(status.getCreated() != null) {
+            // Interoperable with rsync
+            final Header header = S3TimestampFeature.toHeader(S3TimestampFeature.METADATA_CREATION_DATE, status.getCreated());
+            object.addMetadata(String.format("%s%s", session.getRestMetadataPrefix(), header.getName()), header.getValue());
         }
         if(status.getLength() != TransferStatus.UNKNOWN_LENGTH) {
             object.setContentLength(status.getLength());
@@ -148,33 +152,36 @@ public class S3WriteFeature extends AbstractHttpWriteFeature<StorageObject> impl
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        if(new HostPreferences(session.getHost()).getBoolean("s3.upload.multipart")) {
-            try {
-                final S3DefaultMultipartService multipartService = new S3DefaultMultipartService(session);
-                final List<MultipartUpload> upload = multipartService.find(file);
-                if(!upload.isEmpty()) {
-                    Long size = 0L;
-                    for(MultipartPart completed : multipartService.list(upload.iterator().next())) {
-                        size += completed.getSize();
-                    }
-                    return new Append(true).withStatus(status).withSize(size);
-                }
-            }
-            catch(AccessDeniedException | InteroperabilityException e) {
-                log.warn(String.format("Ignore failure listing incomplete multipart uploads. %s", e));
-            }
-        }
-        return Write.override;
-    }
-
-    @Override
-    public boolean timestamp() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum, Flags.acl, Flags.mime);
     }
 
     @Override
     public ChecksumCompute checksum(final Path file, final TransferStatus status) {
-        return ChecksumComputeFactory.get(HashAlgorithm.sha256);
+        return new ChecksumCompute() {
+            @Override
+            public Set<Checksum> computeAll(final InputStream in, final TransferStatus status) throws BackgroundException {
+                final HashSet<Checksum> checksums = new HashSet<>(Arrays.asList(
+                        ChecksumComputeFactory.get(HashAlgorithm.sha256).compute(new ProxyInputStream(in) {
+                            @Override
+                            public void close() throws IOException {
+                                in.reset();
+                            }
+                        }, status),
+                        ChecksumComputeFactory.get(HashAlgorithm.md5).compute(new ProxyInputStream(in) {
+                            @Override
+                            public void close() throws IOException {
+                                in.reset();
+                            }
+                        }, status)));
+                IOUtils.closeQuietly(in);
+                return checksums;
+            }
+
+            @Override
+            public Checksum compute(final InputStream in, final TransferStatus status) throws BackgroundException {
+                return ChecksumComputeFactory.get(HashAlgorithm.sha256).compute(in, status);
+            }
+        };
     }
 }

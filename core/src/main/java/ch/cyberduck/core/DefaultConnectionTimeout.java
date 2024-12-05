@@ -24,6 +24,7 @@ import org.apache.logging.log4j.Logger;
 
 public class DefaultConnectionTimeout implements ConnectionTimeout {
     private static final Logger log = LogManager.getLogger(DefaultConnectionTimeout.class);
+
     private static final Preferences mutablePreferences = PreferencesFactory.get();
 
     public final static int TIMEOUT_MIN = 10;
@@ -46,6 +47,7 @@ public class DefaultConnectionTimeout implements ConnectionTimeout {
 
     @Override
     public void setTimeout(final int timeout) {
+        log.debug("Set connection timeout to {}", timeout);
         mutablePreferences.setProperty(PREFERENCE_KEY, clamp(timeout));
     }
 

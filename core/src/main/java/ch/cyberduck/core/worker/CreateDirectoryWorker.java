@@ -19,9 +19,12 @@ package ch.cyberduck.core.worker;
 
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AclPermission;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Encryption;
 import ch.cyberduck.core.features.UnixPermission;
@@ -49,15 +52,13 @@ public class CreateDirectoryWorker extends Worker<Path> {
     @Override
     public Path run(final Session<?> session) throws BackgroundException {
         final Directory feature = session.getFeature(Directory.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
-        final TransferStatus status = new TransferStatus();
+        log.debug("Run with feature {}", feature);
+        final TransferStatus status = new TransferStatus().withLength(0L);
         final Encryption encryption = session.getFeature(Encryption.class);
         if(encryption != null) {
             status.setEncryption(encryption.getDefault(folder));
         }
-        status.setTimestamp(System.currentTimeMillis());
+        status.setModified(System.currentTimeMillis());
         if(PreferencesFactory.get().getBoolean("touch.permissions.change")) {
             final UnixPermission permission = session.getFeature(UnixPermission.class);
             if(permission != null) {
@@ -65,11 +66,15 @@ public class CreateDirectoryWorker extends Worker<Path> {
             }
             final AclPermission acl = session.getFeature(AclPermission.class);
             if(acl != null) {
-                status.setAcl(acl.getDefault(EnumSet.of(Path.Type.directory)));
+                status.setAcl(acl.getDefault(folder));
             }
         }
         status.setRegion(region);
-        return feature.mkdir(folder, status);
+        final Path result = feature.mkdir(folder, status);
+        if(PathAttributes.EMPTY.equals(result.attributes())) {
+            return result.withAttributes(session.getFeature(AttributesFinder.class).find(result));
+        }
+        return result;
     }
 
     @Override
@@ -93,7 +98,7 @@ public class CreateDirectoryWorker extends Worker<Path> {
             return false;
         }
         final CreateDirectoryWorker that = (CreateDirectoryWorker) o;
-        if(!Objects.equals(folder, that.folder)) {
+        if(!new SimplePathPredicate(folder).test(that.folder)) {
             return false;
         }
         return Objects.equals(region, that.region);
@@ -102,7 +107,7 @@ public class CreateDirectoryWorker extends Worker<Path> {
 
     @Override
     public int hashCode() {
-        int result = folder != null ? folder.hashCode() : 0;
+        int result = folder != null ? new SimplePathPredicate(folder).hashCode() : 0;
         result = 31 * result + (region != null ? region.hashCode() : 0);
         return result;
     }

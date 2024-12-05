@@ -44,9 +44,7 @@ public class S3BucketCreateService {
     }
 
     public void create(final Path bucket, final String region) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Create bucket %s in region %s", bucket, region));
-        }
+        log.debug("Create bucket {} in region {}", bucket, region);
         if(!new HostPreferences(session.getHost()).getBoolean("s3.bucket.virtualhost.disable")) {
             if(!ServiceUtils.isBucketNameValidDNSName(bucket.getName())) {
                 throw new InteroperabilityException(LocaleFactory.localizedString("Bucket name is not DNS compatible", "S3"));
@@ -71,7 +69,7 @@ public class S3BucketCreateService {
             }
             // Create bucket
             session.getClient().createBucket(URIEncoder.encode(containerService.getContainer(bucket).getName()),
-                    "us-east-1".equals(region) ? "US" : region, acl);
+                    S3LocationFeature.DEFAULT_REGION.getIdentifier().equals(region) ? "US" : region, acl);
         }
         catch(ServiceException e) {
             throw new S3ExceptionMappingService().map("Cannot create folder {0}", e, bucket);

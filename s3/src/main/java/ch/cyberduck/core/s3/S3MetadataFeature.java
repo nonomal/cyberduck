@@ -19,8 +19,8 @@ package ch.cyberduck.core.s3;
  */
 
 import ch.cyberduck.core.Acl;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -35,8 +35,9 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.jets3t.service.Constants;
 import org.jets3t.service.ServiceException;
-import org.jets3t.service.model.StorageObject;
+import org.jets3t.service.model.S3Object;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -55,7 +56,7 @@ public class S3MetadataFeature implements Headers {
     }
 
     @Override
-    public Map<String, String> getDefault(final Local local) {
+    public Map<String, String> getDefault() {
         return new HostPreferences(session.getHost()).getMap("s3.metadata.default");
     }
 
@@ -66,54 +67,47 @@ public class S3MetadataFeature implements Headers {
 
     @Override
     public void setMetadata(final Path file, final TransferStatus status) throws BackgroundException {
-        if(file.isFile() || file.isPlaceholder()) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Write metadata %s for file %s", status, file));
-            }
+        log.debug("Write metadata {} for file {}", status, file);
+        try {
+            final S3Object target = new S3Object(containerService.getKey(file));
+            target.replaceAllMetadata(new HashMap<>(status.getMetadata()));
             try {
-                final StorageObject target = new StorageObject(containerService.getKey(file));
-                target.replaceAllMetadata(new HashMap<>(status.getMetadata()));
-                if(status.getTimestamp() != null) {
-                    target.addMetadata(S3TimestampFeature.METADATA_MODIFICATION_DATE, String.valueOf(status.getTimestamp()));
-                }
-                try {
-                    // Apply non standard ACL
-                    final Acl list = acl.getPermission(file);
-                    if(list.isEditable()) {
-                        target.setAcl(acl.toAcl(list));
-                    }
-                }
-                catch(AccessDeniedException | InteroperabilityException e) {
-                    log.warn(String.format("Ignore failure %s", e));
-                }
-                final Redundancy storageClassFeature = session.getFeature(Redundancy.class);
-                if(storageClassFeature != null) {
-                    target.setStorageClass(storageClassFeature.getClass(file));
-                }
-                final Encryption encryptionFeature = session.getFeature(Encryption.class);
-                if(encryptionFeature != null) {
-                    final Encryption.Algorithm encryption = encryptionFeature.getEncryption(file);
-                    target.setServerSideEncryptionAlgorithm(encryption.algorithm);
-                    // Set custom key id stored in KMS
-                    target.setServerSideEncryptionKmsKeyId(encryption.key);
-                }
-                final Path bucket = containerService.getContainer(file);
-                final Map<String, Object> metadata = session.getClient().updateObjectMetadata(
-                        bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), target);
-                if(metadata.containsKey("version-id")) {
-                    file.attributes().setVersionId(metadata.get("version-id").toString());
+                // Apply non-standard ACL
+                final Acl list = acl.getPermission(file);
+                if(list.isEditable()) {
+                    target.setAcl(acl.toAcl(list));
                 }
             }
-            catch(ServiceException e) {
-                final BackgroundException failure = new S3ExceptionMappingService().map("Failure to write attributes of {0}", e, file);
-                if(file.isPlaceholder()) {
-                    if(failure instanceof NotfoundException) {
-                        // No placeholder file may exist but we just have a common prefix
-                        return;
-                    }
-                }
-                throw failure;
+            catch(AccessDeniedException | InteroperabilityException e) {
+                log.warn("Ignore failure {}", e.getMessage());
             }
+            final Redundancy storageClassFeature = session.getFeature(Redundancy.class);
+            if(storageClassFeature != null) {
+                target.setStorageClass(storageClassFeature.getClass(file));
+            }
+            final Encryption encryptionFeature = session.getFeature(Encryption.class);
+            if(encryptionFeature != null) {
+                final Encryption.Algorithm encryption = encryptionFeature.getEncryption(file);
+                target.setServerSideEncryptionAlgorithm(encryption.algorithm);
+                // Set custom key id stored in KMS
+                target.setServerSideEncryptionKmsKeyId(encryption.key);
+            }
+            final Path bucket = containerService.getContainer(file);
+            final Map<String, Object> result = session.getClient().updateObjectMetadata(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), target);
+            final PathAttributes attributes = new S3AttributesAdapter(session.getHost()).toAttributes(target);
+            final Map complete = (Map) result.get(Constants.KEY_FOR_COMPLETE_METADATA);
+            attributes.setVersionId((String) complete.get(Constants.AMZ_VERSION_ID));
+            status.setResponse(attributes);
+        }
+        catch(ServiceException e) {
+            final BackgroundException failure = new S3ExceptionMappingService().map("Failure to write attributes of {0}", e, file);
+            if(file.isDirectory()) {
+                if(failure instanceof NotfoundException) {
+                    // No placeholder file may exist but we just have a common prefix
+                    return;
+                }
+            }
+            throw failure;
         }
     }
 }

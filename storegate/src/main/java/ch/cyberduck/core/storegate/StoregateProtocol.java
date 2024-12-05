@@ -16,8 +16,12 @@ package ch.cyberduck.core.storegate;
  */
 
 import ch.cyberduck.core.AbstractProtocol;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class StoregateProtocol extends AbstractProtocol {
     @Override
     public String getIdentifier() {
@@ -65,7 +69,17 @@ public class StoregateProtocol extends AbstractProtocol {
     }
 
     @Override
+    public boolean isOAuthPKCE() {
+        return false;
+    }
+
+    @Override
     public DirectoryTimestamp getDirectoryTimestamp() {
         return DirectoryTimestamp.explicit;
+    }
+
+    @Override
+    public Case getCaseSensitivity() {
+        return Case.insensitive;
     }
 }

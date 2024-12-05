@@ -15,7 +15,6 @@ package ch.cyberduck.core.b2;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Headers;
@@ -27,6 +26,7 @@ import java.util.Map;
 public class B2MetadataFeature implements Headers {
 
     public static final String X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS = "src_last_modified_millis";
+    public static final String X_BZ_INFO_SRC_CREATION_DATE_MILLIS = "src_creation_date_millis";
     public static final String X_BZ_INFO_LARGE_FILE_SHA1 = "large_file_sha1";
 
     private final B2Session session;
@@ -38,7 +38,7 @@ public class B2MetadataFeature implements Headers {
     }
 
     @Override
-    public Map<String, String> getDefault(final Local file) {
+    public Map<String, String> getDefault() {
         return new HostPreferences(session.getHost()).getMap("b2.metadata.default");
     }
 

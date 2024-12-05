@@ -13,6 +13,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 
 import java.io.File;
+import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
@@ -24,6 +25,23 @@ import static org.junit.Assert.*;
 public class LocalTest {
 
     @Test
+    public void testWriteNewFile() throws Exception {
+        final Local file = new DefaultTemporaryFileService().create(new AlphanumericRandomStringService().random());
+        final OutputStream out = file.getOutputStream(false);
+        out.close();
+        file.delete();
+    }
+
+    @Test
+    public void testWriteExistingFile() throws Exception {
+        final Local file = new DefaultTemporaryFileService().create(new AlphanumericRandomStringService().random());
+        new DefaultLocalTouchFeature().touch(file);
+        final OutputStream out = file.getOutputStream(false);
+        out.close();
+        file.delete();
+    }
+
+    @Test
     public void testList() throws Exception {
         assertFalse(new Local("../profiles").list().isEmpty());
         assertTrue(new Local("../profiles").list(new NullFilter<String>() {
@@ -32,6 +50,11 @@ public class LocalTest {
                 return false;
             }
         }).isEmpty());
+    }
+
+    @Test
+    public void testListNotfound() {
+        assertThrows(LocalAccessDeniedException.class, () -> new Local(new AlphanumericRandomStringService().random()).list());
     }
 
     @Test(expected = AccessDeniedException.class)
@@ -203,6 +226,8 @@ public class LocalTest {
     public void testOpenOutputStream() throws Exception {
         Local l = new TestLocal(String.format("%s/%s", System.getProperty("java.io.tmpdir"), new AlphanumericRandomStringService().random()));
         assertNotNull(l.getOutputStream(false));
+        assertThrows(LocalAccessDeniedException.class, () -> new DefaultLocalTouchFeature().touch(l));
+        l.delete();
         new DefaultLocalTouchFeature().touch(l);
         assertNotNull(l.getOutputStream(false));
         assertNotNull(l.getOutputStream(true));
@@ -244,7 +269,7 @@ public class LocalTest {
     @Test
     public void testNormalize() {
         assertEquals(StringUtils.removeEnd(System.getProperty("java.io.tmpdir"),
-            PreferencesFactory.get().getProperty("local.delimiter")), new Local(System.getProperty("java.io.tmpdir")).getAbsolute());
+                PreferencesFactory.get().getProperty("local.delimiter")), new Local(System.getProperty("java.io.tmpdir")).getAbsolute());
     }
 
     private static class WindowsLocal extends Local {

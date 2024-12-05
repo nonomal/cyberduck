@@ -34,8 +34,6 @@ import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.HttpResponseException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import javax.ws.rs.ProcessingException;
 import java.io.IOException;
@@ -49,7 +47,6 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 public class EueExceptionMappingService extends AbstractExceptionMappingService<ApiException> {
-    private static final Logger log = LogManager.getLogger(EueExceptionMappingService.class);
 
     @Override
     public BackgroundException map(final ApiException failure) {
@@ -90,7 +87,7 @@ public class EueExceptionMappingService extends AbstractExceptionMappingService<
         switch(failure.getCode()) {
             case HttpStatus.SC_UNPROCESSABLE_ENTITY:
                 return new LockedException(buffer.toString(), failure);
-            case 429:
+            case HttpStatus.SC_TOO_MANY_REQUESTS:
                 final Optional<Map.Entry<String, List<String>>> header
                         = failure.getResponseHeaders().entrySet().stream().filter(e -> HttpHeaders.RETRY_AFTER.equals(e.getKey())).findAny();
                 if(header.isPresent()) {

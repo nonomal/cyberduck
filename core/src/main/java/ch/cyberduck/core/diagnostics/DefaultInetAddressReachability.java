@@ -18,9 +18,17 @@ package ch.cyberduck.core.diagnostics;
  */
 
 import ch.cyberduck.core.ConnectionTimeoutFactory;
+import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.Host;
+import ch.cyberduck.core.HostnameConfiguratorFactory;
+import ch.cyberduck.core.exception.BackgroundException;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.net.InetAddress;
 
 /**
@@ -28,16 +36,23 @@ import java.net.InetAddress;
  * establish a TCP connection on port 7 (Echo) of the destination host.
  */
 public class DefaultInetAddressReachability extends DisabledReachability {
+    private static final Logger log = LogManager.getLogger(DefaultInetAddressReachability.class);
 
     @Override
-    public boolean isReachable(final Host host) {
+    public void test(final Host bookmark) throws BackgroundException {
         try {
-            return InetAddress.getByName(host.getHostname()).isReachable(
-                    ConnectionTimeoutFactory.get().getTimeout() * 1000
-            );
+            if(StringUtils.isBlank(bookmark.getHostname())) {
+                throw new ConnectException();
+            }
+            if(!InetAddress.getByName(HostnameConfiguratorFactory.get(bookmark.getProtocol()).getHostname(bookmark.getHostname())).isReachable(
+                    ConnectionTimeoutFactory.get(bookmark).getTimeout() * 1000
+            )) {
+                throw new ConnectException();
+            }
         }
         catch(IOException e) {
-            return false;
+            log.warn("Failure opening ICMP socket for {}", bookmark);
+            throw new DefaultIOExceptionMappingService().map(e);
         }
     }
 }

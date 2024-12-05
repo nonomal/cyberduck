@@ -21,12 +21,11 @@ import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DisabledCancelCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
-import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
 
@@ -49,17 +48,17 @@ public class DataConnectionActionExecutorTest extends AbstractFTPTest {
     @Ignore
     public void testFallbackDataConnectionSocketTimeout() throws Exception {
         final Host host = new Host(new FTPProtocol(), "mirror.switch.ch", new Credentials(
-            PreferencesFactory.get().getProperty("connection.login.anon.name"), null
+                PreferencesFactory.get().getProperty("connection.login.anon.name"), null
         ));
         host.setFTPConnectMode(FTPConnectMode.active);
 
         final AtomicInteger count = new AtomicInteger();
 
         final FTPSession session = new FTPSession(host);
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
         session.getClient().setDefaultTimeout(2000);
         session.getClient().setConnectTimeout(2000);
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
         final Path file = new Path("/pub/debian/README.html", EnumSet.of(Path.Type.file));
         final TransferStatus status = new TransferStatus();
         final DataConnectionAction<InputStream> action = new DataConnectionAction<InputStream>() {
@@ -84,21 +83,14 @@ public class DataConnectionActionExecutorTest extends AbstractFTPTest {
                 return super.fallback(action);
             }
         };
-        f.data(action, new DisabledProgressListener());
+        f.data(action);
         assertEquals(1, count.get());
     }
 
     @Test
     public void testFallbackDataConnection500Error() throws Exception {
-        final Host host = new Host(new FTPTLSProtocol(), "test.cyberduck.ch", new Credentials(
-            System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
-        ));
-        host.setFTPConnectMode(FTPConnectMode.active);
+        session.getHost().setFTPConnectMode(FTPConnectMode.active);
         final AtomicInteger count = new AtomicInteger();
-        final FTPSession session = new FTPSession(host);
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
-        final TransferStatus status = new TransferStatus();
         final DataConnectionAction<Void> action = new DataConnectionAction<Void>() {
             @Override
             public Void execute() throws BackgroundException {
@@ -115,7 +107,7 @@ public class DataConnectionActionExecutorTest extends AbstractFTPTest {
                 return super.fallback(action);
             }
         };
-        f.data(action, new DisabledProgressListener());
+        f.data(action);
         assertEquals(1, count.get());
     }
 }

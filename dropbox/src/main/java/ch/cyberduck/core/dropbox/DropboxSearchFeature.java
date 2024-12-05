@@ -49,16 +49,15 @@ public class DropboxSearchFeature implements Search {
     public DropboxSearchFeature(final DropboxSession session) {
         this.session = session;
         this.attributes = new DropboxAttributesFinderFeature(session);
-        this.containerService = new DropboxPathContainerService(session);
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
     public AttributedList<Path> search(final Path workdir, final Filter<Path> regex, final ListProgressListener listener) throws BackgroundException {
         try {
             final AttributedList<Path> list = new AttributedList<>();
-            long start = 0;
-            SearchV2Result result = new DbxUserFilesRequests(session.getClient(workdir)).searchV2Builder(regex.toPattern().pattern())
-                .withOptions(SearchOptions.newBuilder().withPath(containerService.getKey(workdir)).build()).start();
+            SearchV2Result result = new DbxUserFilesRequests(session.getClient(workdir)).searchV2Builder(regex.toString())
+                    .withOptions(SearchOptions.newBuilder().withPath(containerService.getKey(workdir)).build()).start();
             this.parse(workdir, listener, list, result);
             while(result.getHasMore()) {
                 this.parse(workdir, listener, list, result = new DbxUserFilesRequests(session.getClient(workdir)).searchContinueV2(result.getCursor()));
@@ -85,7 +84,7 @@ public class DropboxSearchFeature implements Search {
                 type = EnumSet.of(Path.Type.directory);
             }
             else {
-                log.warn(String.format("Skip file %s", metadata));
+                log.warn("Skip file {}", metadata);
                 return true;
             }
             list.add(new Path(metadata.getPathDisplay(), type, attributes.toAttributes(metadata)));
@@ -95,8 +94,8 @@ public class DropboxSearchFeature implements Search {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 
 }

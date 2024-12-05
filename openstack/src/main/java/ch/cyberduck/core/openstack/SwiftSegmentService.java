@@ -21,7 +21,7 @@ import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DefaultPathContainerService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
-import ch.cyberduck.core.date.ISO8601DateParser;
+import ch.cyberduck.core.date.ISO8601DateFormatter;
 import ch.cyberduck.core.date.InvalidDateException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.io.Checksum;
@@ -55,8 +55,8 @@ public class SwiftSegmentService {
     private final PathContainerService containerService
         = new DefaultPathContainerService();
 
-    private final ISO8601DateParser dateParser
-            = new ISO8601DateParser();
+    private final ISO8601DateFormatter dateParser
+            = new ISO8601DateFormatter();
 
     /**
      * Segement files prefix
@@ -103,7 +103,7 @@ public class SwiftSegmentService {
                         segment.attributes().setModificationDate(dateParser.parse(s.getLastModified()).getTime());
                     }
                     catch(InvalidDateException e) {
-                        log.warn(String.format("%s is not ISO 8601 format %s", s.getLastModified(), e.getMessage()));
+                        log.warn("{} is not ISO 8601 format {}", s.getLastModified(), e.getMessage());
                     }
                     if(StringUtils.isNotBlank(s.getMd5sum())) {
                         segment.attributes().setChecksum(Checksum.parse(s.getMd5sum()));

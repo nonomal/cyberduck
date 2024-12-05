@@ -16,7 +16,6 @@ package ch.cyberduck.core.storegate;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
@@ -26,6 +25,8 @@ import ch.cyberduck.core.storegate.io.swagger.client.api.FilesApi;
 import ch.cyberduck.core.storegate.io.swagger.client.model.CopyFileRequest;
 import ch.cyberduck.core.storegate.io.swagger.client.model.File;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.util.EnumSet;
 
 public class StoregateCopyFeature implements Copy {
 
@@ -42,10 +43,10 @@ public class StoregateCopyFeature implements Copy {
         try {
             final CopyFileRequest copy = new CopyFileRequest()
                 .name(target.getName())
-                .parentID(fileid.getFileId(target.getParent(), new DisabledListProgressListener()))
+                .parentID(fileid.getFileId(target.getParent()))
                 .mode(1); // Overwrite
             final File file = new FilesApi(session.getClient()).filesCopy(
-                fileid.getFileId(source, new DisabledListProgressListener()), copy);
+                fileid.getFileId(source), copy);
             listener.sent(status.getLength());
             fileid.cache(target, file.getId());
             return target.withAttributes(new StoregateAttributesFinderFeature(session, fileid).toAttributes(file));
@@ -56,12 +57,7 @@ public class StoregateCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return true;
-    }
-
-    @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

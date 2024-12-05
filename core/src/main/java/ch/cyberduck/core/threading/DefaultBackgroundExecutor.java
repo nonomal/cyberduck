@@ -22,7 +22,6 @@ import org.apache.commons.lang3.concurrent.ConcurrentUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.concurrent.Callable;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
@@ -64,34 +63,32 @@ public class DefaultBackgroundExecutor implements BackgroundExecutor {
 
     @Override
     public <T> Future<T> execute(final Controller controller, final BackgroundActionRegistry registry, final BackgroundAction<T> action) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run action %s in background", action));
-        }
+        log.debug("Run action {} in background", action);
         // Add action to registry of controller. Will be removed automatically when stopped
         registry.add(action);
-        action.init();
         // Start background task
-        final Callable<T> command = new BackgroundCallable<>(action, controller);
-        try {
-            final Future<T> task = concurrentExecutor.execute(command);
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Scheduled background runnable %s for execution", action));
+        final BackgroundCallable<T> command = new BackgroundCallable<>(action, controller);
+        if(command.init()) {
+            try {
+                final Future<T> task = concurrentExecutor.execute(command);
+                log.info("Scheduled background runnable {} for execution", action);
+                return task;
             }
-            return task;
+            catch(RejectedExecutionException e) {
+                log.error("Error scheduling background task {} for execution. {}", action, e.getMessage());
+                action.cancel();
+                action.cleanup();
+                return ConcurrentUtils.constantFuture(null);
+            }
         }
-        catch(RejectedExecutionException e) {
-            log.error(String.format("Error scheduling background task %s for execution. %s", action, e.getMessage()));
-            action.cancel();
-            action.cleanup();
+        else {
             return ConcurrentUtils.constantFuture(null);
         }
     }
 
     @Override
     public void shutdown() {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Terminating concurrent executor thread pool %s", concurrentExecutor));
-        }
+        log.info("Terminating concurrent executor thread pool {}", concurrentExecutor);
         concurrentExecutor.shutdown(false);
     }
 }

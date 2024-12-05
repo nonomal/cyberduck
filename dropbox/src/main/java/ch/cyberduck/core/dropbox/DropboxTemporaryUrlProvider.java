@@ -22,12 +22,11 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.UserDateFormatterFactory;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.net.URI;
 import java.text.MessageFormat;
 import java.util.Calendar;
 import java.util.TimeZone;
@@ -36,7 +35,7 @@ import com.dropbox.core.DbxException;
 import com.dropbox.core.v2.files.CommitInfo;
 import com.dropbox.core.v2.files.DbxUserFilesRequests;
 
-public class DropboxTemporaryUrlProvider implements PromptUrlProvider<Void, Void> {
+public class DropboxTemporaryUrlProvider implements Share<Void, Void> {
     private static final Logger log = LogManager.getLogger(DropboxTemporaryUrlProvider.class);
 
     private final DropboxSession session;
@@ -44,21 +43,19 @@ public class DropboxTemporaryUrlProvider implements PromptUrlProvider<Void, Void
 
     public DropboxTemporaryUrlProvider(final DropboxSession session) {
         this.session = session;
-        this.containerService = new DropboxPathContainerService(session);
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final Void options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final Void options, final PasswordCallback callback) throws BackgroundException {
         try {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Create temporary link for %s", file));
-            }
+            log.debug("Create temporary link for {}", file);
             // This link will expire in four hours and afterwards you will get 410 Gone.
             final String link = new DbxUserFilesRequests(session.getClient(file)).getTemporaryLink(containerService.getKey(file)).getLink();
             // Determine expiry time for URL
             final Calendar expiry = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
             expiry.add(Calendar.HOUR, 4);
-            return new DescriptiveUrl(URI.create(link), DescriptiveUrl.Type.signed,
+            return new DescriptiveUrl(link, DescriptiveUrl.Type.signed,
                 MessageFormat.format(LocaleFactory.localizedString("{0} URL"), LocaleFactory.localizedString("Temporary", "S3"))
                     + " (" + MessageFormat.format(LocaleFactory.localizedString("Expires {0}", "S3") + ")",
                     UserDateFormatterFactory.get().getMediumFormat(expiry.getTimeInMillis()))
@@ -70,13 +67,11 @@ public class DropboxTemporaryUrlProvider implements PromptUrlProvider<Void, Void
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final Void options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final Void options, final PasswordCallback callback) throws BackgroundException {
         try {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Create temporary upload link for %s", file));
-            }
+            log.debug("Create temporary upload link for {}", file);
             final String link = new DbxUserFilesRequests(session.getClient(file)).getTemporaryUploadLink(new CommitInfo(containerService.getKey(file))).getLink();
-            return new DescriptiveUrl(URI.create(link), DescriptiveUrl.Type.signed, MessageFormat.format(LocaleFactory.localizedString("{0} URL"), LocaleFactory.localizedString("Temporary", "S3")));
+            return new DescriptiveUrl(link, DescriptiveUrl.Type.signed, MessageFormat.format(LocaleFactory.localizedString("{0} URL"), LocaleFactory.localizedString("Temporary", "S3")));
         }
         catch(DbxException e) {
             throw new DropboxExceptionMappingService().map(e);

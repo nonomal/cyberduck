@@ -32,11 +32,13 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.text.MessageFormat;
+import java.time.Duration;
 import java.util.Arrays;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -63,25 +65,26 @@ public final class Resolver {
      * @throws ResolveFailedException   If the hostname cannot be resolved
      * @throws ResolveCanceledException If the lookup has been interrupted
      */
-    public InetAddress resolve(final String hostname, final CancelCallback callback) throws ResolveFailedException, ResolveCanceledException {
+    public InetAddress[] resolve(final String hostname, final CancelCallback callback) throws ResolveFailedException, ResolveCanceledException {
         final CountDownLatch signal = new CountDownLatch(1);
-        final AtomicReference<InetAddress> resolved = new AtomicReference<>();
+        final AtomicReference<Set<InetAddress>> resolved = new AtomicReference<>();
         final AtomicReference<UnknownHostException> failure = new AtomicReference<>();
         final Thread resolver = threadFactory.newThread(new Runnable() {
             @Override
             public void run() {
                 try {
                     final InetAddress[] allByName = InetAddress.getAllByName(hostname);
-                    Arrays.stream(allByName).findFirst().ifPresent(resolved::set);
+                    resolved.set(Arrays.stream(allByName).collect(Collectors.toSet()));
                     if(preferIPv6) {
-                        Arrays.stream(allByName).filter(inetAddress -> inetAddress instanceof Inet6Address).findFirst().ifPresent(resolved::set);
+                        final Set<InetAddress> filtered = Arrays.stream(allByName).filter(inetAddress -> inetAddress instanceof Inet6Address).collect(Collectors.toSet());
+                        if(!filtered.isEmpty()) {
+                            resolved.set(filtered);
+                        }
                     }
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Resolved %s to %s", hostname, resolved.get().getHostAddress()));
-                    }
+                    log.info("Resolved {} to {}", hostname, Arrays.toString(resolved.get().toArray()));
                 }
                 catch(UnknownHostException e) {
-                    log.warn(String.format("Failed resolving %s", hostname));
+                    log.warn("Failed resolving {}", hostname);
                     failure.set(e);
                 }
                 finally {
@@ -90,9 +93,9 @@ public final class Resolver {
             }
         });
         resolver.start();
-        log.debug(String.format("Waiting for resolving of %s", hostname));
+        log.debug("Waiting for resolving of {}", hostname);
         // Wait for #run to finish
-        while(!Uninterruptibles.awaitUninterruptibly(signal, 500, TimeUnit.MILLISECONDS)) {
+        while(!Uninterruptibles.awaitUninterruptibly(signal, Duration.ofMillis(500))) {
             try {
                 callback.verify();
             }
@@ -108,13 +111,13 @@ public final class Resolver {
         }
         if(null == resolved.get()) {
             if(null == failure.get()) {
-                log.warn(String.format("Canceled resolving %s", hostname));
+                log.warn("Canceled resolving {}", hostname);
                 throw new ResolveCanceledException(MessageFormat.format(LocaleFactory.localizedString("DNS lookup for {0} failed", "Error"), hostname));
             }
             throw new ResolveFailedException(
                     MessageFormat.format(LocaleFactory.localizedString("DNS lookup for {0} failed", "Error"), hostname), failure.get());
         }
-        return resolved.get();
+        return resolved.get().toArray(new InetAddress[resolved.get().size()]);
     }
 
     @Override

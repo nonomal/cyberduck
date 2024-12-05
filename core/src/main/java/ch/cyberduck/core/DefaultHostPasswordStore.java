@@ -18,8 +18,6 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.exception.LocalAccessDeniedException;
-import ch.cyberduck.core.preferences.Preferences;
-import ch.cyberduck.core.preferences.PreferencesFactory;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -30,8 +28,6 @@ import java.net.URI;
 public abstract class DefaultHostPasswordStore implements HostPasswordStore {
     private static final Logger log = LogManager.getLogger(DefaultHostPasswordStore.class);
 
-    private final Preferences preferences = PreferencesFactory.get();
-
     /**
      * Find password for login
      *
@@ -41,30 +37,26 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
     @Override
     public String findLoginPassword(final Host bookmark) {
         if(StringUtils.isEmpty(bookmark.getHostname())) {
-            log.warn("No hostname given");
+            log.warn("Missing hostname in {}", bookmark);
             return null;
         }
         final Credentials credentials = bookmark.getCredentials();
         if(StringUtils.isEmpty(credentials.getUsername())) {
-            log.warn("No username given");
+            log.warn("Missing hostname in {}", bookmark);
             return null;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetching login password from keychain for %s", bookmark));
-        }
+        log.info("Fetching login password from keychain for {}", bookmark);
         final String password;
         try {
             password = this.getPassword(bookmark.getProtocol().getScheme(), bookmark.getPort(),
-                bookmark.getHostname(), credentials.getUsername());
+                    bookmark.getHostname(), credentials.getUsername());
         }
         catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure %s searching in keychain", e));
+            log.warn("Failure {} searching in keychain", e.getMessage());
             return null;
         }
         if(null == password) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Password not found in keychain for %s", bookmark));
-            }
+            log.info("Password not found in keychain for {}", bookmark);
         }
         return password;
     }
@@ -72,28 +64,24 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
     @Override
     public String findLoginToken(final Host bookmark) {
         if(StringUtils.isEmpty(bookmark.getHostname())) {
-            log.warn("No hostname given");
+            log.warn("Missing hostname in {}", bookmark);
             return null;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetching login token from keychain for %s", bookmark));
-        }
+        log.info("Fetching login token from keychain for {}", bookmark);
         final Credentials credentials = bookmark.getCredentials();
         // Find token named like "Shared Access Signature (SAS) Token"
         final String token;
         try {
             token = this.getPassword(bookmark.getProtocol().getScheme(), bookmark.getPort(),
-                bookmark.getHostname(), StringUtils.isEmpty(credentials.getUsername()) ?
-                    bookmark.getProtocol().getTokenPlaceholder() : String.format("%s (%s)", bookmark.getProtocol().getTokenPlaceholder(), credentials.getUsername()));
+                    bookmark.getHostname(), StringUtils.isEmpty(credentials.getUsername()) ?
+                            bookmark.getProtocol().getTokenPlaceholder() : String.format("%s (%s)", bookmark.getProtocol().getTokenPlaceholder(), credentials.getUsername()));
         }
         catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure %s searching in keychain", e));
+            log.warn("Failure {} searching in keychain", e.getMessage());
             return null;
         }
         if(null == token) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Token not found in keychain for %s", bookmark));
-            }
+            log.info("Token not found in keychain for {}", bookmark);
         }
         return token;
     }
@@ -107,17 +95,15 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
     @Override
     public String findPrivateKeyPassphrase(final Host bookmark) {
         if(StringUtils.isEmpty(bookmark.getHostname())) {
-            log.warn("No hostname given");
+            log.warn("Missing hostname in {}", bookmark);
             return null;
         }
         final Credentials credentials = bookmark.getCredentials();
         if(StringUtils.isEmpty(credentials.getUsername())) {
-            log.warn("No username given");
+            log.warn("Missing username in {}", bookmark);
             return null;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetching private key passphrase from keychain for %s", bookmark));
-        }
+        log.info("Fetching private key passphrase from keychain for {}", bookmark);
         if(credentials.isPublicKeyAuthentication()) {
             final Local key = credentials.getIdentity();
             try {
@@ -131,14 +117,12 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
                     passphrase = this.getPassword("SSHKeychain", key.getAbbreviatedPath());
                 }
                 if(null == passphrase) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Passphrase not found in keychain for %s", key));
-                    }
+                    log.info("Passphrase not found in keychain for {}", key);
                 }
                 return passphrase;
             }
             catch(LocalAccessDeniedException e) {
-                log.warn(String.format("Failure %s searching in keychain", e));
+                log.warn("Failure {} searching in keychain", e.getMessage());
                 return null;
             }
         }
@@ -149,39 +133,71 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
 
     @Override
     public OAuthTokens findOAuthTokens(final Host bookmark) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetching OAuth tokens from keychain for %s", bookmark));
+        log.info("Fetching OAuth tokens from keychain for {}", bookmark);
+        final String[] descriptors = getOAuthPrefix(bookmark);
+        for(String prefix : descriptors) {
+            log.debug("Search with prefix {}", prefix);
+            final String hostname = getOAuthHostname(bookmark);
+            log.debug("Search with hostname {}", hostname);
+            try {
+                final String expiry = this.getPassword(getOAuthHostname(bookmark), String.format("%s OAuth2 Token Expiry", prefix));
+                final OAuthTokens tokens = new OAuthTokens(
+                        this.getPassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), hostname,
+                                String.format("%s OAuth2 Access Token", prefix)),
+                        this.getPassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), hostname,
+                                String.format("%s OAuth2 Refresh Token", prefix)),
+                        expiry != null ? Long.parseLong(expiry) : -1L,
+                        this.getPassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), hostname,
+                                String.format("%s OIDC Id Token", prefix)));
+                if(tokens.validate()) {
+                    log.debug("Return tokens {} for {}", tokens, bookmark);
+                    return tokens;
+                }
+                // Continue with deprecated descriptors
+            }
+            catch(LocalAccessDeniedException e) {
+                log.warn("Failure {} searching in keychain", e.getMessage());
+                return OAuthTokens.EMPTY;
+            }
         }
-        final long expiry = preferences.getLong(String.format("%s.oauth.expiry", bookmark.getProtocol().getIdentifier()));
-        final String prefix = this.getOAuthPrefix(bookmark);
-        final String hostname = this.getOAuthHostname(bookmark);
-        try {
-            return new OAuthTokens(this.getPassword(bookmark.getProtocol().getScheme(),
-                bookmark.getPort(), hostname,
-                String.format("%s OAuth2 Access Token", prefix)),
-                this.getPassword(bookmark.getProtocol().getScheme(),
-                    bookmark.getPort(), hostname,
-                    String.format("%s OAuth2 Refresh Token", prefix)),
-                expiry);
-        }
-        catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure %s searching in keychain", e));
-            return OAuthTokens.EMPTY;
-        }
+        return OAuthTokens.EMPTY;
     }
 
-    protected String getOAuthHostname(final Host bookmark) {
-        if(StringUtils.isNotBlank(URI.create(bookmark.getProtocol().getOAuthTokenUrl()).getHost())) {
-            return URI.create(bookmark.getProtocol().getOAuthTokenUrl()).getHost();
+    protected static Scheme getOAuthScheme(final Host bookmark) {
+        final URI uri = URI.create(bookmark.getProtocol().getOAuthTokenUrl());
+        if(null == uri.getScheme()) {
+            return bookmark.getProtocol().getScheme();
+        }
+        return Scheme.valueOf(uri.getScheme());
+    }
+
+    protected static String getOAuthHostname(final Host bookmark) {
+        final URI uri = URI.create(bookmark.getProtocol().getOAuthTokenUrl());
+        if(StringUtils.isNotBlank(uri.getHost())) {
+            return uri.getHost();
         }
         return bookmark.getHostname();
     }
 
-    private String getOAuthPrefix(final Host bookmark) {
-        if(StringUtils.isNotBlank(bookmark.getCredentials().getUsername())) {
-            return String.format("%s (%s)", bookmark.getProtocol().getDescription(), bookmark.getCredentials().getUsername());
+    protected static int getOAuthPort(final Host bookmark) {
+        final URI uri = URI.create(bookmark.getProtocol().getOAuthTokenUrl());
+        if(-1 != uri.getPort()) {
+            return uri.getPort();
         }
-        return bookmark.getProtocol().getDescription();
+        return getOAuthScheme(bookmark).getPort();
+    }
+
+    protected static String[] getOAuthPrefix(final Host bookmark) {
+        if(StringUtils.isNotBlank(bookmark.getCredentials().getUsername())) {
+            return new String[]{
+                    String.format("%s (%s)", bookmark.getProtocol().getOAuthClientId(), bookmark.getCredentials().getUsername()),
+                    String.format("%s (%s)", bookmark.getProtocol().getDescription(), bookmark.getCredentials().getUsername())
+            };
+        }
+        return new String[]{
+                bookmark.getProtocol().getOAuthClientId(),
+                bookmark.getProtocol().getDescription()
+        };
     }
 
     @Override
@@ -191,55 +207,61 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
             return;
         }
         final Credentials credentials = bookmark.getCredentials();
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Save credentials for bookmark %s", bookmark));
-        }
+        final Protocol protocol = bookmark.getProtocol();
+        log.info("Save credentials {} for bookmark {}", credentials, bookmark);
         if(credentials.isPublicKeyAuthentication()) {
             this.addPassword(bookmark.getHostname(), credentials.getIdentity().getAbbreviatedPath(),
-                credentials.getIdentityPassphrase());
+                    credentials.getIdentityPassphrase());
         }
         if(credentials.isPasswordAuthentication()) {
             if(StringUtils.isEmpty(credentials.getUsername())) {
-                log.warn(String.format("No username in credentials for bookmark %s", bookmark.getHostname()));
+                log.warn("No username in credentials for bookmark {}", bookmark.getHostname());
                 return;
             }
             if(StringUtils.isEmpty(credentials.getPassword())) {
-                log.warn(String.format("No password in credentials for bookmark %s", bookmark.getHostname()));
+                log.warn("No password in credentials for bookmark {}", bookmark.getHostname());
                 return;
             }
-            this.addPassword(bookmark.getProtocol().getScheme(), bookmark.getPort(),
-                bookmark.getHostname(), credentials.getUsername(), credentials.getPassword());
+            this.addPassword(protocol.getScheme(), bookmark.getPort(),
+                    bookmark.getHostname(), credentials.getUsername(), credentials.getPassword());
         }
         if(credentials.isTokenAuthentication()) {
-            this.addPassword(bookmark.getProtocol().getScheme(), bookmark.getPort(),
-                bookmark.getHostname(), StringUtils.isEmpty(credentials.getUsername()) ?
-                    bookmark.getProtocol().getTokenPlaceholder() : String.format("%s (%s)", bookmark.getProtocol().getTokenPlaceholder(), credentials.getUsername()),
-                credentials.getToken());
+            this.addPassword(protocol.getScheme(), bookmark.getPort(),
+                    bookmark.getHostname(), StringUtils.isEmpty(credentials.getUsername()) ?
+                            protocol.getTokenPlaceholder() : String.format("%s (%s)", protocol.getTokenPlaceholder(), credentials.getUsername()),
+                    credentials.getToken());
         }
         if(credentials.isOAuthAuthentication()) {
-            final String prefix = this.getOAuthPrefix(bookmark);
-            if(StringUtils.isNotBlank(credentials.getOauth().getAccessToken())) {
-                this.addPassword(bookmark.getProtocol().getScheme(),
-                    bookmark.getPort(), this.getOAuthHostname(bookmark),
-                    String.format("%s OAuth2 Access Token", prefix), credentials.getOauth().getAccessToken());
-            }
-            if(StringUtils.isNotBlank(credentials.getOauth().getRefreshToken())) {
-                this.addPassword(bookmark.getProtocol().getScheme(),
-                    bookmark.getPort(), this.getOAuthHostname(bookmark),
-                    String.format("%s OAuth2 Refresh Token", prefix), credentials.getOauth().getRefreshToken());
-            }
-            // Save expiry
-            if(credentials.getOauth().getExpiryInMilliseconds() != null) {
-                preferences.setProperty(String.format("%s.oauth.expiry", bookmark.getProtocol().getIdentifier()), credentials.getOauth().getExpiryInMilliseconds());
+            final String[] descriptors = getOAuthPrefix(bookmark);
+            for(String prefix : descriptors) {
+                if(StringUtils.isNotBlank(credentials.getOauth().getAccessToken())) {
+                    this.addPassword(getOAuthScheme(bookmark),
+                            getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OAuth2 Access Token", prefix), credentials.getOauth().getAccessToken());
+                }
+                if(StringUtils.isNotBlank(credentials.getOauth().getRefreshToken())) {
+                    this.addPassword(getOAuthScheme(bookmark),
+                            getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OAuth2 Refresh Token", prefix), credentials.getOauth().getRefreshToken());
+                }
+                // Save expiry
+                if(credentials.getOauth().getExpiryInMilliseconds() != null) {
+                    this.addPassword(getOAuthHostname(bookmark), String.format("%s OAuth2 Token Expiry", prefix),
+                            String.valueOf(credentials.getOauth().getExpiryInMilliseconds()));
+                }
+                if(StringUtils.isNotBlank(credentials.getOauth().getIdToken())) {
+                    this.addPassword(getOAuthScheme(bookmark),
+                            getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OIDC Id Token", prefix), credentials.getOauth().getIdToken());
+                }
+                break;
             }
         }
     }
 
     @Override
     public void delete(final Host bookmark) throws LocalAccessDeniedException {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Delete password for bookmark %s", bookmark));
-        }
+        log.info("Delete password for bookmark {}", bookmark);
         final Credentials credentials = bookmark.getCredentials();
         final Protocol protocol = bookmark.getProtocol();
         if(protocol.isPrivateKeyConfigurable()) {
@@ -247,30 +269,36 @@ public abstract class DefaultHostPasswordStore implements HostPasswordStore {
         }
         if(protocol.isPasswordConfigurable()) {
             if(StringUtils.isEmpty(credentials.getUsername())) {
-                log.warn(String.format("No username in credentials for bookmark %s", bookmark.getHostname()));
+                log.warn("No username in credentials for bookmark {}", bookmark.getHostname());
                 return;
             }
             this.deletePassword(protocol.getScheme(), bookmark.getPort(), bookmark.getHostname(),
-                credentials.getUsername());
+                    credentials.getUsername());
         }
         if(protocol.isTokenConfigurable()) {
             this.deletePassword(protocol.getScheme(), bookmark.getPort(), bookmark.getHostname(),
-                StringUtils.isEmpty(credentials.getUsername()) ?
-                    protocol.getTokenPlaceholder() : String.format("%s (%s)", protocol.getTokenPlaceholder(), credentials.getUsername()));
+                    StringUtils.isEmpty(credentials.getUsername()) ?
+                            protocol.getTokenPlaceholder() : String.format("%s (%s)", protocol.getTokenPlaceholder(), credentials.getUsername()));
         }
         if(protocol.isOAuthConfigurable()) {
-            final String prefix = this.getOAuthPrefix(bookmark);
-            if(StringUtils.isNotBlank(credentials.getOauth().getAccessToken())) {
-                this.deletePassword(protocol.getScheme(), bookmark.getPort(), this.getOAuthHostname(bookmark),
-                    String.format("%s OAuth2 Access Token", prefix));
-            }
-            if(StringUtils.isNotBlank(credentials.getOauth().getRefreshToken())) {
-                this.deletePassword(protocol.getScheme(), bookmark.getPort(), this.getOAuthHostname(bookmark),
-                    String.format("%s OAuth2 Refresh Token", prefix));
-            }
-            // Save expiry
-            if(credentials.getOauth().getExpiryInMilliseconds() != null) {
-                preferences.setProperty(String.format("%s.oauth.expiry", protocol.getIdentifier()), credentials.getOauth().getExpiryInMilliseconds());
+            final String[] descriptors = getOAuthPrefix(bookmark);
+            for(String prefix : descriptors) {
+                if(StringUtils.isNotBlank(credentials.getOauth().getAccessToken())) {
+                    this.deletePassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OAuth2 Access Token", prefix));
+                }
+                if(StringUtils.isNotBlank(credentials.getOauth().getRefreshToken())) {
+                    this.deletePassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OAuth2 Refresh Token", prefix));
+                }
+                // Save expiry
+                if(credentials.getOauth().getExpiryInMilliseconds() != null) {
+                    this.deletePassword(getOAuthHostname(bookmark), String.format("%s OAuth2 Token Expiry", prefix));
+                }
+                if(StringUtils.isNotBlank(credentials.getOauth().getIdToken())) {
+                    this.deletePassword(getOAuthScheme(bookmark), getOAuthPort(bookmark), getOAuthHostname(bookmark),
+                            String.format("%s OIDC Id Token", prefix));
+                }
             }
         }
     }

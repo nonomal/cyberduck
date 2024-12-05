@@ -17,7 +17,6 @@ package ch.cyberduck.core.storegate;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -39,6 +38,7 @@ import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.EnumSet;
 
 import static com.google.api.client.json.Json.MEDIA_TYPE;
 
@@ -58,10 +58,10 @@ public class StoregateMoveFeature implements Move {
             final StoregateApiClient client = session.getClient();
             final MoveFileRequest move = new MoveFileRequest()
                 .name(renamed.getName())
-                .parentID(fileid.getFileId(renamed.getParent(), new DisabledListProgressListener()))
+                .parentID(fileid.getFileId(renamed.getParent()))
                 .mode(1); // Overwrite
             final HttpEntityEnclosingRequestBase request;
-            request = new HttpPost(String.format("%s/v4/files/%s/move", client.getBasePath(), fileid.getFileId(file, new DisabledListProgressListener())));
+            request = new HttpPost(String.format("%s/v4.2/files/%s/move", client.getBasePath(), fileid.getFileId(file)));
             if(status.getLockId() != null) {
                 request.addHeader("X-Lock-Id", status.getLockId().toString());
             }
@@ -74,10 +74,11 @@ public class StoregateMoveFeature implements Move {
                     case HttpStatus.SC_NO_CONTENT:
                         final PathAttributes attr = new PathAttributes(file.attributes());
                         fileid.cache(file, null);
-                        fileid.cache(renamed, file.attributes().getFileId());
+                        fileid.cache(renamed, attr.getFileId());
                         return renamed.withAttributes(attr);
                     default:
-                        throw new StoregateExceptionMappingService(fileid).map(new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()));
+                        throw new StoregateExceptionMappingService(fileid).map("Cannot rename {0}",
+                                new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()), file);
                 }
             }
             finally {
@@ -85,12 +86,12 @@ public class StoregateMoveFeature implements Move {
             }
         }
         catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map(e);
+            throw new DefaultIOExceptionMappingService().map("Cannot rename {0}", e, file);
         }
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

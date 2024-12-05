@@ -56,7 +56,7 @@ public class HostUrlProvider {
         final Scheme scheme = bookmark.getProtocol().getScheme();
         final int port = bookmark.getPort();
         final String username = bookmark.getCredentials().getUsername();
-        final String hostname = bookmark.getHostname();
+        final String hostname = HostnameConfiguratorFactory.get(bookmark.getProtocol()).getHostname(bookmark.getHostname());
         final String path = bookmark.getDefaultPath();
         return this.get(scheme, port, username, hostname, path);
     }
@@ -69,7 +69,7 @@ public class HostUrlProvider {
             port != scheme.getPort() ? String.format(":%d", port) : "");
         if(includePath) {
             if(StringUtils.isNotBlank(path)) {
-                return String.format("%s%s", base, PathNormalizer.normalize(path));
+                return String.format("%s%s", base, URIEncoder.encode(PathNormalizer.normalize(path)));
             }
         }
         return base;

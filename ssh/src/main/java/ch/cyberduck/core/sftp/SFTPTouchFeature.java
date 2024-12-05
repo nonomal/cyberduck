@@ -21,7 +21,6 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Touch;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
@@ -56,11 +55,6 @@ public class SFTPTouchFeature implements Touch<Void> {
         catch(IOException e) {
             throw new SFTPExceptionMappingService().map("Cannot create {0}", e, file);
         }
-        return file.withAttributes(new SFTPAttributesFinderFeature(session).find(file));
-    }
-
-    @Override
-    public SFTPTouchFeature withWriter(final Write writer) {
-        return this;
+        return file;
     }
 }

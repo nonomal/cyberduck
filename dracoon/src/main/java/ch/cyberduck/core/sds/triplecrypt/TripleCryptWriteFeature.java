@@ -23,6 +23,7 @@ import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.sds.SDSNodeIdProvider;
 import ch.cyberduck.core.sds.SDSSession;
+import ch.cyberduck.core.sds.SDSTripleCryptEncryptorFeature;
 import ch.cyberduck.core.sds.io.swagger.client.model.FileKey;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -31,6 +32,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.EnumSet;
 
 import com.dracoon.sdk.crypto.Crypto;
 import com.dracoon.sdk.crypto.error.CryptoSystemException;
@@ -54,11 +56,9 @@ public class TripleCryptWriteFeature implements Write<Node> {
     public StatusOutputStream<Node> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         try {
             final ObjectReader reader = session.getClient().getJSON().getContext(null).readerFor(FileKey.class);
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Read file key for file %s", file));
-            }
+            log.debug("Read file key for file {}", file);
             if(null == status.getFilekey()) {
-                status.setFilekey(nodeid.getFileKey());
+                status.setFilekey(SDSTripleCryptEncryptorFeature.generateFileKey());
             }
             final FileKey fileKey = reader.readValue(status.getFilekey().array());
             return new TripleCryptEncryptingOutputStream(session, nodeid, proxy.write(file, status, callback),
@@ -74,12 +74,7 @@ public class TripleCryptWriteFeature implements Write<Node> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return proxy.append(file, status);
-    }
-
-    @Override
-    public boolean random() {
-        return proxy.random();
+    public EnumSet<Flags> features(final Path file) {
+        return proxy.features(file);
     }
 }

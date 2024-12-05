@@ -23,6 +23,7 @@ import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Download;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.ChecksumCompute;
@@ -42,19 +43,25 @@ public class ResumeFilter extends AbstractDownloadFilter {
         this(symlinkResolver, session, new DownloadFilterOptions(session.getHost()));
     }
 
-    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session,
-                        final DownloadFilterOptions options) {
-        this(symlinkResolver, session, options, session.getFeature(Download.class));
+    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final DownloadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(AttributesFinder.class), session.getFeature(Download.class), options);
     }
 
-    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session,
-                        final DownloadFilterOptions options, final Download download) {
-        super(symlinkResolver, session, options);
+    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final AttributesFinder attribute, final DownloadFilterOptions options) {
+        this(symlinkResolver, session, attribute, session.getFeature(Download.class), options);
+    }
+
+    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final Download download, final DownloadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(AttributesFinder.class), download, options);
+    }
+
+    public ResumeFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final AttributesFinder attribute, final Download download, final DownloadFilterOptions options) {
+        super(symlinkResolver, session, attribute, options);
         this.download = download;
     }
 
     @Override
-    public boolean accept(final Path file, final Local local, final TransferStatus parent) throws BackgroundException {
+    public boolean accept(final Path file, final Local local, final TransferStatus parent, final ProgressListener progress) throws BackgroundException {
         if(local.isFile()) {
             if(local.exists()) {
                 // Read remote attributes
@@ -63,26 +70,22 @@ public class ResumeFilter extends AbstractDownloadFilter {
                     if(Checksum.NONE != attributes.getChecksum()) {
                         final ChecksumCompute compute = ChecksumComputeFactory.get(attributes.getChecksum().algorithm);
                         if(compute.compute(local.getInputStream(), parent).equals(attributes.getChecksum())) {
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Skip file %s with checksum %s", file, local.attributes().getChecksum()));
-                            }
+                            log.info("Skip file {} with checksum {}", file, attributes.getChecksum());
                             return false;
                         }
                         else {
-                            log.warn(String.format("Checksum mismatch for %s and %s", file, local));
+                            log.warn("Checksum mismatch for {} and {}", file, local);
                         }
                     }
                     else {
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("Skip file %s with local size %d", file, local.attributes().getSize()));
-                        }
+                        log.info("Skip file {} with local size {}", file, local.attributes().getSize());
                         // No need to resume completed transfers
                         return false;
                     }
                 }
             }
         }
-        return super.accept(file, local, parent);
+        return super.accept(file, local, parent, progress);
     }
 
     @Override
@@ -92,9 +95,7 @@ public class ResumeFilter extends AbstractDownloadFilter {
             for(TransferStatus segmentStatus : status.getSegments()) {
                 final Local segmentFile = segmentStatus.getRename().local;
                 if(segmentFile.exists()) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Determine if part %s can be skipped", segmentStatus));
-                    }
+                    log.info("Determine if part {} can be skipped", segmentStatus);
                     if(segmentFile.attributes().getSize() == segmentStatus.getLength()) {
                         segmentStatus.setComplete();
                         status.setLength(status.getLength() - segmentStatus.getLength());

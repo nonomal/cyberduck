@@ -15,7 +15,6 @@ package ch.cyberduck.core.features;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 
@@ -23,18 +22,20 @@ import ch.cyberduck.core.exception.BackgroundException;
  * Determine an ID for a file for services where API calls take IDs rather than file paths. Implemented for services
  * where the file id remains constant when updating file contents.
  */
+@Optional
 public interface FileIdProvider {
     /**
      * Determine file id for file
      *
-     * @param file     File
-     * @param listener Progress listener
+     * @param file File
      * @return Latest file id for file
      */
-    String getFileId(Path file, ListProgressListener listener) throws BackgroundException;
+    String getFileId(Path file) throws BackgroundException;
 
     /**
      * Clear any cached values
      */
-    void clear();
+    default void clear() {
+        // No-op
+    }
 }

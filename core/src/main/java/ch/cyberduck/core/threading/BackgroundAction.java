@@ -25,7 +25,7 @@ public interface BackgroundAction<T> extends BackgroundActionState {
     /**
      * Called before synchronized with other pending actions
      */
-    void init();
+    void init() throws BackgroundException;
 
     /**
      * Called just before #run.
@@ -37,8 +37,9 @@ public interface BackgroundAction<T> extends BackgroundActionState {
     T run() throws BackgroundException;
 
     /**
-     * Called form a worker thread not blocking the user interface
+     * Called form a worker thread not blocking the user interface. Delegate to {@link #run()} for action by default.
      *
+     * @see #run()
      */
     T call() throws BackgroundException;
 

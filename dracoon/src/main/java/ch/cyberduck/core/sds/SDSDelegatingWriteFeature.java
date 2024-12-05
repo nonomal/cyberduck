@@ -17,6 +17,7 @@ package ch.cyberduck.core.sds;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.MultipartWrite;
 import ch.cyberduck.core.features.Write;
@@ -29,12 +30,17 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.EnumSet;
+
 public class SDSDelegatingWriteFeature implements MultipartWrite<Node> {
     private static final Logger log = LogManager.getLogger(SDSDelegatingWriteFeature.class);
 
     private final SDSSession session;
     private final SDSNodeIdProvider nodeid;
     private final Write<Node> proxy;
+
+    private final PathContainerService containerService
+            = new SDSPathContainerService();
 
     public SDSDelegatingWriteFeature(final SDSSession session, final SDSNodeIdProvider nodeid, final Write<Node> proxy) {
         this.session = session;
@@ -44,10 +50,8 @@ public class SDSDelegatingWriteFeature implements MultipartWrite<Node> {
 
     @Override
     public StatusOutputStream<Node> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        if(SDSNodeIdProvider.isEncrypted(file)) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return encrypting writer for %s", file));
-            }
+        if(new SDSTripleCryptEncryptorFeature(session, nodeid).isEncrypted(containerService.getContainer(file))) {
+            log.debug("Return encrypting writer for {}", file);
             // File key is set in encryption bulk feature if container is encrypted
             return new TripleCryptWriteFeature(session, nodeid, proxy).write(file, status, callback);
         }
@@ -55,28 +59,20 @@ public class SDSDelegatingWriteFeature implements MultipartWrite<Node> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        if(SDSNodeIdProvider.isEncrypted(file)) {
-            return new TripleCryptWriteFeature(session, nodeid, proxy).append(file, status);
-        }
-        return proxy.append(file, status);
-    }
-
-    @Override
-    public boolean random() {
-        return proxy.random();
-    }
-
-    @Override
-    public boolean timestamp() {
-        return proxy.timestamp();
-    }
-
-    @Override
     public ChecksumCompute checksum(final Path file, final TransferStatus status) {
-        if(SDSNodeIdProvider.isEncrypted(file)) {
+        if(SDSAttributesAdapter.isEncrypted(containerService.getContainer(file).attributes())) {
             return new TripleCryptWriteFeature(session, nodeid, proxy).checksum(file, status);
         }
         return proxy.checksum(file, status);
+    }
+
+    @Override
+    public void preflight(final Path file) throws BackgroundException {
+        new SDSTouchFeature(session, nodeid).preflight(file.getParent(), file.getName());
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return proxy.features(file);
     }
 }

@@ -33,20 +33,17 @@ import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.VoidStatusOutputStream;
 import ch.cyberduck.core.preferences.HostPreferences;
-import ch.cyberduck.core.shared.AppendWriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import org.apache.commons.codec.DecoderException;
-import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.http.HttpHeaders;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.bouncycastle.util.encoders.Base64;
 
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.util.EnumSet;
 import java.util.HashMap;
 
 import com.microsoft.azure.storage.AccessCondition;
@@ -60,13 +57,13 @@ import com.microsoft.azure.storage.blob.CloudBlob;
 import com.microsoft.azure.storage.blob.CloudBlockBlob;
 import com.microsoft.azure.storage.core.SR;
 
-public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write<Void> {
+public class AzureWriteFeature implements Write<Void> {
     private static final Logger log = LogManager.getLogger(AzureWriteFeature.class);
 
     private final AzureSession session;
     private final OperationContext context;
     private final PathContainerService containerService
-        = new DirectoryDelimiterPathContainerService();
+            = new DirectoryDelimiterPathContainerService();
     private final BlobType blobType;
 
     public AzureWriteFeature(final AzureSession session, final OperationContext context) {
@@ -85,41 +82,29 @@ public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        final Append append = super.append(file, status);
-        if(append.append) {
-            final PathAttributes attr = new AzureAttributesFinderFeature(session, context).find(file);
-            if(BlobType.APPEND_BLOB == BlobType.valueOf(attr.getCustom().get(AzureAttributesFinderFeature.KEY_BLOB_TYPE))) {
-                return append;
-            }
-        }
-        return Write.override;
-    }
-
-    @Override
     public StatusOutputStream<Void> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         try {
             final CloudBlob blob;
             if(status.isExists()) {
                 if(new HostPreferences(session.getHost()).getBoolean("azure.upload.snapshot")) {
                     session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                        .getBlobReferenceFromServer(containerService.getKey(file)).createSnapshot();
+                            .getBlobReferenceFromServer(containerService.getKey(file)).createSnapshot();
                 }
                 if(status.isAppend()) {
                     // Existing append blob type
                     blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                        .getAppendBlobReference(containerService.getKey(file));
+                            .getAppendBlobReference(containerService.getKey(file));
                 }
                 else {
                     // Existing block blob type
                     final PathAttributes attr = new AzureAttributesFinderFeature(session, context).find(file);
                     if(BlobType.APPEND_BLOB == BlobType.valueOf(attr.getCustom().get(AzureAttributesFinderFeature.KEY_BLOB_TYPE))) {
                         blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                            .getAppendBlobReference(containerService.getKey(file));
+                                .getAppendBlobReference(containerService.getKey(file));
                     }
                     else {
                         blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                            .getBlockBlobReference(containerService.getKey(file));
+                                .getBlockBlobReference(containerService.getKey(file));
                     }
                 }
             }
@@ -128,11 +113,11 @@ public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write
                 switch(blobType) {
                     case APPEND_BLOB:
                         blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                            .getAppendBlobReference(containerService.getKey(file));
+                                .getAppendBlobReference(containerService.getKey(file));
                         break;
                     default:
                         blob = session.getClient().getContainerReference(containerService.getContainer(file).getName())
-                            .getBlockBlobReference(containerService.getKey(file));
+                                .getBlockBlobReference(containerService.getKey(file));
                 }
             }
             if(StringUtils.isNotBlank(status.getMime())) {
@@ -154,13 +139,8 @@ public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write
             if(Checksum.NONE != checksum) {
                 switch(checksum.algorithm) {
                     case md5:
-                        try {
-                            blob.getProperties().setContentMD5(Base64.toBase64String(Hex.decodeHex(status.getChecksum().hash.toCharArray())));
-                            headers.remove(HttpHeaders.CONTENT_MD5);
-                        }
-                        catch(DecoderException e) {
-                            // Ignore
-                        }
+                        headers.remove(HttpHeaders.CONTENT_MD5);
+                        blob.getProperties().setContentMD5(status.getChecksum().base64);
                         break;
                 }
             }
@@ -189,7 +169,7 @@ public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write
                 @Override
                 protected void handleIOException(final IOException e) throws IOException {
                     if(StringUtils.equals(SR.STREAM_CLOSED, e.getMessage())) {
-                        log.warn(String.format("Ignore failure %s", e));
+                        log.warn("Ignore failure {}", e.getMessage());
                         return;
                     }
                     final Throwable cause = ExceptionUtils.getRootCause(e);
@@ -206,5 +186,10 @@ public class AzureWriteFeature extends AppendWriteFeature<Void> implements Write
         catch(URISyntaxException e) {
             throw new NotfoundException(e.getMessage(), e);
         }
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.checksum, Flags.mime);
     }
 }

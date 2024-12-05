@@ -22,6 +22,7 @@ import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.vault.VaultRegistry;
+import ch.cyberduck.core.vault.VaultUnlockCancelException;
 
 public class VaultRegistryDirectoryFeature<Reply> implements Directory<Reply> {
 
@@ -42,8 +43,13 @@ public class VaultRegistryDirectoryFeature<Reply> implements Directory<Reply> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return proxy.isSupported(workdir, name);
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        try {
+            registry.find(session, workdir, false).getFeature(session, Directory.class, proxy).preflight(workdir, filename);
+        }
+        catch(VaultUnlockCancelException e) {
+            proxy.preflight(workdir, filename);
+        }
     }
 
     @Override

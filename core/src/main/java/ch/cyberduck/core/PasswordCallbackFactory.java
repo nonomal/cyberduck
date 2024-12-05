@@ -27,7 +27,7 @@ public class PasswordCallbackFactory extends Factory<PasswordCallback> {
 
     private Constructor<? extends PasswordCallback> constructor;
 
-    protected PasswordCallbackFactory() {
+    private PasswordCallbackFactory() {
         super("factory.passwordcallback.class");
     }
 
@@ -37,23 +37,28 @@ public class PasswordCallbackFactory extends Factory<PasswordCallback> {
                 constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             }
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledPasswordCallback();
         }
     }
+
+    private static PasswordCallbackFactory singleton;
 
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static PasswordCallback get(final Controller c) {
-        return new PasswordCallbackFactory().create(c);
+    public static synchronized PasswordCallback get(final Controller c) {
+        if(null == singleton) {
+            singleton = new PasswordCallbackFactory();
+        }
+        return singleton.create(c);
     }
 }

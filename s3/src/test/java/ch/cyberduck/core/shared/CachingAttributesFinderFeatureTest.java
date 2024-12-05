@@ -56,11 +56,11 @@ public class CachingAttributesFinderFeatureTest extends AbstractS3Test {
     @Test(expected = NotfoundException.class)
     public void testNotFound() throws Exception {
         final PathCache cache = new PathCache(1);
-        final CachingAttributesFinderFeature f = new CachingAttributesFinderFeature(cache, new DefaultAttributesFinderFeature(session));
+        final CachingAttributesFinderFeature f = new CachingAttributesFinderFeature(session, cache, new DefaultAttributesFinderFeature(session));
         final Path test = new Path(new DefaultHomeFinderService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         f.find(test);
         // Test cache
-        new CachingAttributesFinderFeature(cache, new AttributesFinder() {
+        new CachingAttributesFinderFeature(session, cache, new AttributesFinder() {
             @Override
             public PathAttributes find(final Path file, final ListProgressListener listener) {
                 fail("Expected cache hit");
@@ -72,10 +72,11 @@ public class CachingAttributesFinderFeatureTest extends AbstractS3Test {
     @Test
     public void testDefaultAttributes() throws Exception {
         final PathCache cache = new PathCache(1);
-        final AttributesFinder f = new CachingAttributesFinderFeature(cache, new DefaultAttributesFinderFeature(session));
+        final AttributesFinder f = new CachingAttributesFinderFeature(session, cache, new DefaultAttributesFinderFeature(session));
         final String name = new AlphanumericRandomStringService().random();
         final Path bucket = new Path("versioning-test-eu-central-1-cyberduck", EnumSet.of(Path.Type.volume, Path.Type.directory));
-        final Path file = new S3TouchFeature(session, new S3AccessControlListFeature(session)).touch(new Path(bucket, name, EnumSet.of(Path.Type.file)), new TransferStatus());
+        final S3AccessControlListFeature acl = new S3AccessControlListFeature(session);
+        final Path file = new S3TouchFeature(session, acl).touch(new Path(bucket, name, EnumSet.of(Path.Type.file)), new TransferStatus());
         final String initialVersion = file.attributes().getVersionId();
         assertNotNull(initialVersion);
         final PathAttributes lookup = f.find(file);
@@ -84,7 +85,7 @@ public class CachingAttributesFinderFeatureTest extends AbstractS3Test {
         // Test with no specific version id
         assertSame(lookup, f.find(new Path(file).withAttributes(PathAttributes.EMPTY)));
         // Test cache
-        assertEquals(0L, new CachingAttributesFinderFeature(cache, new AttributesFinder() {
+        assertEquals(0L, new CachingAttributesFinderFeature(session, cache, new AttributesFinder() {
             @Override
             public PathAttributes find(final Path file, final ListProgressListener listener) {
                 fail("Expected cache hit");
@@ -104,7 +105,7 @@ public class CachingAttributesFinderFeatureTest extends AbstractS3Test {
         final byte[] content = RandomUtils.nextBytes(12);
         status.setChecksum(new SHA256ChecksumCompute().compute(new ByteArrayInputStream(content), status));
         status.setLength(content.length);
-        final HttpResponseOutputStream<StorageObject> out = new S3WriteFeature(session, new S3AccessControlListFeature(session)).write(file, status, new DisabledConnectionCallback());
+        final HttpResponseOutputStream<StorageObject> out = new S3WriteFeature(session, acl).write(file, status, new DisabledConnectionCallback());
         IOUtils.copy(new ByteArrayInputStream(content), out);
         out.close();
         assertEquals(initialVersion, f.find(file.withAttributes(new PathAttributes(file.attributes()).withVersionId(initialVersion))).getVersionId());
@@ -120,8 +121,8 @@ public class CachingAttributesFinderFeatureTest extends AbstractS3Test {
         assertEquals(newVersion, f.find(file.withAttributes(new PathAttributes(file.attributes()).withVersionId(newVersion))).getVersionId());
         assertEquals(newVersion, f.find(file.withAttributes(PathAttributes.EMPTY)).getVersionId());
         assertNotEquals(initialVersion, f.find(file.withAttributes(new PathAttributes(file.attributes()).withVersionId(newVersion))).getVersionId());
-        assertEquals(new S3AttributesAdapter().toAttributes(out.getStatus()).getVersionId(), f.find(file).getVersionId());
-        new S3DefaultDeleteFeature(session).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
+        assertEquals(new S3AttributesAdapter(session.getHost()).toAttributes(out.getStatus()).getVersionId(), f.find(file).getVersionId());
+        new S3DefaultDeleteFeature(session, acl).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
 }

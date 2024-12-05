@@ -20,6 +20,7 @@ package ch.cyberduck.core.sftp;
 import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -41,7 +42,7 @@ public class SFTPMoveFeatureTest extends AbstractSFTPTest {
     public void testMove() throws Exception {
         final Path workdir = new SFTPHomeDirectoryService(session).find();
         final Path test = new SFTPTouchFeature(session).touch(new Path(workdir, UUID.randomUUID().toString(), EnumSet.of(Path.Type.file)), new TransferStatus());
-        assertEquals(0L, test.attributes().getSize());
+        assertEquals(TransferStatus.UNKNOWN_LENGTH, test.attributes().getSize());
         final Path target = new SFTPMoveFeature(session).move(test,
             new Path(workdir, UUID.randomUUID().toString(), EnumSet.of(Path.Type.file)), new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
         assertFalse(new SFTPFindFeature(session).find(test));
@@ -57,6 +58,7 @@ public class SFTPMoveFeatureTest extends AbstractSFTPTest {
         new SFTPTouchFeature(session).touch(test, new TransferStatus());
         final Path target = new Path(workdir, UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
         new SFTPTouchFeature(session).touch(target, new TransferStatus());
+        assertThrows(ConflictException.class, () -> new SFTPMoveFeature(session).move(test, target, new TransferStatus().exists(false), new Delete.DisabledCallback(), new DisabledConnectionCallback()));
         new SFTPMoveFeature(session).move(test, target, new TransferStatus().exists(true), new Delete.DisabledCallback(), new DisabledConnectionCallback());
         assertFalse(new SFTPFindFeature(session).find(test));
         assertTrue(new SFTPFindFeature(session).find(target));

@@ -16,7 +16,6 @@ package ch.cyberduck.core.onedrive.features.sharepoint;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.onedrive.SharepointSiteSession;
@@ -37,13 +36,13 @@ public class SharepointSiteFileIdProvider extends GraphFileIdProvider {
     private Site.Metadata getSite(final Path file) throws IOException {
         final Site hostSite = Site.byHostname(session.getClient(), session.getHost().getHostname());
         if(file.isRoot()) {
-            return hostSite.getMetadata();
+            return hostSite.getMetadata(null); // query: null: Default return set.
         }
-        return Site.byPath(hostSite, file.getAbsolute()).getMetadata();
+        return Site.byPath(hostSite, file.getAbsolute()).getMetadata(null); // query: null: Default return set.
     }
 
     @Override
-    public String getFileId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getFileId(final Path file) throws BackgroundException {
         if(session.isHome(file)) {
             final Site.Metadata site;
             try {
@@ -54,6 +53,6 @@ public class SharepointSiteFileIdProvider extends GraphFileIdProvider {
             }
             return site.getId();
         }
-        return super.getFileId(file, listener);
+        return super.getFileId(file);
     }
 }

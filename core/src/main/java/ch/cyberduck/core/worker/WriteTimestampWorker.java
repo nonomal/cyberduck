@@ -20,6 +20,7 @@ package ch.cyberduck.core.worker;
 
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.UserDateFormatterFactory;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -36,20 +37,38 @@ public class WriteTimestampWorker extends Worker<Boolean> {
     private static final Logger log = LogManager.getLogger(WriteTimestampWorker.class);
 
     private final Path file;
-    private final Long timestamp;
+    private final Long created;
+    private final Long modified;
 
-    public WriteTimestampWorker(final Path file, final Long timestamp) {
+    public WriteTimestampWorker(final Path file, final Long created, final Long modified) {
         this.file = file;
-        this.timestamp = timestamp;
+        this.created = created;
+        this.modified = modified;
     }
 
     @Override
     public Boolean run(final Session<?> session) throws BackgroundException {
         final Timestamp feature = session.getFeature(Timestamp.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
+        if(null == feature) {
+            return false;
         }
-        feature.setTimestamp(file, new TransferStatus().withTimestamp(timestamp).withLockId(this.getLockId(file)));
+        log.debug("Run with feature {}", feature);
+        final TransferStatus status = new TransferStatus()
+                .withCreated(created)
+                .withModified(modified)
+                .withLockId(this.getLockId(file));
+        feature.setTimestamp(file, status);
+        if(!PathAttributes.EMPTY.equals(status.getResponse())) {
+            file.withAttributes(status.getResponse());
+        }
+        else {
+            if(created != null) {
+                file.attributes().setCreationDate(created);
+            }
+            if(modified != null) {
+                file.attributes().setModificationDate(modified);
+            }
+        }
         return true;
     }
 
@@ -60,7 +79,8 @@ public class WriteTimestampWorker extends Worker<Boolean> {
     @Override
     public String getActivity() {
         return MessageFormat.format(LocaleFactory.localizedString("Changing timestamp of {0} to {1}", "Status"),
-            file.getName(), UserDateFormatterFactory.get().getShortFormat(timestamp));
+                file.getName(), modified != null ? UserDateFormatterFactory.get().getShortFormat(modified) :
+                        created != null ? UserDateFormatterFactory.get().getShortFormat(created) : LocaleFactory.localizedString("Unknown"));
     }
 
     @Override
@@ -77,20 +97,20 @@ public class WriteTimestampWorker extends Worker<Boolean> {
             return false;
         }
         final WriteTimestampWorker that = (WriteTimestampWorker) o;
-        return Objects.equals(file, that.file) &&
-            Objects.equals(timestamp, that.timestamp);
+        return Objects.equals(file, that.file) && Objects.equals(created, that.created) && Objects.equals(modified, that.modified);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(file, timestamp);
+        return Objects.hash(file, created, modified);
     }
 
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("WriteTimestampWorker{");
         sb.append("file=").append(file);
-        sb.append(", timestamp=").append(timestamp);
+        sb.append(", created=").append(created);
+        sb.append(", modified=").append(modified);
         sb.append('}');
         return sb.toString();
     }

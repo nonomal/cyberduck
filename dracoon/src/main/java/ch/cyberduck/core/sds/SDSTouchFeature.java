@@ -15,8 +15,13 @@ package ch.cyberduck.core.sds;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
+import ch.cyberduck.core.exception.QuotaException;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
 import ch.cyberduck.core.shared.DefaultTouchFeature;
@@ -26,51 +31,60 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
+
 public class SDSTouchFeature extends DefaultTouchFeature<Node> {
     private static final Logger log = LogManager.getLogger(SDSTouchFeature.class);
 
     private final SDSSession session;
     private final SDSNodeIdProvider nodeid;
 
+    private final PathContainerService containerService
+            = new SDSPathContainerService();
+
+
     public SDSTouchFeature(final SDSSession session, final SDSNodeIdProvider nodeid) {
-        super(new SDSDelegatingWriteFeature(session, nodeid, new HostPreferences(session.getHost()).getBoolean("sds.upload.s3.enable") ? new SDSDirectS3MultipartWriteFeature(session, nodeid) : new SDSMultipartWriteFeature(session, nodeid)));
+        super(new SDSDelegatingWriteFeature(session, nodeid,
+                new HostPreferences(session.getHost()).getBoolean("sds.upload.s3.enable") ?
+                        new SDSDirectS3MultipartWriteFeature(session, nodeid) : new SDSMultipartWriteFeature(session, nodeid)));
         this.session = session;
         this.nodeid = nodeid;
     }
 
     @Override
     public Path touch(final Path file, final TransferStatus status) throws BackgroundException {
-        if(SDSNodeIdProvider.isEncrypted(file)) {
-            status.setFilekey(nodeid.getFileKey());
+        if(new SDSTripleCryptEncryptorFeature(session, nodeid).isEncrypted(containerService.getContainer(file))) {
+            status.setFilekey(SDSTripleCryptEncryptorFeature.generateFileKey());
         }
         return super.touch(file, status);
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String filename) {
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
         if(workdir.isRoot()) {
-            return false;
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename)).withFile(workdir);
         }
-        if(!this.validate(filename)) {
-            log.warn(String.format("Validation failed for target name %s", filename));
-            return false;
-        }
-        if(workdir.attributes().getQuota() != -1) {
-            if(workdir.attributes().getQuota() <= workdir.attributes().getSize() + new HostPreferences(session.getHost()).getInteger("sds.upload.multipart.chunksize")) {
-                log.warn(String.format("Quota %d exceeded with %d in %s", workdir.attributes().getQuota(), workdir.attributes().getSize(), workdir));
-                return false;
-            }
+        if(!validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename));
         }
         final SDSPermissionsFeature permissions = new SDSPermissionsFeature(session, nodeid);
-        return permissions.containsRole(workdir, SDSPermissionsFeature.CREATE_ROLE)
+        if(!permissions.containsRole(workdir, SDSPermissionsFeature.CREATE_ROLE)
                 // For existing files the delete role is also required to overwrite
-                && permissions.containsRole(workdir, SDSPermissionsFeature.DELETE_ROLE);
+                || !permissions.containsRole(workdir, SDSPermissionsFeature.DELETE_ROLE)) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename)).withFile(workdir);
+        }
+        if(workdir.attributes().getQuota() != SDSQuotaFeature.unknown) {
+            if(workdir.attributes().getQuota().available <= workdir.attributes().getSize() + new HostPreferences(session.getHost()).getInteger("sds.upload.multipart.chunksize")) {
+                log.warn("Quota {} exceeded with {} in {}", workdir.attributes().getQuota().available, workdir.attributes().getSize(), workdir);
+                throw new QuotaException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename)).withFile(workdir);
+            }
+        }
     }
 
     /**
      * Validate node name convention
      */
-    public boolean validate(final String filename) {
+    public static boolean validate(final String filename) {
         // Empty argument if not known in validation
         if(StringUtils.isNotBlank(filename)) {
             if(StringUtils.length(filename) > 150) {

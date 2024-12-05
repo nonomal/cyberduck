@@ -74,6 +74,21 @@ namespace Ch.Cyberduck.Ui.Winforms.Controls
             base.OnExpanding(args);
         }
 
+        protected override ToolStripDropDown MakeHeaderRightClickMenu(int columnIndex)
+        {
+            ToolStripDropDown m = MakeColumnSelectMenu(new ContextMenuStrip());
+            ContextMenu cm = new ContextMenu();
+            foreach (ToolStripMenuItem item in m.Items)
+            {
+                ToolStripMenuItem item1 = item;
+                MenuItem nItem = new MenuItem(LocaleFactory.localizedString(item.Text, "Localizable"),
+                    delegate { item1.PerformClick(); }); //forward click event
+                nItem.Checked = item.Checked;
+                cm.MenuItems.Add(nItem);
+            }
+            return m;
+        }
+
         protected override void OnDrawSubItem(DrawListViewSubItemEventArgs e)
         {
             object o = ((OLVListItem) e.Item).RowObject;
@@ -90,26 +105,8 @@ namespace Ch.Cyberduck.Ui.Winforms.Controls
             base.OnDrawSubItem(e);
         }
 
-        protected override void ShowColumnSelectMenu(Point pt)
-        {
-            ToolStripDropDown m = MakeColumnSelectMenu(new ContextMenuStrip());
-            ContextMenu cm = new ContextMenu();
-            foreach (ToolStripMenuItem item in m.Items)
-            {
-                ToolStripMenuItem item1 = item;
-                MenuItem nItem = new MenuItem(LocaleFactory.localizedString(item.Text, "Localizable"),
-                    delegate { item1.PerformClick(); }); //forward click event
-                nItem.Checked = item.Checked;
-                cm.MenuItems.Add(nItem);
-            }
-            cm.Show(this, PointToClient(pt)); //transform coordinates
-        }
-
         protected override void OnCellEditStarting(CellEditEventArgs e)
         {
-            e.Control.AutoSize = false;
-            e.Control.Bounds = new Rectangle(e.Control.Bounds.X + IconSize, e.Control.Bounds.Y,
-                e.Control.Bounds.Width - IconSize, e.Control.Bounds.Height);
             if (e.Control is TextBox)
             {
                 //Only select filename part w/o extension (Explorer like behavior)

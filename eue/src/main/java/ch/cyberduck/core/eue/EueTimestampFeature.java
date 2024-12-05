@@ -15,20 +15,17 @@ package ch.cyberduck.core.eue;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.eue.io.swagger.client.ApiException;
 import ch.cyberduck.core.eue.io.swagger.client.api.UpdateResourceApi;
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceUpdateModel;
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceUpdateModelUpdate;
 import ch.cyberduck.core.eue.io.swagger.client.model.UiWin32;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
+import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import org.joda.time.DateTime;
-
-public class EueTimestampFeature extends DefaultTimestampFeature {
+public class EueTimestampFeature implements Timestamp {
 
     private final EueSession session;
     private final EueResourceIdProvider fileid;
@@ -41,11 +38,12 @@ public class EueTimestampFeature extends DefaultTimestampFeature {
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
         try {
-            final String resourceId = fileid.getFileId(file, new DisabledListProgressListener());
+            final String resourceId = fileid.getFileId(file);
             final ResourceUpdateModel resourceUpdateModel = new ResourceUpdateModel();
             ResourceUpdateModelUpdate resourceUpdateModelUpdate = new ResourceUpdateModelUpdate();
             UiWin32 uiWin32 = new UiWin32();
-            uiWin32.setLastModificationMillis(new DateTime(status.getTimestamp()).getMillis());
+            uiWin32.setCreationMillis(null != status.getCreated() ? status.getCreated() : null);
+            uiWin32.setLastModificationMillis(null != status.getModified() ? status.getModified() : null);
             resourceUpdateModelUpdate.setUiwin32(uiWin32);
             resourceUpdateModel.setUpdate(resourceUpdateModelUpdate);
             new UpdateResourceApi(new EueApiClient(session)).resourceResourceIdPatch(resourceId,

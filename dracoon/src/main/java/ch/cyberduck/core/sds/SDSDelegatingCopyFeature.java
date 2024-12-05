@@ -17,6 +17,7 @@ package ch.cyberduck.core.sds;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.StreamListener;
@@ -29,6 +30,9 @@ public class SDSDelegatingCopyFeature implements Copy {
     private final SDSNodeIdProvider nodeid;
     private final SDSCopyFeature proxy;
     private final DefaultCopyFeature copy;
+
+    private final PathContainerService containerService
+            = new SDSPathContainerService();
 
     public SDSDelegatingCopyFeature(final SDSSession session, final SDSNodeIdProvider nodeid, final SDSCopyFeature proxy) {
         this.session = session;
@@ -43,9 +47,9 @@ public class SDSDelegatingCopyFeature implements Copy {
             return proxy.copy(source, target, status, callback, listener);
         }
         // Copy between encrypted and unencrypted data room
-        if(SDSNodeIdProvider.isEncrypted(target)) {
+        if(new SDSTripleCryptEncryptorFeature(session, nodeid).isEncrypted(containerService.getContainer(target))) {
             // File key must be set for new upload
-            status.setFilekey(nodeid.getFileKey());
+            status.setFilekey(SDSTripleCryptEncryptorFeature.generateFileKey());
         }
         final Path result = copy.copy(source, target, status, callback, listener);
         nodeid.cache(target, null);
@@ -53,18 +57,10 @@ public class SDSDelegatingCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
+    public void preflight(final Path source, final Path target) throws BackgroundException {
         if(proxy.isSupported(source, target)) {
-            return proxy.isRecursive(source, target);
+            proxy.preflight(source, target);
         }
-        return copy.isRecursive(source, target);
-    }
-
-    @Override
-    public boolean isSupported(final Path source, final Path target) {
-        if(proxy.isSupported(source, target)) {
-            return true;
-        }
-        return copy.isSupported(source, target);
+        copy.preflight(source, target);
     }
 }

@@ -63,13 +63,14 @@ public class SDSAttributesFinderFeature implements AttributesFinder {
             return attributes;
         }
         // Throw failure if looking up file fails
-        final String id = nodeid.getVersionId(file, listener);
+        final String id = nodeid.getVersionId(file);
         try {
             return this.findNode(file, id);
         }
         catch(NotfoundException e) {
+            log.warn("Previously cached node id {} no longer found for file {}", id, file);
             // Try with reset cache after failure finding node id
-            return this.findNode(file, nodeid.getVersionId(file, listener));
+            return this.findNode(file, nodeid.getVersionId(file));
         }
     }
 

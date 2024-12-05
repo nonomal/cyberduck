@@ -25,11 +25,12 @@ public class DisabledFilesystemBookmarkResolverTest {
 
     @Test
     public void testResolve() {
-        assertNull(new DisabledFilesystemBookmarkResolver().resolve(new NullLocal("/t"), false));
+        assertNull(new DisabledFilesystemBookmarkResolver().resolve(null));
     }
 
     @Test
     public void testCreate() {
         assertNull(new DisabledFilesystemBookmarkResolver().create(new NullLocal("/t")));
+        assertNull(new DisabledFilesystemBookmarkResolver().create(new NullLocal("/t").withBookmark("dGVzdA==")));
     }
 }

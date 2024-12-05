@@ -26,6 +26,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.nio.file.NoSuchFileException;
 import java.util.Collections;
+import java.util.EnumSet;
 
 public class LocalMoveFeature implements Move {
 
@@ -46,13 +47,12 @@ public class LocalMoveFeature implements Move {
         if(!session.toPath(file).toFile().renameTo(session.toPath(renamed).toFile())) {
             throw new LocalExceptionMappingService().map("Cannot rename {0}", new NoSuchFileException(file.getName()), file);
         }
-        // Copy attributes from original file
-        return renamed.withAttributes(new LocalAttributesFinderFeature(session).find(renamed));
+        return renamed;
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 
 }

@@ -29,6 +29,7 @@ import ch.cyberduck.core.LoginOptions;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.cryptomator.features.CryptoReadFeature;
 import ch.cyberduck.core.cryptomator.random.FastSecureRandomProvider;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.proxy.Proxy;
 import ch.cyberduck.core.sftp.SFTPHomeDirectoryService;
 import ch.cyberduck.core.sftp.SFTPProtocol;
@@ -47,7 +48,7 @@ import org.apache.commons.text.RandomStringGenerator;
 import org.apache.sshd.common.file.virtualfs.VirtualFileSystemFactory;
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.keyprovider.SimpleGeneratorHostKeyProvider;
-import org.apache.sshd.server.subsystem.sftp.SftpSubsystemFactory;
+import org.apache.sshd.sftp.server.SftpSubsystemFactory;
 import org.cryptomator.cryptofs.CryptoFileSystem;
 import org.cryptomator.cryptofs.CryptoFileSystemProperties;
 import org.cryptomator.cryptofs.CryptoFileSystemProvider;
@@ -105,13 +106,13 @@ public class SFTPCryptomatorInteroperabilityTest {
         final java.nio.file.Path mkPath = Paths.get(vault.toString(), DefaultVaultRegistry.DEFAULT_MASTERKEY_FILE_NAME);
         mkAccess.persist(mk, mkPath, passphrase);
         CryptoFileSystemProperties properties = cryptoFileSystemProperties().withKeyLoader(new MasterkeyLoader() {
-                @Override
-                public Masterkey loadKey(final URI keyId) throws MasterkeyLoadingFailedException {
-                    return mkAccess.load(mkPath, passphrase);
-                }
-            })
-            .withCipherCombo(CryptorProvider.Scheme.SIV_CTRMAC)
-            .build();
+                    @Override
+                    public Masterkey loadKey(final URI keyId) throws MasterkeyLoadingFailedException {
+                        return mkAccess.load(mkPath, passphrase);
+                    }
+                })
+                .withCipherCombo(CryptorProvider.Scheme.SIV_CTRMAC)
+                .build();
         CryptoFileSystemProvider.initialize(vault, properties, URI.create("test:key"));
         cryptoFileSystem = CryptoFileSystemProvider.newFileSystem(vault, properties);
         server.setFileSystemFactory(new VirtualFileSystemFactory(cryptoFileSystem.getPathToVault().getParent().toAbsolutePath()));
@@ -141,8 +142,8 @@ public class SFTPCryptomatorInteroperabilityTest {
         // read with Cyberduck and compare
         final Host host = new Host(new SFTPProtocol(), "localhost", PORT_NUMBER, new Credentials("empty", "empty"));
         final SFTPSession session = new SFTPSession(host, new DisabledX509TrustManager(), new DefaultX509KeyManager());
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
         final Path home = new SFTPHomeDirectoryService(session).find();
         final Path vault = new Path(home, "vault", EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault).load(session, new DisabledPasswordCallback() {
@@ -150,7 +151,7 @@ public class SFTPCryptomatorInteroperabilityTest {
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
                 return new VaultCredentials(passphrase);
             }
-        }, new DisabledPasswordStore());
+        });
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         Path p = new Path(new Path(vault, targetFolder.getFileName().toString(), EnumSet.of(Path.Type.directory)), targetFile.getFileName().toString(), EnumSet.of(Path.Type.file));
         final InputStream read = new CryptoReadFeature(session, new SFTPReadFeature(session), cryptomator).read(p, new TransferStatus(), new DisabledConnectionCallback());
@@ -175,8 +176,8 @@ public class SFTPCryptomatorInteroperabilityTest {
         // read with Cyberduck and compare
         final Host host = new Host(new SFTPProtocol(), "localhost", PORT_NUMBER, new Credentials("empty", "empty"));
         final SFTPSession session = new SFTPSession(host, new DisabledX509TrustManager(), new DefaultX509KeyManager());
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
         final Path home = new SFTPHomeDirectoryService(session).find();
         final Path vault = new Path(home, "vault", EnumSet.of(Path.Type.directory));
         final CryptoVault cryptomator = new CryptoVault(vault).load(session, new DisabledPasswordCallback() {
@@ -184,7 +185,7 @@ public class SFTPCryptomatorInteroperabilityTest {
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
                 return new VaultCredentials(passphrase);
             }
-        }, new DisabledPasswordStore());
+        });
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         Path p = new Path(new Path(vault, targetFolder.getFileName().toString(), EnumSet.of(Path.Type.directory)), targetFile.getFileName().toString(), EnumSet.of(Path.Type.file));
         final InputStream read = new CryptoReadFeature(session, new SFTPReadFeature(session), cryptomator).read(p, new TransferStatus(), new DisabledConnectionCallback());

@@ -16,16 +16,19 @@ package ch.cyberduck.core.googledrive;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
 
 import com.google.api.services.drive.model.File;
 
@@ -42,8 +45,8 @@ public class DriveCopyFeature implements Copy {
     @Override
     public Path copy(final Path source, final Path target, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
         try {
-            final File copy = session.getClient().files().copy(fileid.getFileId(source, new DisabledListProgressListener()), new File()
-                    .setParents(Collections.singletonList(fileid.getFileId(target.getParent(), new DisabledListProgressListener())))
+            final File copy = session.getClient().files().copy(fileid.getFileId(source), new File()
+                    .setParents(Collections.singletonList(fileid.getFileId(target.getParent())))
                     .setName(target.getName()))
                 .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
             listener.sent(status.getLength());
@@ -56,19 +59,18 @@ public class DriveCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        if(target.isRoot()) {
-            return false;
+    public void preflight(final Path source, final Path target) throws BackgroundException {
+        if(target.getParent().isRoot()) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(target);
         }
         if(source.isPlaceholder()) {
             // Disable for application/vnd.google-apps
-            return false;
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
         }
-        return true;
     }
 }

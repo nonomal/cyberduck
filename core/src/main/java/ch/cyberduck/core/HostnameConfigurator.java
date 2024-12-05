@@ -18,6 +18,10 @@ package ch.cyberduck.core;
  * dkocher@cyberduck.ch
  */
 
+
+/**
+ * Configurator for resolving hostname from alias
+ */
 public interface HostnameConfigurator {
 
     /**
@@ -38,7 +42,7 @@ public interface HostnameConfigurator {
 
     HostnameConfigurator DISABLED = new HostnameConfigurator() {
         @Override
-        public String getHostname(String alias) {
+        public String getHostname(final String alias) {
             return alias;
         }
 

@@ -15,17 +15,19 @@ package ch.cyberduck.core.storegate;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.VersionId;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.storegate.io.swagger.client.ApiException;
 import ch.cyberduck.core.storegate.io.swagger.client.api.FilesApi;
 import ch.cyberduck.core.storegate.io.swagger.client.model.CreateFolderRequest;
 import ch.cyberduck.core.storegate.io.swagger.client.model.File;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.text.MessageFormat;
 
 public class StoregateDirectoryFeature implements Directory<VersionId> {
 
@@ -43,7 +45,7 @@ public class StoregateDirectoryFeature implements Directory<VersionId> {
             final FilesApi files = new FilesApi(session.getClient());
             final CreateFolderRequest request = new CreateFolderRequest();
             request.setName(folder.getName());
-            request.setParentID(fileid.getFileId(folder.getParent(), new DisabledListProgressListener()));
+            request.setParentID(fileid.getFileId(folder.getParent()));
             final File f = files.filesCreateFolder(request);
             fileid.cache(folder, f.getId());
             return folder.withAttributes(new StoregateAttributesFinderFeature(session, fileid).toAttributes(f));
@@ -54,12 +56,9 @@ public class StoregateDirectoryFeature implements Directory<VersionId> {
     }
 
     @Override
-    public Directory<VersionId> withWriter(final Write<VersionId> writer) {
-        return this;
-    }
-
-    @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return !workdir.isRoot();
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(workdir.isRoot()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename)).withFile(workdir);
+        }
     }
 }

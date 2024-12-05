@@ -22,39 +22,32 @@ import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.AttributesFinder;
-import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.transfer.TransferItem;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.Collections;
 import java.util.Map;
 
 public class CachingComparePathFilter implements ComparePathFilter {
     private static final Logger log = LogManager.getLogger(CachingComparePathFilter.class);
 
-    private Map<TransferItem, Comparison> cache = Collections.emptyMap();
-
+    private final Map<TransferItem, Comparison> cache;
     private final DefaultComparePathFilter delegate;
 
-    public CachingComparePathFilter(final DefaultComparePathFilter delegate) {
+    public CachingComparePathFilter(final Map<TransferItem, Comparison> cache, final DefaultComparePathFilter delegate) {
+        this.cache = cache;
         this.delegate = delegate;
     }
 
     @Override
     public Comparison compare(final Path file, final Local local, final ProgressListener listener) throws BackgroundException {
         if(!cache.containsKey(new TransferItem(file, local))) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Compare file %s", file));
-            }
+            log.debug("Compare file {}", file);
             cache.put(new TransferItem(file, local), delegate.compare(file, local, listener));
         }
         final Comparison comparison = cache.get(new TransferItem(file, local));
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Return comparison %s for file %s", comparison, file));
-        }
+        log.debug("Return comparison {} for file {}", comparison, file);
         return comparison;
     }
 
@@ -63,27 +56,5 @@ public class CachingComparePathFilter implements ComparePathFilter {
             return cache.get(item);
         }
         return Comparison.unknown;
-    }
-
-    public void reset() {
-        cache.clear();
-    }
-
-    @Override
-    public CachingComparePathFilter withFinder(final Find finder) {
-        delegate.withFinder(finder);
-        return this;
-    }
-
-    @Override
-    public CachingComparePathFilter withAttributes(final AttributesFinder attribute) {
-        delegate.withAttributes(attribute);
-        return this;
-    }
-
-    @Override
-    public CachingComparePathFilter withCache(final Map<TransferItem, Comparison> cache) {
-        this.cache = cache;
-        return this;
     }
 }

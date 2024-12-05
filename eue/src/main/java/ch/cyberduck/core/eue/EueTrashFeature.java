@@ -15,7 +15,7 @@ package ch.cyberduck.core.eue;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.collections.Partition;
@@ -25,6 +25,7 @@ import ch.cyberduck.core.eue.io.swagger.client.model.ResourceCreationResponseEnt
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceMoveResponseEntries;
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceMoveResponseEntry;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Trash;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -34,8 +35,10 @@ import org.apache.http.HttpStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -63,13 +66,13 @@ public class EueTrashFeature implements Trash {
         final List<String> resources = new ArrayList<>();
         try {
             for(Path f : files.keySet()) {
-                switch(fileid.getFileId(f.getParent(), new DisabledListProgressListener())) {
+                switch(fileid.getFileId(f.getParent())) {
                     case EueResourceIdProvider.TRASH:
-                        log.warn(String.format("Delete file %s already in trash", f));
-                        new EueDeleteFeature(session, fileid).delete(Collections.singletonList(fileid.getFileId(f, new DisabledListProgressListener())));
+                        log.warn("Delete file {} already in trash", f);
+                        new EueDeleteFeature(session, fileid).delete(Collections.singletonList(fileid.getFileId(f)));
                         break;
                     default:
-                        resources.add(fileid.getFileId(f, new DisabledListProgressListener()));
+                        resources.add(fileid.getFileId(f));
                         callback.delete(f);
                 }
             }
@@ -89,7 +92,7 @@ public class EueTrashFeature implements Trash {
                                 case HttpStatus.SC_OK:
                                     break;
                                 default:
-                                    log.warn(String.format("Failure %s trashing resource %s", resourceMoveResponseEntries, resourceMoveResponseEntry));
+                                    log.warn("Failure {} trashing resource {}", resourceMoveResponseEntries, resourceMoveResponseEntry);
                                     final ResourceCreationResponseEntryEntity entity = resourceMoveResponseEntry.getEntity();
                                     if(null == entity) {
                                         throw new EueExceptionMappingService().map(new ApiException(resourceMoveResponseEntry.getReason(),
@@ -112,16 +115,17 @@ public class EueTrashFeature implements Trash {
     }
 
     @Override
-    public boolean isSupported(final Path file) {
-        if(StringUtils.equals(EueResourceIdProvider.TRASH, file.attributes().getFileId())
-                || StringUtils.equals(session.getHost().getProperty("cryptomator.vault.name.default"), file.getName())) {
-            return false;
+    public void preflight(final Path file) throws BackgroundException {
+        if(StringUtils.equals(EueResourceIdProvider.TRASH, file.attributes().getFileId())) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
         }
-        return true;
+        else if(StringUtils.equals(session.getHost().getProperty("cryptomator.vault.name.default"), file.getName())) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+        }
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 }

@@ -17,7 +17,11 @@ package ch.cyberduck.core.dav;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
+import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.http.HttpUploadFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.security.MessageDigest;
 
@@ -25,5 +29,17 @@ public class DAVUploadFeature extends HttpUploadFeature<Void, MessageDigest> {
 
     public DAVUploadFeature(final DAVSession session) {
         super(new DAVWriteFeature(session));
+    }
+
+    public DAVUploadFeature(final Write<Void> writer) {
+        super(writer);
+    }
+
+    @Override
+    public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
+        if(status.getLength() == TransferStatus.UNKNOWN_LENGTH) {
+            return new Write.Append(false).withStatus(status);
+        }
+        return new Write.Append(status.isExists()).withStatus(status);
     }
 }

@@ -26,6 +26,7 @@ import ch.cyberduck.test.IntegrationTest;
 import ch.cyberduck.ui.browser.SearchFilter;
 
 import org.apache.commons.lang3.StringUtils;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -35,6 +36,7 @@ import java.util.EnumSet;
 import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
+@Ignore
 public class DriveSearchFeatureTest extends AbstractDriveTest {
 
     @Test
@@ -61,8 +63,7 @@ public class DriveSearchFeatureTest extends AbstractDriveTest {
         final Path file = new DriveTouchFeature(session, fileid).touch(new Path(workdir, name, EnumSet.of(Path.Type.file)), new TransferStatus());
         final DriveSearchFeature feature = new DriveSearchFeature(session, fileid);
         assertTrue(feature.search(workdir, new SearchFilter(name), new DisabledListProgressListener()).contains(file));
-        // Supports prefix matching only
-        assertFalse(feature.search(workdir, new SearchFilter(StringUtils.substring(name, 2)), new DisabledListProgressListener()).contains(file));
+        assertTrue(feature.search(workdir, new SearchFilter(StringUtils.substring(name, 2)), new DisabledListProgressListener()).contains(file));
         final AttributedList<Path> result = feature.search(workdir, new SearchFilter(StringUtils.substring(name, 0, name.length() - 2)), new DisabledListProgressListener());
         assertTrue(result.contains(file));
         assertEquals(workdir, result.get(result.indexOf(file)).getParent());

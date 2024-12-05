@@ -30,6 +30,7 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.filter.DownloadDuplicateFilter;
 import ch.cyberduck.core.io.DisabledStreamListener;
 import ch.cyberduck.core.local.Application;
+import ch.cyberduck.core.local.ApplicationQuitCallback;
 import ch.cyberduck.core.local.FileWatcherListener;
 import ch.cyberduck.core.notification.NotificationService;
 import ch.cyberduck.core.transfer.DisabledTransferErrorCallback;
@@ -58,6 +59,7 @@ public class EditOpenWorker extends Worker<Transfer> {
     private final Transfer download;
     private final Path file;
     private final Local local;
+    private final ApplicationQuitCallback quit;
     private final NotificationService notification;
     private final ProgressListener listener;
     private final FileWatcherListener watcher;
@@ -67,12 +69,13 @@ public class EditOpenWorker extends Worker<Transfer> {
                           final Application application,
                           final Path file, final Local local,
                           final ProgressListener listener,
-                          final FileWatcherListener watcher,
+                          final ApplicationQuitCallback quit, final FileWatcherListener watcher,
                           final NotificationService notification) {
         this.application = application;
         this.file = file;
         this.editor = editor;
         this.local = local;
+        this.quit = quit;
         this.notification = notification;
         final DownloadFilterOptions options = new DownloadFilterOptions(bookmark);
         options.quarantine = false;
@@ -91,9 +94,7 @@ public class EditOpenWorker extends Worker<Transfer> {
 
     @Override
     public Transfer run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run edit action for editor %s", file));
-        }
+        log.debug("Run edit action for editor {}", file);
         // Delete any existing file which might be used by a watch editor already
         final TransferOptions options = new TransferOptions();
         final SingleTransferWorker worker
@@ -102,10 +103,10 @@ public class EditOpenWorker extends Worker<Transfer> {
                 listener, new DisabledStreamListener(), new DisabledLoginCallback(), notification);
         worker.run(session);
         if(!download.isComplete()) {
-            log.warn(String.format("File size changed for %s", file));
+            log.warn("File size changed for {}", file);
         }
         try {
-            editor.edit(application, file, local, watcher);
+            editor.edit(application, file, local, watcher, quit);
         }
         catch(IOException e) {
             throw new DefaultIOExceptionMappingService().map(e);
@@ -124,22 +125,28 @@ public class EditOpenWorker extends Worker<Transfer> {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(final Object o) {
         if(this == o) {
             return true;
         }
         if(o == null || getClass() != o.getClass()) {
             return false;
         }
-        EditOpenWorker that = (EditOpenWorker) o;
-        if(!Objects.equals(editor, that.editor)) {
-            return false;
-        }
-        return true;
+        final EditOpenWorker that = (EditOpenWorker) o;
+        return Objects.equals(editor, that.editor) && Objects.equals(file, that.file);
     }
 
     @Override
     public int hashCode() {
-        return editor != null ? editor.hashCode() : 0;
+        return Objects.hash(editor, file);
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("EditOpenWorker{");
+        sb.append("editor=").append(editor);
+        sb.append(", file=").append(file);
+        sb.append('}');
+        return sb.toString();
     }
 }

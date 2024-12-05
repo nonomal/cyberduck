@@ -22,9 +22,10 @@ import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.DisabledPasswordCallback;
 import ch.cyberduck.core.DisabledPasswordStore;
+import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.box.AbtractBoxTest;
+import ch.cyberduck.core.box.AbstractBoxTest;
 import ch.cyberduck.core.box.BoxAttributesFinderFeature;
 import ch.cyberduck.core.box.BoxDeleteFeature;
 import ch.cyberduck.core.box.BoxDirectoryFeature;
@@ -32,13 +33,13 @@ import ch.cyberduck.core.box.BoxFileidProvider;
 import ch.cyberduck.core.box.BoxFindFeature;
 import ch.cyberduck.core.box.BoxReadFeature;
 import ch.cyberduck.core.box.BoxThresholdUploadService;
-import ch.cyberduck.core.box.BoxThresholdWriteFeature;
-import ch.cyberduck.core.cryptomator.features.CryptoAttributesFeature;
+import ch.cyberduck.core.box.BoxWriteFeature;
 import ch.cyberduck.core.cryptomator.features.CryptoBulkFeature;
-import ch.cyberduck.core.cryptomator.features.CryptoFindV6Feature;
 import ch.cyberduck.core.cryptomator.features.CryptoReadFeature;
 import ch.cyberduck.core.cryptomator.features.CryptoUploadFeature;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.io.BandwidthThrottle;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.shared.DisabledBulkFeature;
@@ -69,7 +70,7 @@ import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
 @RunWith(value = Parameterized.class)
-public class BoxThresholdUploadServiceTest extends AbtractBoxTest {
+public class BoxThresholdUploadServiceTest extends AbstractBoxTest {
 
     @Test
     public void testUploadVaultWithBulkFeature() throws Exception {
@@ -78,7 +79,7 @@ public class BoxThresholdUploadServiceTest extends AbtractBoxTest {
         final Path vault = new Path(container, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final Path test = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         final DefaultVaultRegistry registry = new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator);
         session.withRegistry(registry);
         final Local local = new Local(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString());
@@ -93,12 +94,12 @@ public class BoxThresholdUploadServiceTest extends AbtractBoxTest {
         final BytecountStreamListener count = new BytecountStreamListener();
         final CryptoUploadFeature feature = new CryptoUploadFeature<>(session,
                 new BoxThresholdUploadService(session, fileid, registry),
-                new BoxThresholdWriteFeature(session, fileid), cryptomator);
-        feature.upload(test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), count, writeStatus, new DisabledConnectionCallback());
+                new BoxWriteFeature(session, fileid), cryptomator);
+        feature.upload(test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED), new DisabledProgressListener(), count, writeStatus, new DisabledConnectionCallback());
         assertEquals(content.length, count.getSent());
         assertTrue(writeStatus.isComplete());
-        assertTrue(new CryptoFindV6Feature(session, new BoxFindFeature(session, fileid), cryptomator).find(test));
-        assertEquals(content.length, new CryptoAttributesFeature(session, new BoxAttributesFinderFeature(session, fileid), cryptomator).find(test).getSize());
+        assertTrue(cryptomator.getFeature(session, Find.class, new BoxFindFeature(session, fileid)).find(test));
+        assertEquals(content.length, cryptomator.getFeature(session, AttributesFinder.class, new BoxAttributesFinderFeature(session, fileid)).find(test).getSize());
         final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);
         final TransferStatus readStatus = new TransferStatus().withLength(content.length);
         final InputStream in = new CryptoReadFeature(session, new BoxReadFeature(session, fileid), cryptomator).read(test, readStatus, new DisabledConnectionCallback());

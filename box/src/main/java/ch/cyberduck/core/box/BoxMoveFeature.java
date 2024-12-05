@@ -16,7 +16,7 @@ package ch.cyberduck.core.box;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.box.io.swagger.client.ApiException;
 import ch.cyberduck.core.box.io.swagger.client.api.FilesApi;
@@ -28,6 +28,7 @@ import ch.cyberduck.core.box.io.swagger.client.model.Folder;
 import ch.cyberduck.core.box.io.swagger.client.model.FoldersFolderIdBody;
 import ch.cyberduck.core.box.io.swagger.client.model.FoldersfolderIdParent;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Move;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -35,7 +36,9 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
 
 public class BoxMoveFeature implements Move {
     private static final Logger log = LogManager.getLogger(BoxMoveFeature.class);
@@ -52,18 +55,16 @@ public class BoxMoveFeature implements Move {
     public Path move(final Path file, final Path renamed, final TransferStatus status, final Delete.Callback delete, final ConnectionCallback callback) throws BackgroundException {
         try {
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Delete file %s to be replaced with %s", renamed, file));
-                }
+                log.warn("Delete file {} to be replaced with {}", renamed, file);
                 new BoxDeleteFeature(session, fileid).delete(Collections.singletonList(renamed), callback, delete);
             }
-            final String id = fileid.getFileId(file, new DisabledListProgressListener());
+            final String id = fileid.getFileId(file);
             if(file.isDirectory()) {
                 final Folder result = new FoldersApi(new BoxApiClient(session.getClient())).putFoldersId(
                         id, new FoldersFolderIdBody()
                                 .name(renamed.getName())
                                 .parent(new FoldersfolderIdParent()
-                                        .id(fileid.getFileId(renamed.getParent(), new DisabledListProgressListener()))),
+                                        .id(fileid.getFileId(renamed.getParent()))),
                         null, BoxAttributesFinderFeature.DEFAULT_FIELDS);
                 fileid.cache(file, null);
                 fileid.cache(renamed, id);
@@ -73,7 +74,7 @@ public class BoxMoveFeature implements Move {
                     id, new FilesFileIdBody()
                             .name(renamed.getName())
                             .parent(new FilesfileIdParent()
-                                    .id(fileid.getFileId(renamed.getParent(), new DisabledListProgressListener()))),
+                                    .id(fileid.getFileId(renamed.getParent()))),
                     null, BoxAttributesFinderFeature.DEFAULT_FIELDS);
             fileid.cache(file, null);
             fileid.cache(renamed, id);
@@ -85,7 +86,14 @@ public class BoxMoveFeature implements Move {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
+    }
+
+    @Override
+    public void preflight(final Path source, final Path target) throws BackgroundException {
+        if(!BoxTouchFeature.validate(target.getName())) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), target.getName()));
+        }
     }
 }

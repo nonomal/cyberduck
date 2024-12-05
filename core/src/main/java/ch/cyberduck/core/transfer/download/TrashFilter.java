@@ -23,6 +23,7 @@ import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.local.LocalTrashFactory;
 import ch.cyberduck.core.local.features.Trash;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -38,20 +39,21 @@ public class TrashFilter extends AbstractDownloadFilter {
             = LocalTrashFactory.get();
 
     public TrashFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session) {
-        super(symlinkResolver, session, new DownloadFilterOptions(session.getHost()));
+        this(symlinkResolver, session, new DownloadFilterOptions(session.getHost()));
     }
 
-    public TrashFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session,
-                       final DownloadFilterOptions options) {
-        super(symlinkResolver, session, options);
+    public TrashFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final DownloadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(AttributesFinder.class), options);
+    }
+
+    public TrashFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final AttributesFinder attribute, final DownloadFilterOptions options) {
+        super(symlinkResolver, session, attribute, options);
     }
 
     @Override
     public void apply(Path file, final Local local, final TransferStatus status, final ProgressListener listener) throws BackgroundException {
         if(status.isExists()) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Trash file %s", local));
-            }
+            log.info("Trash file {}", local);
             try {
                 feature.trash(local);
             }

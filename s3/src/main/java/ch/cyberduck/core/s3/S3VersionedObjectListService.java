@@ -34,6 +34,7 @@ import ch.cyberduck.core.threading.ThreadPoolFactory;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jets3t.service.ServiceException;
@@ -96,9 +97,9 @@ public class S3VersionedObjectListService extends S3AbstractListService implemen
         final ThreadPool pool = ThreadPoolFactory.get("list", concurrency);
         try {
             final String prefix = this.createPrefix(directory);
+            log.debug("List with prefix {}", prefix);
             final Path bucket = containerService.getContainer(directory);
-            final AttributedList<Path> children = new AttributedList<>();
-            final List<Future<Path>> folders = new ArrayList<>();
+            final AttributedList<Path> objects = new AttributedList<>();
             String priorLastKey = null;
             String priorLastVersionId = null;
             long revision = 0L;
@@ -112,12 +113,8 @@ public class S3VersionedObjectListService extends S3AbstractListService implemen
                 // Amazon S3 returns object versions in the order in which they were stored, with the most recently stored returned first.
                 for(BaseVersionOrDeleteMarker marker : chunk.getItems()) {
                     final String key = URIEncoder.decode(marker.getKey());
-                    if(String.valueOf(Path.DELIMITER).equals(PathNormalizer.normalize(key))) {
-                        log.warn(String.format("Skipping prefix %s", key));
-                        continue;
-                    }
                     if(new SimplePathPredicate(PathNormalizer.compose(bucket, key)).test(directory)) {
-                        // Placeholder object, skip
+                        log.debug("Skip placeholder key {}", key);
                         hasDirectoryPlaceholder = true;
                         continue;
                     }
@@ -151,43 +148,44 @@ public class S3VersionedObjectListService extends S3AbstractListService implemen
                     final Path f = new Path(directory.isDirectory() ? directory : directory.getParent(),
                             PathNormalizer.name(key), EnumSet.of(Path.Type.file), attr);
                     if(metadata) {
-                        f.withAttributes(attributes.find(f));
+                        // Method Not Allowed for delete marker
+                        if(!marker.isDeleteMarker()) {
+                            f.withAttributes(attributes.find(f));
+                        }
                     }
-                    children.add(f);
+                    objects.add(f);
                     lastKey = key;
                 }
                 final String[] prefixes = chunk.getCommonPrefixes();
+                final List<Future<Path>> folders = new ArrayList<>();
                 for(String common : prefixes) {
-                    if(String.valueOf(Path.DELIMITER).equals(common)) {
-                        log.warn(String.format("Skipping prefix %s", common));
-                        continue;
-                    }
-                    final String key = PathNormalizer.normalize(URIEncoder.decode(common));
-                    if(new SimplePathPredicate(new Path(bucket, key, EnumSet.of(Path.Type.directory))).test(directory)) {
+                    if(new SimplePathPredicate(PathNormalizer.compose(bucket, URIEncoder.decode(common))).test(directory)) {
                         continue;
                     }
                     folders.add(this.submit(pool, bucket, directory, URIEncoder.decode(common)));
                 }
+                for(Future<Path> f : folders) {
+                    try {
+                        objects.add(Uninterruptibles.getUninterruptibly(f));
+                    }
+                    catch(ExecutionException e) {
+                        log.warn("Listing versioned objects failed with execution failure {}", e.getMessage());
+                        for(Throwable cause : ExceptionUtils.getThrowableList(e)) {
+                            Throwables.throwIfInstanceOf(cause, BackgroundException.class);
+                        }
+                        throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
+                    }
+                }
                 priorLastKey = null != chunk.getNextKeyMarker() ? URIEncoder.decode(chunk.getNextKeyMarker()) : null;
                 priorLastVersionId = chunk.getNextVersionIdMarker();
-                listener.chunk(directory, children);
+                listener.chunk(directory, objects);
             }
             while(priorLastKey != null);
-            for(Future<Path> f : folders) {
-                try {
-                    children.add(Uninterruptibles.getUninterruptibly(f));
-                }
-                catch(ExecutionException e) {
-                    log.warn(String.format("Listing versioned objects failed with execution failure %s", e.getMessage()));
-                    Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
-                    throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
-                }
-            }
-            listener.chunk(directory, children);
-            if(!hasDirectoryPlaceholder && children.isEmpty()) {
+            if(!hasDirectoryPlaceholder && objects.isEmpty()) {
                 // Only for AWS
                 if(S3Session.isAwsHostname(session.getHost().getHostname())) {
                     if(StringUtils.isEmpty(RequestEntityRestStorageService.findBucketInHostname(session.getHost()))) {
+                        log.warn("No placeholder found for directory {}", directory);
                         throw new NotfoundException(directory.getAbsolute());
                     }
                 }
@@ -202,7 +200,7 @@ public class S3VersionedObjectListService extends S3AbstractListService implemen
                     }
                 }
             }
-            return children;
+            return objects;
         }
         catch(ServiceException e) {
             throw new S3ExceptionMappingService().map("Listing directory {0} failed", e, directory);
@@ -213,38 +211,47 @@ public class S3VersionedObjectListService extends S3AbstractListService implemen
         }
     }
 
-    private Future<Path> submit(final ThreadPool pool, final Path bucket, final Path directory, final String common) {
+    /**
+     * Determine path from prefix. Path will have duplicate marker set in attributes when all containing files for the
+     * prefix have a delete marker set.
+     *
+     * @param pool      Thread pool to run task with
+     * @param bucket    Bucket
+     * @param directory The directory for which contents are listed
+     * @param prefix    URI decoded common prefix found in directory
+     * @return Path to add to directory list
+     */
+    private Future<Path> submit(final ThreadPool pool, final Path bucket, final Path directory, final String prefix) {
         return pool.execute(new BackgroundExceptionCallable<Path>() {
             @Override
             public Path call() throws BackgroundException {
                 final PathAttributes attr = new PathAttributes();
                 attr.setRegion(bucket.attributes().getRegion());
-                final Path prefix = new Path(directory, PathNormalizer.name(common),
-                        EnumSet.of(Path.Type.directory, Path.Type.placeholder), attr);
+                final String key = StringUtils.chomp(prefix, String.valueOf(Path.DELIMITER));
                 try {
                     final VersionOrDeleteMarkersChunk versions = session.getClient().listVersionedObjectsChunked(
-                            bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), common, null, 1,
+                            bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), prefix, null, 1,
                             null, null, false);
                     if(versions.getItems().length == 1) {
                         final BaseVersionOrDeleteMarker version = versions.getItems()[0];
-                        if(URIEncoder.decode(version.getKey()).equals(common)) {
+                        if(URIEncoder.decode(version.getKey()).equals(prefix)) {
                             attr.setVersionId(version.getVersionId());
                             if(version.isDeleteMarker()) {
                                 attr.setCustom(ImmutableMap.of(KEY_DELETE_MARKER, Boolean.TRUE.toString()));
                             }
                         }
-                        // no placeholder but objects inside - need to check if all of them are deleted
+                        // No placeholder but objects inside; need to check if all of them are deleted
                         final StorageObjectsChunk unversioned = session.getClient().listObjectsChunked(
-                                bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), common,
+                                bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(), prefix,
                                 null, 1, null, false);
                         if(unversioned.getObjects().length == 0) {
                             attr.setDuplicate(true);
                         }
                     }
-                    return prefix;
+                    return new Path(directory, PathNormalizer.name(key), EnumSet.of(Path.Type.directory, Path.Type.placeholder), attr);
                 }
                 catch(ServiceException e) {
-                    throw new S3ExceptionMappingService().map("Listing directory {0} failed", e, prefix);
+                    throw new S3ExceptionMappingService().map("Listing directory {0} failed", e, directory);
                 }
             }
         });

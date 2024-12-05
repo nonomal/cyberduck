@@ -29,35 +29,41 @@ import java.lang.reflect.InvocationTargetException;
 public class LoginCallbackFactory extends Factory<LoginCallback> {
     private static final Logger log = LogManager.getLogger(LoginCallbackFactory.class);
 
-    private Constructor<? extends LoginCallback> constructor;
+    LoginCallbackFactory(final Class<? extends LoginCallback> clazz) {
+        super(clazz);
+    }
 
-    protected LoginCallbackFactory() {
+    private LoginCallbackFactory() {
         super("factory.logincallback.class");
     }
 
     public LoginCallback create(final Controller controller) {
         try {
+            final Constructor<? extends LoginCallback> constructor
+                    = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             if(null == constructor) {
-                constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
-            }
-            if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledLoginCallback();
         }
     }
+
+    private static LoginCallbackFactory singleton;
 
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static LoginCallback get(final Controller c) {
-        return new LoginCallbackFactory().create(c);
+    public static synchronized LoginCallback get(final Controller c) {
+        if(null == singleton) {
+            singleton = new LoginCallbackFactory();
+        }
+        return singleton.create(c);
     }
 }

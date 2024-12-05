@@ -20,6 +20,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.io.Checksum;
@@ -44,7 +45,7 @@ public class DropboxAttributesFinderFeature implements AttributesFinder, Attribu
 
     public DropboxAttributesFinderFeature(final DropboxSession session) {
         this.session = session;
-        this.containerService = new DropboxPathContainerService(session);
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
@@ -52,14 +53,22 @@ public class DropboxAttributesFinderFeature implements AttributesFinder, Attribu
         try {
             // Metadata for the root folder is unsupported
             if(file.isRoot()) {
-                // Retrieve he namespace ID for a users home folder and team root folder
+                // Retrieve the namespace ID for a users home folder and team root folder
                 final FullAccount account = new DbxUserUsersRequests(session.getClient()).getCurrentAccount();
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Set root namespace %s", account.getRootInfo().getRootNamespaceId()));
-                }
+                log.debug("Set root namespace {}", account.getRootInfo().getRootNamespaceId());
                 return new PathAttributes().withFileId(account.getRootInfo().getRootNamespaceId());
             }
             final Metadata metadata = new DbxUserFilesRequests(session.getClient(file)).getMetadata(containerService.getKey(file));
+            if(metadata instanceof FileMetadata) {
+                if(file.isDirectory()) {
+                    throw new NotfoundException(file.getAbsolute());
+                }
+            }
+            if(metadata instanceof FolderMetadata) {
+                if(file.isFile()) {
+                    throw new NotfoundException(file.getAbsolute());
+                }
+            }
             return this.toAttributes(metadata);
         }
         catch(DbxException e) {
@@ -83,7 +92,11 @@ public class DropboxAttributesFinderFeature implements AttributesFinder, Attribu
         if(metadata instanceof FolderMetadata) {
             final FolderMetadata folder = (FolderMetadata) metadata;
             // All shared folders have a shared_folder_id. This value is identical to the namespace ID for that shared folder
-            attributes.setFileId(folder.getSharedFolderId());
+            final String sharedFolderId = folder.getSharedFolderId();
+            if(sharedFolderId != null) {
+                log.debug("Set file id {} for shared folder {}", sharedFolderId, folder);
+                attributes.setFileId(sharedFolderId);
+            }
         }
         return attributes;
     }

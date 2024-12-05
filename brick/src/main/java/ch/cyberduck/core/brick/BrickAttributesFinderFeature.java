@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -16,6 +18,7 @@ package ch.cyberduck.core.brick;/*
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.brick.io.swagger.client.ApiException;
 import ch.cyberduck.core.brick.io.swagger.client.api.FilesApi;
 import ch.cyberduck.core.brick.io.swagger.client.model.FileEntity;
@@ -39,8 +42,8 @@ public class BrickAttributesFinderFeature implements AttributesFinder, Attribute
     public PathAttributes find(final Path file, final ListProgressListener listener) throws BackgroundException {
         try {
             final FileEntity entity = new FilesApi(new BrickApiClient(session))
-                .download(StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)),
-                    "stat", null, false, false);
+                    .download(StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)),
+                            "stat", null, false, false);
             switch(entity.getType()) {
                 case "file":
                     if(file.isDirectory()) {
@@ -73,6 +76,41 @@ public class BrickAttributesFinderFeature implements AttributesFinder, Attribute
         else if(entity.getMtime() != null) {
             attr.setModificationDate(entity.getMtime().getMillis());
         }
+        if(entity.getPermissions() != null) {
+            final Permission permission = new Permission();
+            if(entity.getPermissions().contains(PermissionType.r.name())) {
+                permission.setUser(permission.getUser().or(Permission.Action.read));
+            }
+            if(entity.getPermissions().contains(PermissionType.w.name())) {
+                permission.setUser(permission.getUser().or(Permission.Action.write));
+            }
+            if(entity.getPermissions().contains(PermissionType.l.name())) {
+                permission.setUser(permission.getUser().or(Permission.Action.execute));
+            }
+            attr.setPermission(permission);
+        }
         return attr;
+    }
+
+    /**
+     * A short string representing the current user's permissions. Can be r,w,d, l or any combination
+     */
+    enum PermissionType {
+        /**
+         * Read
+         */
+        r,
+        /**
+         * Write
+         */
+        w,
+        /**
+         * Delete
+         */
+        d,
+        /**
+         * List
+         */
+        l,
     }
 }

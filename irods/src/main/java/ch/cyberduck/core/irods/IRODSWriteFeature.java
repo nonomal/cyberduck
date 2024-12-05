@@ -20,8 +20,8 @@ package ch.cyberduck.core.irods;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.StatusOutputStream;
-import ch.cyberduck.core.shared.AppendWriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
@@ -33,7 +33,7 @@ import org.irods.jargon.core.pub.domain.ObjStat;
 import org.irods.jargon.core.pub.io.IRODSFileOutputStream;
 import org.irods.jargon.core.pub.io.PackingIrodsOutputStream;
 
-public class IRODSWriteFeature extends AppendWriteFeature<ObjStat> {
+public class IRODSWriteFeature implements Write<ObjStat> {
 
     private final IRODSSession session;
 
@@ -50,9 +50,14 @@ public class IRODSWriteFeature extends AppendWriteFeature<ObjStat> {
                         file.getAbsolute(), status.isAppend() ? DataObjInp.OpenFlags.READ_WRITE : DataObjInp.OpenFlags.WRITE_TRUNCATE);
                 return new StatusOutputStream<ObjStat>(new PackingIrodsOutputStream(out)) {
                     @Override
-                    public ObjStat getStatus() {
+                    public ObjStat getStatus() throws BackgroundException {
                         // No remote attributes from server returned after upload
-                        return null;
+                        try {
+                            return fs.getObjStat(file.getAbsolute());
+                        }
+                        catch(JargonException e) {
+                            throw new IRODSExceptionMappingService().map("Failure to read attributes of {0}", e, file);
+                        }
                     }
                 };
             }

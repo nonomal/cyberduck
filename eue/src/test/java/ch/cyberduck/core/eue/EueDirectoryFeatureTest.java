@@ -32,7 +32,7 @@ import java.util.Collections;
 import java.util.EnumSet;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.fail;
+import static org.junit.Assert.assertThrows;
 
 @Category(IntegrationTest.class)
 public class EueDirectoryFeatureTest extends AbstractEueSessionTest {
@@ -42,6 +42,7 @@ public class EueDirectoryFeatureTest extends AbstractEueSessionTest {
         final EueResourceIdProvider fileid = new EueResourceIdProvider(session);
         final TransferStatus status = new TransferStatus();
         final Path directory = new EueDirectoryFeature(session, fileid).mkdir(new Path(new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), status);
+        assertThrows(ConflictException.class, () -> new EueDirectoryFeature(session, fileid).mkdir(directory, new TransferStatus()));
         assertEquals(new EueAttributesFinderFeature(session, fileid).find(directory).getFileId(), directory.attributes().getFileId());
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(directory), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
@@ -58,17 +59,12 @@ public class EueDirectoryFeatureTest extends AbstractEueSessionTest {
         }
     }
 
-    @Test(expected = ConflictException.class)
+    @Test
     public void testCaseSensitivity() throws Exception {
         final EueResourceIdProvider fileid = new EueResourceIdProvider(session);
         final String filename = new AlphanumericRandomStringService().random();
         new EueDirectoryFeature(session, fileid).mkdir(new Path(StringUtils.capitalize(filename), EnumSet.of(Path.Type.directory)), new TransferStatus());
-        try {
-            new EueDirectoryFeature(session, fileid).mkdir(new Path(StringUtils.lowerCase(filename), EnumSet.of(Path.Type.directory)), new TransferStatus());
-            fail();
-        }
-        finally {
-            new EueDeleteFeature(session, fileid).delete(Collections.singletonList(new Path(StringUtils.capitalize(filename), EnumSet.of(Path.Type.directory))), new DisabledLoginCallback(), new Delete.DisabledCallback());
-        }
+        assertThrows(ConflictException.class, () -> new EueDirectoryFeature(session, fileid).mkdir(new Path(StringUtils.lowerCase(filename), EnumSet.of(Path.Type.directory)), new TransferStatus()));
+        new EueDeleteFeature(session, fileid).delete(Collections.singletonList(new Path(StringUtils.capitalize(filename), EnumSet.of(Path.Type.directory))), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

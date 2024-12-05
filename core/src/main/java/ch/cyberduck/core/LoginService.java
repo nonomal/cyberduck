@@ -18,9 +18,10 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.exception.LoginFailureException;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.threading.CancelCallback;
 
 public interface LoginService {
@@ -28,11 +29,10 @@ public interface LoginService {
      * Obtain password from keychain or prompt panel
      *
      * @param bookmark Credentials
-     * @param message  Prompt message
      * @param pompt    Login prompt
      * @param options  Login mechanism features
      */
-    void validate(Host bookmark, String message, LoginCallback pompt, LoginOptions options) throws LoginCanceledException, LoginFailureException;
+    void validate(Host bookmark, LoginCallback pompt, LoginOptions options) throws ConnectionCanceledException, LoginFailureException;
 
     /**
      * Login and prompt on failure
@@ -46,5 +46,5 @@ public interface LoginService {
      * @throws LoginCanceledException Login prompt canceled by user
      * @throws LoginFailureException  Login attempt failed
      */
-    boolean authenticate(Proxy proxy, Session session, ProgressListener listener, LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
+    boolean authenticate(ProxyFinder proxy, Session session, ProgressListener listener, LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
 }

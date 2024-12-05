@@ -46,6 +46,8 @@ import org.jets3t.service.ServiceException;
 import org.jets3t.service.model.S3BucketVersioningStatus;
 import org.jets3t.service.model.S3Object;
 
+import java.util.EnumSet;
+
 public class S3VersioningFeature implements Versioning {
     private static final Logger log = LogManager.getLogger(S3VersioningFeature.class);
 
@@ -72,22 +74,22 @@ public class S3VersioningFeature implements Versioning {
                 final Credentials factor = this.getToken(prompt);
                 if(configuration.isEnabled()) {
                     if(current.isEnabled()) {
-                        log.debug(String.format("Versioning already enabled for bucket %s", bucket));
+                        log.debug("Versioning already enabled for bucket {}", bucket);
                     }
                     else {
                         // Enable versioning if not already active.
-                        log.debug(String.format("Enable bucket versioning with MFA %s for %s", factor.getUsername(), bucket));
+                        log.debug("Enable bucket versioning with MFA {} for {}", factor.getUsername(), bucket);
                         session.getClient().enableBucketVersioningWithMFA(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(),
                                 factor.getUsername(), factor.getPassword());
                     }
                 }
                 else {
-                    log.debug(String.format("Suspend bucket versioning with MFA %s for %s", factor.getUsername(), bucket));
+                    log.debug("Suspend bucket versioning with MFA {} for {}", factor.getUsername(), bucket);
                     session.getClient().suspendBucketVersioningWithMFA(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(),
                             factor.getUsername(), factor.getPassword());
                 }
                 if(configuration.isEnabled() && !configuration.isMultifactor()) {
-                    log.debug(String.format("Disable MFA %s for %s", factor.getUsername(), bucket));
+                    log.debug("Disable MFA {} for {}", factor.getUsername(), bucket);
                     // User has choosen to disable MFA
                     final Credentials factor2 = this.getToken(prompt);
                     session.getClient().disableMFAForVersionedBucket(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(),
@@ -98,22 +100,22 @@ public class S3VersioningFeature implements Versioning {
                 if(configuration.isEnabled()) {
                     if(configuration.isMultifactor()) {
                         final Credentials factor = this.getToken(prompt);
-                        log.debug(String.format("Enable bucket versioning with MFA %s for %s", factor.getUsername(), bucket));
+                        log.debug("Enable bucket versioning with MFA {} for {}", factor.getUsername(), bucket);
                         session.getClient().enableBucketVersioningWithMFA(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName(),
                                 factor.getUsername(), factor.getPassword());
                     }
                     else {
                         if(current.isEnabled()) {
-                            log.debug(String.format("Versioning already enabled for bucket %s", bucket));
+                            log.debug("Versioning already enabled for bucket {}", bucket);
                         }
                         else {
-                            log.debug(String.format("Enable bucket versioning for %s", bucket));
+                            log.debug("Enable bucket versioning for {}", bucket);
                             session.getClient().enableBucketVersioning(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
                         }
                     }
                 }
                 else {
-                    log.debug(String.format("Susped bucket versioning for %s", bucket));
+                    log.debug("Susped bucket versioning for {}", bucket);
                     session.getClient().suspendBucketVersioning(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
                 }
             }
@@ -134,7 +136,7 @@ public class S3VersioningFeature implements Versioning {
             final S3BucketVersioningStatus status
                     = session.getClient().getBucketVersioningStatus(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
             if(null == status) {
-                log.warn(String.format("Failure parsing versioning status for %s", bucket));
+                log.warn("Failure parsing versioning status for {}", bucket);
                 return VersioningConfiguration.empty();
             }
             final VersioningConfiguration configuration = new VersioningConfiguration(status.isVersioningEnabled(),
@@ -147,11 +149,13 @@ public class S3VersioningFeature implements Versioning {
                 throw new S3ExceptionMappingService().map("Cannot read container configuration", e);
             }
             catch(AccessDeniedException l) {
-                log.warn(String.format("Missing permission to read versioning configuration for %s %s", bucket, e.getMessage()));
+                cache.put(bucket, VersioningConfiguration.empty());
+                log.warn("Missing permission to read versioning configuration for {} {}", bucket, e.getMessage());
                 return VersioningConfiguration.empty();
             }
             catch(InteroperabilityException | NotfoundException i) {
-                log.warn(String.format("Not supported to read versioning configuration for %s %s", bucket, e.getMessage()));
+                cache.put(bucket, VersioningConfiguration.empty());
+                log.warn("Not supported to read versioning configuration for {} {}", bucket, e.getMessage());
                 return VersioningConfiguration.empty();
             }
         }
@@ -180,26 +184,23 @@ public class S3VersioningFeature implements Versioning {
                     }
                 }
                 catch(AccessDeniedException | InteroperabilityException e) {
-                    log.warn(String.format("Ignore failure %s", e));
+                    log.warn("Ignore failure {}", e.getMessage());
                 }
+                final Path bucket = containerService.getContainer(file);
+                final String bucketname = bucket.isRoot() ? RequestEntityRestStorageService.findBucketInHostname(session.getHost()) : bucket.getName();
                 session.getClient().copyVersionedObject(file.attributes().getVersionId(),
-                        containerService.getContainer(file).getName(), containerService.getKey(file), containerService.getContainer(file).getName(), destination, false);
+                        bucketname, containerService.getKey(file), bucketname, destination, false);
                 if(file.getParent().attributes().getCustom().containsKey(S3VersionedObjectListService.KEY_DELETE_MARKER)) {
                     // revert placeholder
                     session.getClient().deleteVersionedObject(
                             file.getParent().attributes().getVersionId(),
-                            containerService.getContainer(file).getName(), containerService.getKey(file.getParent()));
+                            bucketname, containerService.getKey(file.getParent()));
                 }
             }
             catch(ServiceException e) {
                 throw new S3ExceptionMappingService().map("Cannot revert file", e, file);
             }
         }
-    }
-
-    @Override
-    public boolean isRevertable(final Path file) {
-        return file.attributes().isDuplicate();
     }
 
     /**
@@ -210,21 +211,29 @@ public class S3VersioningFeature implements Versioning {
      * @throws ch.cyberduck.core.exception.ConnectionCanceledException Prompt dismissed
      */
     protected Credentials getToken(final PasswordCallback callback) throws ConnectionCanceledException {
-        // Prompt for multi factor authentication credentials.
-        return callback.prompt(
+        // Prompt for multifactor authentication credentials
+        final LoginOptions options = new LoginOptions().icon(session.getHost().getProtocol().disk())
+                .password(true)
+                .user(false)
+                .keychain(false);
+        final String serialNumber = callback.prompt(
                 session.getHost(), LocaleFactory.localizedString("Provide additional login credentials", "Credentials"),
                 LocaleFactory.localizedString("Multi-Factor Authentication", "S3"),
-                new LoginOptions()
-                        .icon(session.getHost().getProtocol().disk())
-                        .password(true)
-                        .user(false)
-                        .passwordPlaceholder(LocaleFactory.localizedString("MFA Authentication Code", "S3"))
-                        .keychain(false)
-        );
+                options.passwordPlaceholder(LocaleFactory.localizedString("MFA Serial Number", "S3"))
+        ).getPassword();
+        final String code = callback.prompt(
+                session.getHost(), LocaleFactory.localizedString("Provide additional login credentials", "Credentials"),
+                LocaleFactory.localizedString("Multi-Factor Authentication", "S3"),
+                options.passwordPlaceholder(LocaleFactory.localizedString("MFA Authentication Code", "S3"))
+        ).getPassword();
+        return new Credentials(serialNumber, code);
     }
 
     @Override
     public AttributedList<Path> list(final Path file, final ListProgressListener listener) throws BackgroundException {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
         return new S3VersionedObjectListService(session, acl).list(file, new ProxyListProgressListener(new IndexedListProgressListener() {
             @Override
             public void message(final String message) {
@@ -234,9 +243,7 @@ public class S3VersioningFeature implements Versioning {
             @Override
             public void visit(final AttributedList<Path> list, final int index, final Path f) {
                 if(!StringUtils.equals(f.getName(), file.getName())) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Skip file %s", f));
-                    }
+                    log.debug("Skip file {}", f);
                     // List with prefix will also return other keys
                     list.remove(index);
                 }
@@ -247,5 +254,10 @@ public class S3VersioningFeature implements Versioning {
                 return f.attributes().isDuplicate();
             }
         });
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.configuration, Flags.list, Flags.revert);
     }
 }

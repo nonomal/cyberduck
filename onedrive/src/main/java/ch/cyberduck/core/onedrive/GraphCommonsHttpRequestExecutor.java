@@ -15,12 +15,14 @@ package ch.cyberduck.core.onedrive;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.concurrency.Interruptibles;
 import ch.cyberduck.core.http.DelayedHttpEntity;
 import ch.cyberduck.core.http.HttpMethodReleaseInputStream;
 import ch.cyberduck.core.threading.DefaultThreadPool;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.input.NullInputStream;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.HttpClient;
@@ -85,8 +87,8 @@ public abstract class GraphCommonsHttpRequestExecutor implements RequestExecutor
             }
             request.addHeader(new BasicHeader(header.getKey(), header.getValue()));
         }
-        final CountDownLatch entry = new CountDownLatch(1);
-        final DelayedHttpEntity entity = new DelayedHttpEntity(entry) {
+        final CountDownLatch requestExecuted = new CountDownLatch(1);
+        final DelayedHttpEntity entity = new DelayedHttpEntity(requestExecuted) {
             @Override
             public long getContentLength() {
                 for(RequestHeader header : headers) {
@@ -99,7 +101,7 @@ public abstract class GraphCommonsHttpRequestExecutor implements RequestExecutor
             }
         };
         request.setEntity(entity);
-        final DefaultThreadPool executor = new DefaultThreadPool(String.format("http-%s", url), 1);
+        final DefaultThreadPool executor = new DefaultThreadPool(String.format("httpexecutor-%s", url), 1);
         final Future<CloseableHttpResponse> future = executor.execute(new Callable<CloseableHttpResponse>() {
             @Override
             public CloseableHttpResponse call() throws Exception {
@@ -107,7 +109,7 @@ public abstract class GraphCommonsHttpRequestExecutor implements RequestExecutor
                     return client.execute(request);
                 }
                 finally {
-                    entry.countDown();
+                    requestExecuted.countDown();
                 }
             }
         });
@@ -119,7 +121,9 @@ public abstract class GraphCommonsHttpRequestExecutor implements RequestExecutor
                     response = Uninterruptibles.getUninterruptibly(future);
                 }
                 catch(ExecutionException e) {
-                    Throwables.throwIfInstanceOf(Throwables.getRootCause(e), IOException.class);
+                    for(Throwable cause : ExceptionUtils.getThrowableList(e)) {
+                        Throwables.throwIfInstanceOf(cause, IOException.class);
+                    }
                     throw new IOException(e.getCause());
                 }
                 finally {
@@ -129,9 +133,9 @@ public abstract class GraphCommonsHttpRequestExecutor implements RequestExecutor
             }
 
             @Override
-            public OutputStream getOutputStream() {
+            public OutputStream getOutputStream() throws IOException {
                 // Await execution of HTTP request to make stream available
-                Uninterruptibles.awaitUninterruptibly(entry);
+                Interruptibles.await(requestExecuted, IOException.class);
                 return entity.getStream();
             }
         };

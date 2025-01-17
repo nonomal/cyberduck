@@ -15,11 +15,13 @@ package ch.cyberduck.core.dropbox;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.threading.LoggingUncaughtExceptionHandler;
@@ -27,7 +29,13 @@ import ch.cyberduck.core.threading.ScheduledThreadPool;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
+
+import java.text.MessageFormat;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -49,9 +57,11 @@ import com.google.common.util.concurrent.Uninterruptibles;
 public class DropboxBatchDeleteFeature implements Delete {
 
     private final DropboxSession session;
+    private final DropboxPathContainerService containerService;
 
     public DropboxBatchDeleteFeature(final DropboxSession session) {
         this.session = session;
+        this.containerService = new DropboxPathContainerService();
     }
 
     @Override
@@ -65,71 +75,87 @@ public class DropboxBatchDeleteFeature implements Delete {
                 failure.set(new BackgroundException(e));
                 signal.countDown();
             }
-        });
+        }, "deletebatch");
         try {
+            final Map<Path, List<String>> containers = new HashMap<>();
             for(Path f : files.keySet()) {
+                final Path container = containerService.getContainer(f);
+                if(containers.containsKey(container)) {
+                    containers.get(container).add(containerService.getKey(f));
+                }
+                else {
+                    final List<String> keys = new ArrayList<>();
+                    keys.add(containerService.getKey(f));
+                    containers.put(container, keys);
+                }
                 callback.delete(f);
             }
-            final DbxUserFilesRequests requests = new DbxUserFilesRequests(session.getClient());
-            final DeleteBatchLaunch job = requests.deleteBatch(files.keySet().stream().map(f -> new DeleteArg(f.getAbsolute())).collect(Collectors.toList()));
-            final ScheduledFuture<?> f = scheduler.repeat(() -> {
-                try {
-                    // Poll status
-                    final DeleteBatchJobStatus status = requests.deleteBatchCheck(job.getAsyncJobIdValue());
-                    if(status.isComplete()) {
-                        final List<DeleteBatchResultEntry> entries = status.getCompleteValue().getEntries();
-                        for(DeleteBatchResultEntry entry : entries) {
-                            if(entry.isFailure()) {
-                                switch(entry.getFailureValue().tag()) {
-                                    case PATH_LOOKUP:
-                                        failure.set(new NotfoundException(entry.getFailureValue().toString()));
-                                        break;
-                                    default:
-                                        failure.set(new InteroperabilityException());
+            for(Path container : containers.keySet()) {
+                final DbxUserFilesRequests requests = new DbxUserFilesRequests(session.getClient(container));
+                final DeleteBatchLaunch job = requests.deleteBatch(containers.get(container).stream().map(DeleteArg::new).collect(Collectors.toList()));
+                final ScheduledFuture<?> f = scheduler.repeat(() -> {
+                    try {
+                        // Poll status
+                        final DeleteBatchJobStatus status = requests.deleteBatchCheck(job.getAsyncJobIdValue());
+                        if(status.isComplete()) {
+                            final List<DeleteBatchResultEntry> entries = status.getCompleteValue().getEntries();
+                            for(DeleteBatchResultEntry entry : entries) {
+                                if(entry.isFailure()) {
+                                    switch(entry.getFailureValue().tag()) {
+                                        case PATH_LOOKUP:
+                                            failure.set(new NotfoundException(entry.getFailureValue().toString()));
+                                            break;
+                                        default:
+                                            failure.set(new InteroperabilityException());
+                                    }
                                 }
                             }
+                            signal.countDown();
                         }
+                        if(status.isFailed()) {
+                            signal.countDown();
+                        }
+                    }
+                    catch(DbxException e) {
+                        failure.set(new DropboxExceptionMappingService().map(e));
                         signal.countDown();
                     }
-                    if(status.isFailed()) {
-                        signal.countDown();
+                }, new HostPreferences(session.getHost()).getLong("dropbox.delete.poll.interval.ms"), TimeUnit.MILLISECONDS);
+                while(!Uninterruptibles.awaitUninterruptibly(signal, Duration.ofSeconds(1))) {
+                    try {
+                        if(f.isDone()) {
+                            Uninterruptibles.getUninterruptibly(f);
+                        }
+                    }
+                    catch(ExecutionException e) {
+                        for(Throwable cause : ExceptionUtils.getThrowableList(e)) {
+                            Throwables.throwIfInstanceOf(cause, BackgroundException.class);
+                        }
+                        throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
                     }
                 }
-                catch(DbxException e) {
-                    failure.set(new DropboxExceptionMappingService().map(e));
-                    signal.countDown();
+                if(null != failure.get()) {
+                    throw failure.get();
                 }
-            }, new HostPreferences(session.getHost()).getLong("dropbox.delete.poll.interval.ms"), TimeUnit.MILLISECONDS);
-            while(!Uninterruptibles.awaitUninterruptibly(signal, Duration.ofSeconds(1))) {
-                try {
-                    if(f.isDone()) {
-                        Uninterruptibles.getUninterruptibly(f);
-                    }
-                }
-                catch(ExecutionException e) {
-                    Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
-                    throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
-                }
-            }
-            if(null != failure.get()) {
-                throw failure.get();
             }
         }
         catch(DbxException e) {
             throw new DropboxExceptionMappingService().map(e);
         }
         finally {
-            scheduler.shutdown();
+            scheduler.shutdown(true);
         }
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 
     @Override
-    public boolean isSupported(final Path file) {
-        return !file.attributes().isDuplicate();
+    public void preflight(final Path file) throws BackgroundException {
+        if(file.attributes().isDuplicate()) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+        }
     }
 }

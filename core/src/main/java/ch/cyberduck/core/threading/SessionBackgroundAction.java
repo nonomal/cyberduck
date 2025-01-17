@@ -23,7 +23,6 @@ import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.TranscriptListener;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.pool.SessionPool;
 
 import org.apache.commons.lang3.StringUtils;
@@ -42,10 +41,10 @@ public abstract class SessionBackgroundAction<T> extends AbstractBackgroundActio
      * Contains the transcript of the session while this action was running
      */
     private final StringBuffer transcript
-        = new StringBuffer();
+            = new StringBuffer();
 
     private static final String LINE_SEPARATOR
-        = System.getProperty("line.separator");
+            = System.lineSeparator();
 
     private final AlertCallback alert;
     private final ProgressListener progress;
@@ -85,7 +84,7 @@ public abstract class SessionBackgroundAction<T> extends AbstractBackgroundActio
     }
 
     /**
-     * @return True if the the action had a permanent failures. Returns false if there were only temporary exceptions
+     * @return True if the action had a permanent failures. Returns false if there were only temporary exceptions
      * and the action succeeded upon retry
      */
     public boolean hasFailed() {
@@ -98,30 +97,27 @@ public abstract class SessionBackgroundAction<T> extends AbstractBackgroundActio
 
     @Override
     public T call() throws BackgroundException {
+        return new DefaultRetryCallable<>(pool.getHost(), new BackgroundExceptionCallable<T>() {
+            @Override
+            public T call() throws BackgroundException {
+                // Reset status
+                SessionBackgroundAction.this.reset();
+                // Run action
+                return SessionBackgroundAction.this.run();
+            }
+        }, this, this).call();
+    }
+
+    @Override
+    public T run() throws BackgroundException {
+        final Session<?> session;
         try {
-            return new DefaultRetryCallable<>(pool.getHost(), new BackgroundExceptionCallable<T>() {
-                @Override
-                public T call() throws BackgroundException {
-                    // Reset status
-                    SessionBackgroundAction.this.reset();
-                    // Run action
-                    return SessionBackgroundAction.this.run();
-                }
-            }, this, this).call();
-        }
-        catch(ConnectionCanceledException e) {
-            throw e;
+            session = pool.borrow(this).withListener(this);
         }
         catch(BackgroundException e) {
             failure = e;
             throw e;
         }
-    }
-
-    @Override
-    public T run() throws BackgroundException {
-        final Session<?> session = pool.borrow(this).withListener(this);
-        BackgroundException failure = null;
         try {
             return this.run(session);
         }
@@ -142,9 +138,7 @@ public abstract class SessionBackgroundAction<T> extends AbstractBackgroundActio
         if(this.isCanceled()) {
             return false;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Run alert callback %s for failure %s", alert, failure));
-        }
+        log.info("Run alert callback {} for failure {}", alert, failure);
         // Display alert if the action was not canceled intentionally
         return alert.alert(pool.getHost(), failure, new StringBuilder(transcript.toString()));
     }

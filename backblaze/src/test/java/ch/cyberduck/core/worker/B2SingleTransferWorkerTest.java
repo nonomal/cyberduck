@@ -20,21 +20,26 @@ import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DisabledCancelCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
+import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.DisabledProgressListener;
+import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Local;
+import ch.cyberduck.core.LoginConnectionService;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.b2.AbstractB2Test;
+import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.b2.B2AttributesFinderFeature;
 import ch.cyberduck.core.b2.B2DeleteFeature;
 import ch.cyberduck.core.b2.B2LargeUploadService;
+import ch.cyberduck.core.b2.B2Protocol;
 import ch.cyberduck.core.b2.B2Session;
 import ch.cyberduck.core.b2.B2VersionIdProvider;
 import ch.cyberduck.core.b2.B2WriteFeature;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Upload;
+import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.notification.DisabledNotificationService;
-import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DefaultX509TrustManager;
 import ch.cyberduck.core.transfer.DisabledTransferErrorCallback;
@@ -46,6 +51,7 @@ import ch.cyberduck.core.transfer.TransferOptions;
 import ch.cyberduck.core.transfer.TransferSpeedometer;
 import ch.cyberduck.core.transfer.UploadTransfer;
 import ch.cyberduck.test.IntegrationTest;
+import ch.cyberduck.test.VaultTest;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.input.CountingInputStream;
@@ -63,27 +69,47 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
-public class B2SingleTransferWorkerTest extends AbstractB2Test {
+public class B2SingleTransferWorkerTest extends VaultTest {
 
     @Test
-    public void testTransferredSizeRepeat() throws Exception {
+    public void testUploadTransferWithFailure() throws Exception {
         final Local local = new Local(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString());
-        final byte[] content = new byte[100 * 1024 * 1024 + 1];
+        final byte[] content = new byte[5242880 + 1];
         new Random().nextBytes(content);
         final OutputStream out = local.getOutputStream(false);
         IOUtils.write(content, out);
         out.close();
         final AtomicBoolean failed = new AtomicBoolean();
-        final B2Session custom = new B2Session(session.getHost().withCredentials(new Credentials(
-            System.getProperties().getProperty("b2.user"), System.getProperties().getProperty("b2.key")
+        final Host host = new Host(new ProfilePlistReader(new ProtocolFactory(Collections.singleton(new B2Protocol()))).read(
+                this.getClass().getResourceAsStream("/B2.cyberduckprofile"))) {
+            @Override
+            public String getProperty(final String key) {
+                if("connection.retry".equals(key)) {
+                    return String.valueOf(1);
+                }
+                if("b2.upload.largeobject.threshold".equals(key)) {
+                    return String.valueOf(0);
+                }
+                if("b2.upload.largeobject.size".equals(key)) {
+                    return String.valueOf(5000000);
+                }
+                if("b2.upload.largeobject.concurrency".equals(key)) {
+                    return String.valueOf(5);
+                }
+                if("queue.upload.checksum.calculate".equals(key)) {
+                    return String.valueOf(true);
+                }
+                return super.getProperty(key);
+            }
+        };
+        final B2Session session = new B2Session(host.withCredentials(new Credentials(
+                PROPERTIES.get("b2.user"), PROPERTIES.get("b2.password")
         )), new DefaultX509TrustManager(), new DefaultX509KeyManager()) {
-            final B2LargeUploadService upload = new B2LargeUploadService(this, new B2VersionIdProvider(this), new B2WriteFeature(this, new B2VersionIdProvider(this)),
-                PreferencesFactory.get().getLong("b2.upload.largeobject.size"),
-                PreferencesFactory.get().getInteger("b2.upload.largeobject.concurrency")) {
+            final B2LargeUploadService upload = new B2LargeUploadService(this, new B2VersionIdProvider(this),
+                    new B2WriteFeature(this, new B2VersionIdProvider(this))) {
                 @Override
                 protected InputStream decorate(final InputStream in, final MessageDigest digest) {
                     if(failed.get()) {
@@ -94,7 +120,7 @@ public class B2SingleTransferWorkerTest extends AbstractB2Test {
                         @Override
                         protected void beforeRead(final int n) throws IOException {
                             super.beforeRead(n);
-                            if(this.getByteCount() >= 100L * 1024L * 1024L) {
+                            if(this.getByteCount() >= 5000000L) {
                                 failed.set(true);
                                 throw new SocketTimeoutException();
                             }
@@ -112,28 +138,32 @@ public class B2SingleTransferWorkerTest extends AbstractB2Test {
                 return super._getFeature(type);
             }
         };
-        custom.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        custom.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        new LoginConnectionService(new DisabledLoginCallback(),
+                new DisabledHostKeyCallback(),
+                new DisabledPasswordStore(),
+                new DisabledProgressListener()).connect(session, new DisabledCancelCallback());
         final Path bucket = new Path("test-cyberduck", EnumSet.of(Path.Type.directory, Path.Type.volume));
         final Path test = new Path(bucket, UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
-        final Transfer t = new UploadTransfer(session.getHost(), test, local);
+        final Transfer t = new UploadTransfer(host, test, local);
         final BytecountStreamListener counter = new BytecountStreamListener();
-        assertTrue(new SingleTransferWorker(custom, custom, t, new TransferOptions(), new TransferSpeedometer(t), new DisabledTransferPrompt() {
+        assertTrue(new SingleTransferWorker(session, session, t, new TransferOptions(), new TransferSpeedometer(t), new DisabledTransferPrompt() {
             @Override
             public TransferAction prompt(final TransferItem file) {
                 return TransferAction.overwrite;
             }
         }, new DisabledTransferErrorCallback(),
-            new DisabledProgressListener(), counter, new DisabledLoginCallback(), new DisabledNotificationService()) {
+                new DisabledProgressListener(), counter, new DisabledLoginCallback(), new DisabledNotificationService()) {
 
-        }.run(custom));
+        }.run(session));
         local.delete();
         assertTrue(t.isComplete());
-        final B2VersionIdProvider fileid = new B2VersionIdProvider(custom);
-        assertEquals(content.length, new B2AttributesFinderFeature(custom, fileid).find(test).getSize());
+        final B2VersionIdProvider fileid = new B2VersionIdProvider(session);
+        final PathAttributes attr = new B2AttributesFinderFeature(session, fileid).find(test);
+        assertNotEquals(Checksum.NONE, attr.getChecksum());
+        assertEquals(content.length, attr.getSize());
         assertEquals(content.length, counter.getRecv(), 0L);
         assertEquals(content.length, counter.getSent(), 0L);
         assertTrue(failed.get());
-        new B2DeleteFeature(custom, fileid).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
+        new B2DeleteFeature(session, fileid).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

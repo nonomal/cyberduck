@@ -23,6 +23,8 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Search;
 
+import java.util.EnumSet;
+
 public class DriveSearchFeature implements Search {
 
     private final DriveSession session;
@@ -36,7 +38,7 @@ public class DriveSearchFeature implements Search {
     @Override
     public AttributedList<Path> search(final Path workdir, final Filter<Path> regex, final ListProgressListener listener) throws BackgroundException {
         try {
-            return new DriveSearchListService(session, fileid, regex.toPattern().pattern()).list(workdir, listener);
+            return new DriveSearchListService(session, fileid, regex.toString()).list(workdir, listener);
         }
         catch(NotfoundException e) {
             return AttributedList.emptyList();
@@ -44,8 +46,8 @@ public class DriveSearchFeature implements Search {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 
 }

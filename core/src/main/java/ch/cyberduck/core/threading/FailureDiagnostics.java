@@ -48,7 +48,15 @@ public interface FailureDiagnostics<T> {
         /**
          * Intentionally skipped operation
          */
-        skip
+        skip,
+        /**
+         * Scanner denied access to file
+         */
+        antivirus,
+        /**
+         * Accessing local file
+         */
+        filesystem
     }
 
     Type determine(T failure);

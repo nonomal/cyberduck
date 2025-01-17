@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -20,13 +22,12 @@ import ch.cyberduck.core.brick.io.swagger.client.model.FileEntity;
 import ch.cyberduck.core.brick.io.swagger.client.model.FileUploadPartEntity;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Touch;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
 import java.util.Collections;
 
-public class BrickTouchFeature implements Touch<Void> {
+public class BrickTouchFeature implements Touch<FileEntity> {
 
     private final BrickSession session;
 
@@ -42,7 +43,7 @@ public class BrickTouchFeature implements Touch<Void> {
             status.withLength(0L).withOffset(0L);
             status.setUrl(uploadPartEntity.getUploadUri());
             status.setSegment(true);
-            status.setTimestamp(System.currentTimeMillis());
+            status.setModified(System.currentTimeMillis());
             status.setPart(1);
             new BrickWriteFeature(session).write(file, status, new DisabledConnectionCallback()).close();
             final FileEntity entity = upload.completeUpload(file, uploadPartEntity.getRef(), status, Collections.singletonList(status));
@@ -51,10 +52,5 @@ public class BrickTouchFeature implements Touch<Void> {
         catch(IOException e) {
             throw new DefaultIOExceptionMappingService().map("Cannot create {0}", e, file);
         }
-    }
-
-    @Override
-    public Touch<Void> withWriter(final Write<Void> writer) {
-        return this;
     }
 }

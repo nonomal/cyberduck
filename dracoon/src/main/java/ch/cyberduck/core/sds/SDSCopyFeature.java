@@ -16,11 +16,12 @@ package ch.cyberduck.core.sds;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.HostPreferences;
@@ -34,7 +35,12 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
+import java.util.EnumSet;
 import java.util.Objects;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class SDSCopyFeature implements Copy {
     private static final Logger log = LogManager.getLogger(SDSCopyFeature.class);
@@ -43,7 +49,7 @@ public class SDSCopyFeature implements Copy {
     private final SDSNodeIdProvider nodeid;
 
     private final PathContainerService containerService
-        = new SDSPathContainerService();
+            = new SDSPathContainerService();
 
     public SDSCopyFeature(final SDSSession session, final SDSNodeIdProvider nodeid) {
         this.session = session;
@@ -54,13 +60,13 @@ public class SDSCopyFeature implements Copy {
     public Path copy(final Path source, final Path target, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
         try {
             new NodesApi(session.getClient()).copyNodes(
-                new CopyNodesRequest()
-                    .resolutionStrategy(CopyNodesRequest.ResolutionStrategyEnum.OVERWRITE)
-                    .addItemsItem(new CopyNode().id(Long.parseLong(nodeid.getVersionId(source, new DisabledListProgressListener()))))
-                    .keepShareLinks(new HostPreferences(session.getHost()).getBoolean("sds.upload.sharelinks.keep")),
-                // Target Parent Node ID
-                Long.parseLong(nodeid.getVersionId(target.getParent(), new DisabledListProgressListener())),
-                StringUtils.EMPTY, null);
+                    new CopyNodesRequest()
+                            .resolutionStrategy(CopyNodesRequest.ResolutionStrategyEnum.OVERWRITE)
+                            .addItemsItem(new CopyNode().id(Long.parseLong(nodeid.getVersionId(source))))
+                            .keepShareLinks(new HostPreferences(session.getHost()).getBoolean("sds.upload.sharelinks.keep")),
+                    // Target Parent Node ID
+                    Long.parseLong(nodeid.getVersionId(target.getParent())),
+                    StringUtils.EMPTY, null);
             listener.sent(status.getLength());
             nodeid.cache(target, null);
             final PathAttributes attributes = new SDSAttributesFinderFeature(session, nodeid).find(target);
@@ -73,32 +79,34 @@ public class SDSCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
+    public void preflight(final Path source, final Optional<Path> optional) throws BackgroundException {
         if(containerService.isContainer(source)) {
             // Rooms cannot be copied
-            return false;
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
         }
-        if(SDSNodeIdProvider.isEncrypted(source) ^ SDSNodeIdProvider.isEncrypted(target)) {
-            // If source xor target is encrypted data room we cannot use server side copy
-            log.warn(String.format("Cannot use server side copy with source container %s and target container %s",
-                containerService.getContainer(source), containerService.getContainer(target)));
-            return false;
+        if(optional.isPresent()) {
+            final Path target = optional.get();
+            if(SDSAttributesAdapter.isEncrypted(source.attributes()) ^ SDSAttributesAdapter.isEncrypted(containerService.getContainer(target).attributes())) {
+                // If source xor target is encrypted data room we cannot use server side copy
+                log.warn("Cannot use server side copy with source container {} and target container {}", containerService.getContainer(source), containerService.getContainer(target));
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+            if(!StringUtils.equals(source.getName(), target.getName())) {
+                // Cannot rename node to be copied at the same time
+                log.warn("Deny copy of {} for changed name {}", source, target.getName());
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+            if(Objects.equals(source.getParent(), target.getParent())) {
+                // Nodes must not have the same parent
+                log.warn("Deny copy of {} to {}", source, target);
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+            validate(session.getCaseSensitivity(), source, target);
         }
-        if(!StringUtils.equals(source.getName(), target.getName())) {
-            // Cannot rename node to be copied at the same time
-            log.warn(String.format("Deny copy of %s for changed name %s", source, target.getName()));
-            return false;
-        }
-        if(Objects.equals(source.getParent(), target.getParent())) {
-            // Nodes must not have the same parent
-            log.warn(String.format("Deny copy of %s to %s", source, target));
-            return false;
-        }
-        return true;
     }
 }

@@ -17,10 +17,10 @@ package ch.cyberduck.core.onedrive.features;
 
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.CachingFileIdProvider;
-import ch.cyberduck.core.ListProgressListener;
+import ch.cyberduck.core.CaseInsensitivePathPredicate;
+import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.FileIdProvider;
@@ -41,22 +41,32 @@ public class GraphFileIdProvider extends CachingFileIdProvider implements FileId
     }
 
     @Override
-    public String getFileId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getFileId(final Path file) throws BackgroundException {
         if(StringUtils.isNotBlank(file.attributes().getFileId())) {
             return file.attributes().getFileId();
         }
-        final String cached = super.getFileId(file, listener);
+        final String cached = super.getFileId(file);
         if(cached != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return cached fileid %s for file %s", cached, file));
-            }
+            log.debug("Return cached fileid {} for file {}", cached, file);
             return cached;
         }
-        final AttributedList<Path> list = session._getFeature(ListService.class).list(file.getParent(), listener);
-        final Path found = list.find(new SimplePathPredicate(file));
+        final AttributedList<Path> list = session._getFeature(ListService.class).list(file.getParent(),
+                new DisabledListProgressListener());
+        final Path found = list.find(new SymlinkUnawarePathPredicate(file));
         if(null == found) {
             throw new NotfoundException(file.getAbsolute());
         }
         return this.cache(file, found.attributes().getFileId());
+    }
+
+    private final static class SymlinkUnawarePathPredicate extends CaseInsensitivePathPredicate {
+        public SymlinkUnawarePathPredicate(final Path file) {
+            super(file.isFile() ? Path.Type.file : Path.Type.directory, file.getAbsolute());
+        }
+
+        @Override
+        public boolean test(final Path test) {
+            return this.equals(new SymlinkUnawarePathPredicate(test));
+        }
     }
 }

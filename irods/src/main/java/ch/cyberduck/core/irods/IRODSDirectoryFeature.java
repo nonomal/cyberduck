@@ -20,7 +20,6 @@ package ch.cyberduck.core.irods;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.irods.jargon.core.exception.JargonException;
@@ -41,15 +40,10 @@ public class IRODSDirectoryFeature implements Directory<Void> {
             final IRODSFileSystemAO fs = session.getClient();
             final IRODSFile f = fs.getIRODSFileFactory().instanceIRODSFile(folder.getAbsolute());
             fs.mkdir(f, false);
-            return folder.withAttributes(new IRODSAttributesFinderFeature(session).find(folder));
+            return folder;
         }
         catch(JargonException e) {
             throw new IRODSExceptionMappingService().map("Cannot create folder {0}", e, folder);
         }
-    }
-
-    @Override
-    public IRODSDirectoryFeature withWriter(final Write<Void> writer) {
-        return this;
     }
 }

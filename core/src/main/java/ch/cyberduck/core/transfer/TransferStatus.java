@@ -23,6 +23,9 @@ import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Permission;
+import ch.cyberduck.core.concurrency.Interruptibles;
+import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.TransferStatusCanceledException;
 import ch.cyberduck.core.features.Encryption;
 import ch.cyberduck.core.io.Checksum;
@@ -37,13 +40,12 @@ import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.google.common.util.concurrent.Uninterruptibles;
-
-public class TransferStatus implements StreamCancelation, StreamProgress {
+public class TransferStatus implements TransferResponse, StreamCancelation, StreamProgress {
     private static final Logger log = LogManager.getLogger(TransferStatus.class);
 
     public static final long KILO = 1024; //2^10
@@ -99,7 +101,12 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
     /**
      * Transfer size. May be less than the file size in attributes or 0 if creating symbolic links.
      */
-    private long length = 0L;
+    private long length = TransferStatus.UNKNOWN_LENGTH;
+
+    /**
+     * Destination size may differ when encrypted or by some other transformation
+     */
+    private long destinationlength = TransferStatus.UNKNOWN_LENGTH;
 
     /**
      * The transfer has been canceled by the user.
@@ -150,7 +157,8 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
     /**
      * Target timestamp to set when transfer is complete
      */
-    private Long timestamp;
+    private Long modified;
+    private Long created;
 
     private Map<String, String> parameters
             = Collections.emptyMap();
@@ -210,6 +218,7 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         this.hidden = copy.hidden;
         this.offset.set(copy.offset.get());
         this.length = copy.length;
+        this.destinationlength = copy.destinationlength;
         this.canceled.set(copy.canceled.get());
         this.complete.set(copy.complete.get());
         this.checksum = copy.checksum;
@@ -220,7 +229,8 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         this.acl = copy.acl;
         this.encryption = copy.encryption;
         this.storageClass = copy.storageClass;
-        this.timestamp = copy.timestamp;
+        this.modified = copy.modified;
+        this.created = copy.created;
         this.parameters = copy.parameters;
         this.metadata = copy.metadata;
         this.segment = copy.segment;
@@ -238,9 +248,9 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
      *
      * @return True if complete
      */
-    public boolean await() {
+    public boolean await() throws ConnectionCanceledException {
         // Lock until complete
-        Uninterruptibles.awaitUninterruptibly(done);
+        Interruptibles.await(done, ConnectionCanceledException.class);
         return complete.get();
     }
 
@@ -259,7 +269,8 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         return this;
     }
 
-    public void setFailure() {
+    @Override
+    public void setFailure(final BackgroundException failure) {
         complete.set(false);
         done.countDown();
     }
@@ -279,7 +290,7 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
      *
      */
     @Override
-    public void validate() throws TransferStatusCanceledException {
+    public void validate() throws ConnectionCanceledException {
         for(TransferStatus segment : segments) {
             segment.validate();
         }
@@ -300,9 +311,7 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
      */
     public void setOffset(final long bytes) {
         offset.set(bytes);
-        if(log.isTraceEnabled()) {
-            log.trace(String.format("Offset set to %d bytes", bytes));
-        }
+        log.trace("Offset set to {} bytes", bytes);
     }
 
     public TransferStatus withOffset(final long bytes) {
@@ -329,6 +338,22 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
      */
     public TransferStatus withLength(final long bytes) {
         this.setLength(bytes);
+        return this;
+    }
+
+    public long getDestinationlength() {
+        if(UNKNOWN_LENGTH == destinationlength) {
+            return length;
+        }
+        return destinationlength;
+    }
+
+    public void setDestinationLength(final long destinationlength) {
+        this.destinationlength = destinationlength;
+    }
+
+    public TransferStatus withDestinationLength(final long destinationlength) {
+        this.destinationlength = destinationlength;
         return this;
     }
 
@@ -480,13 +505,12 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         return this;
     }
 
-    /**
-     * @return Attributes on server after upload
-     */
+    @Override
     public PathAttributes getResponse() {
         return response;
     }
 
+    @Override
     public void setResponse(PathAttributes attributes) {
         this.response = attributes;
     }
@@ -504,12 +528,22 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         this.permission = permission;
     }
 
+    public TransferStatus withPermission(Permission permission) {
+        this.permission = permission;
+        return this;
+    }
+
     public Acl getAcl() {
         return acl;
     }
 
     public void setAcl(Acl acl) {
         this.acl = acl;
+    }
+
+    public TransferStatus withAcl(Acl acl) {
+        this.acl = acl;
+        return this;
     }
 
     public Encryption.Algorithm getEncryption() {
@@ -520,6 +554,11 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         this.encryption = encryption;
     }
 
+    public TransferStatus withEncryption(final Encryption.Algorithm encryption) {
+        this.encryption = encryption;
+        return this;
+    }
+
     public String getStorageClass() {
         return storageClass;
     }
@@ -528,16 +567,34 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         this.storageClass = storageClass;
     }
 
-    public Long getTimestamp() {
-        return timestamp;
+    public TransferStatus withStorageClass(final String storageClass) {
+        this.storageClass = storageClass;
+        return this;
     }
 
-    public void setTimestamp(Long timestamp) {
-        this.timestamp = timestamp;
+    public Long getModified() {
+        return modified;
     }
 
-    public TransferStatus withTimestamp(Long timestamp) {
-        this.timestamp = timestamp;
+    public void setModified(Long modified) {
+        this.modified = modified;
+    }
+
+    public TransferStatus withModified(Long timestamp) {
+        this.modified = timestamp;
+        return this;
+    }
+
+    public Long getCreated() {
+        return created;
+    }
+
+    public void setCreated(final Long created) {
+        this.created = created;
+    }
+
+    public TransferStatus withCreated(final Long created) {
+        this.created = created;
         return this;
     }
 
@@ -673,24 +730,12 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
             return false;
         }
         final TransferStatus that = (TransferStatus) o;
-        if(append != that.append) {
-            return false;
-        }
-        if(exists != that.exists) {
-            return false;
-        }
-        if(length != that.length) {
-            return false;
-        }
-        return true;
+        return length == that.length && Objects.equals(offset.longValue(), that.offset.longValue()) && Objects.equals(part, that.part);
     }
 
     @Override
     public int hashCode() {
-        int result = (exists ? 1 : 0);
-        result = 31 * result + (append ? 1 : 0);
-        result = 31 * result + (int) (length ^ (length >>> 32));
-        return result;
+        return Objects.hash(offset.longValue(), length, part);
     }
 
     @Override
@@ -708,12 +753,17 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
         sb.append(", acl=").append(acl);
         sb.append(", encryption=").append(encryption);
         sb.append(", storageClass='").append(storageClass).append('\'');
-        sb.append(", timestamp=").append(timestamp);
+        sb.append(", modified=").append(modified);
+        sb.append(", created=").append(created);
         sb.append(", parameters=").append(parameters);
         sb.append(", metadata=").append(metadata);
         sb.append(", lockId=").append(lockId);
         sb.append(", region=").append(region);
         sb.append(", part=").append(part);
+        sb.append(", filekey=").append(filekey);
+        sb.append(", canceled=").append(canceled);
+        sb.append(", complete=").append(complete);
+        sb.append(", done=").append(done);
         sb.append('}');
         return sb.toString();
     }
@@ -752,7 +802,8 @@ public class TransferStatus implements StreamCancelation, StreamProgress {
 
         @Override
         public String toString() {
-            final StringBuilder sb = new StringBuilder("Temporary{");
+            final StringBuilder sb = new StringBuilder("Displayname{");
+            sb.append("remote=").append(remote);
             sb.append(", local=").append(local);
             sb.append('}');
             return sb.toString();

@@ -1,4 +1,6 @@
-package ch.cyberduck.core.worker;/*
+package ch.cyberduck.core.worker;
+
+/*
  * Copyright (c) 2002-2020 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -26,6 +28,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.text.MessageFormat;
+import java.util.Objects;
 
 public class AttributesWorker extends Worker<PathAttributes> {
     private static final Logger log = LogManager.getLogger(AttributesWorker.class.getName());
@@ -40,20 +43,33 @@ public class AttributesWorker extends Worker<PathAttributes> {
 
     @Override
     public PathAttributes run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Read latest attributes for file %s", file));
-        }
-        final AttributesFinder find = new CachingAttributesFinderFeature(cache, session.getFeature(AttributesFinder.class));
+        log.debug("Read latest attributes for file {}", file);
+        final AttributesFinder find = new CachingAttributesFinderFeature(session, cache, session.getFeature(AttributesFinder.class));
         final PathAttributes attr = find.find(file);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Return %s for file %s", attr, file));
-        }
+        log.debug("Return {} for file {}", attr, file);
         return attr;
     }
 
     @Override
     public PathAttributes initialize() {
         return PathAttributes.EMPTY;
+    }
+
+    @Override
+    public boolean equals(final Object o) {
+        if(this == o) {
+            return true;
+        }
+        if(o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        final AttributesWorker that = (AttributesWorker) o;
+        return file.equals(that.file);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(file);
     }
 
     @Override

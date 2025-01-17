@@ -54,7 +54,7 @@ public class EueListService implements ListService {
             int offset = 0;
             UiFsModel fsModel;
             do {
-                final String resourceId = fileid.getFileId(directory, listener);
+                final String resourceId = fileid.getFileId(directory);
                 switch(resourceId) {
                     case EueResourceIdProvider.ROOT:
                     case EueResourceIdProvider.TRASH:
@@ -85,9 +85,9 @@ public class EueListService implements ListService {
                                     EueShareFeature.findShareForResource(session.userShares(),
                                             EueResourceIdProvider.getResourceIdFromResourceUri(child.getUifs().getResourceURI()))))
                     );
-                    listener.chunk(directory, children);
                 }
                 offset += chunksize;
+                listener.chunk(directory, children);
             }
             while(fsModel.getUifs().getChildren().size() == chunksize);
             return children;

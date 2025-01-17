@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -17,6 +19,7 @@ import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.brick.io.swagger.client.ApiException;
 import ch.cyberduck.core.brick.io.swagger.client.api.FileActionsApi;
 import ch.cyberduck.core.brick.io.swagger.client.api.FilesApi;
@@ -31,6 +34,7 @@ import ch.cyberduck.core.http.HttpResponseOutputStream;
 import ch.cyberduck.core.io.DefaultStreamCloser;
 import ch.cyberduck.core.io.MemorySegementingOutputStream;
 import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.threading.BackgroundActionState;
 import ch.cyberduck.core.threading.BackgroundExceptionCallable;
 import ch.cyberduck.core.threading.DefaultRetryCallable;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -46,6 +50,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
@@ -78,11 +83,6 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
         };
     }
 
-    @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
     private final class MultipartOutputStream extends OutputStream {
         private final BrickWriteFeature writer = new BrickWriteFeature(session);
         private final Path file;
@@ -112,7 +112,7 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
                     throw canceled.get();
                 }
                 partNumber++;
-                checksums.add(new DefaultRetryCallable<>(session.getHost(), new BackgroundExceptionCallable<TransferStatus>() {
+                checksums.add(new DefaultRetryCallable<TransferStatus>(session.getHost(), new BackgroundExceptionCallable<TransferStatus>() {
                     @Override
                     public TransferStatus call() throws BackgroundException {
                         final List<FileUploadPartEntity> uploadPartEntities;
@@ -145,7 +145,16 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
                         }
                         throw new InteroperabilityException();
                     }
-                }, overall).call());
+                }, overall) {
+                    @Override
+                    public boolean retry(final BackgroundException failure, final ProgressListener progress, final BackgroundActionState cancel) {
+                        if(super.retry(failure, progress, cancel)) {
+                            canceled.set(null);
+                            return true;
+                        }
+                        return false;
+                    }
+                }.call());
             }
             catch(BackgroundException e) {
                 throw new IOException(e.getMessage(), e);
@@ -156,11 +165,11 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
         public void close() throws IOException {
             try {
                 if(close.get()) {
-                    log.warn(String.format("Skip double close of stream %s", this));
+                    log.warn("Skip double close of stream {}", this);
                     return;
                 }
                 if(null != canceled.get()) {
-                    log.warn(String.format("Skip closing with previous failure %s", canceled.get()));
+                    log.warn("Skip closing with previous failure {}", canceled.get().getMessage());
                     return;
                 }
                 if(null == ref) {
@@ -169,7 +178,7 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
                 else {
                     try {
                         response.set(new FilesApi(new BrickApiClient(session)).postFilesPath(new FilesPathBody()
-                                .providedMtime(null != overall.getTimestamp() ? new DateTime(overall.getTimestamp()) : null)
+                                .providedMtime(null != overall.getModified() ? new DateTime(overall.getModified()) : null)
                                 .etagsEtag(checksums.stream().map(s -> s.getChecksum().hash).collect(Collectors.toList()))
                                 .etagsPart(checksums.stream().map(TransferStatus::getPart).collect(Collectors.toList()))
                                 .ref(ref)
@@ -178,9 +187,7 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
                     catch(ApiException e) {
                         throw new IOException(e.getMessage(), new BrickExceptionMappingService().map("Upload {0} failed", e, file));
                     }
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Completed multipart upload for %s", file));
-                    }
+                    log.debug("Completed multipart upload for {}", file);
                 }
             }
             catch(BackgroundException e) {
@@ -202,5 +209,10 @@ public class BrickMultipartWriteFeature implements MultipartWrite<FileEntity> {
             sb.append('}');
             return sb.toString();
         }
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum);
     }
 }

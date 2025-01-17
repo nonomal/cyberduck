@@ -19,9 +19,7 @@ package ch.cyberduck.core.azure;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DirectoryDelimiterPathContainerService;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Move;
@@ -29,34 +27,29 @@ import ch.cyberduck.core.io.DisabledStreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.util.Collections;
+import java.util.Optional;
 
 import com.microsoft.azure.storage.OperationContext;
 
 public class AzureMoveFeature implements Move {
 
-    private final AzureSession session;
-
-    private final OperationContext context;
-
-    private final PathContainerService containerService
-        = new DirectoryDelimiterPathContainerService();
-
-    private final Delete delete;
+    private final AzureCopyFeature proxy;
+    private final AzureDeleteFeature delete;
 
     public AzureMoveFeature(final AzureSession session, final OperationContext context) {
-        this.session = session;
+        this.proxy = new AzureCopyFeature(session, context);
         this.delete = new AzureDeleteFeature(session, context);
-        this.context = context;
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return !containerService.isContainer(source);
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        proxy.preflight(source, target);
+        delete.preflight(source);
     }
 
     @Override
     public Path move(final Path file, final Path renamed, final TransferStatus status, final Delete.Callback callback, final ConnectionCallback connectionCallback) throws BackgroundException {
-        final Path copy = new AzureCopyFeature(session, context).copy(file, renamed, new TransferStatus().withLength(file.attributes().getSize()), connectionCallback, new DisabledStreamListener());
+        final Path copy = proxy.copy(file, renamed, new TransferStatus().withLength(file.attributes().getSize()), connectionCallback, new DisabledStreamListener());
         delete.delete(Collections.singletonList(file), connectionCallback, callback);
         return copy;
     }

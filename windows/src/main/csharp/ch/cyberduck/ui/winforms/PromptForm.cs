@@ -29,34 +29,36 @@ namespace Ch.Cyberduck.Ui.Winforms
         public PromptForm()
         {
             InitializeComponent();
-            AutoSize = true;
-            FormClosing += delegate(object sender, FormClosingEventArgs args)
+            FormClosing += delegate (object sender, FormClosingEventArgs args)
             {
+                if (DialogResult == DialogResult.Cancel || DialogResult == DialogResult.Ignore)
+                {
+                    return;
+                }
+
                 bool valid = true;
                 if (ValidateInput != null)
                 {
                     foreach (var d in ValidateInput.GetInvocationList())
                     {
-                        valid = (bool) d.DynamicInvoke();
+                        valid = (bool)d.DynamicInvoke();
                         if (!valid)
                         {
                             break;
                         }
                     }
                 }
-                bool cancel = DialogResult != DialogResult.Cancel && !valid;
-                if (cancel)
+                if (!valid)
                 {
                     args.Cancel = true;
                     SystemSounds.Beep.Play();
                 }
             };
-            MinimumSize = new Size(400, 150);
         }
 
         protected override bool EnableAutoSizePosition => false;
 
-        public override string[] BundleNames => new[] {"Folder", "Cryptomator", "Keychain"};
+        public override string[] BundleNames => new[] { "Folder", "Cryptomator", "Keychain" };
 
         public string InputText
         {
@@ -70,6 +72,15 @@ namespace Ch.Cyberduck.Ui.Winforms
         }
 
         public event ValidateInputHandler ValidateInput;
+
+        protected static Button CreateButton(Button button, out Button result)
+        {
+            button.AutoSize = true;
+            button.Anchor = AnchorStyles.Bottom | AnchorStyles.Right;
+            button.UseVisualStyleBackColor = true;
+            result = button;
+            return button;
+        }
 
         private void PromptForm_Shown(object sender, EventArgs e)
         {

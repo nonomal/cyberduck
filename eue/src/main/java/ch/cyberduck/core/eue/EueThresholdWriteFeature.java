@@ -1,4 +1,6 @@
-package ch.cyberduck.core.eue;/*
+package ch.cyberduck.core.eue;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -22,6 +24,8 @@ import ch.cyberduck.core.io.SHA256ChecksumCompute;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.util.EnumSet;
 
 public class EueThresholdWriteFeature implements Write<EueWriteFeature.Chunk> {
 
@@ -53,7 +57,7 @@ public class EueThresholdWriteFeature implements Write<EueWriteFeature.Chunk> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp);
     }
 }

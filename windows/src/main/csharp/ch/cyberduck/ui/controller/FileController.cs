@@ -17,9 +17,12 @@
 // 
 
 using System.Drawing;
+using System.Text.RegularExpressions;
 using System.Windows.Forms;
 using ch.cyberduck.core;
 using ch.cyberduck.core.pool;
+using ch.cyberduck.core.preferences;
+using Ch.Cyberduck.Core;
 using java.util;
 using static Ch.Cyberduck.ImageHelper;
 
@@ -69,21 +72,24 @@ namespace Ch.Cyberduck.Ui.Controller
         protected virtual bool ValidateInput()
         {
             string t = View.InputText.Trim();
-            if (t.IndexOf('/') != -1)
+            foreach (string f in Utils.ConvertFromJavaList<string>(PreferencesFactory.get().getList("browser.filter.regex")))
             {
-                return false;
+                if (Regex.IsMatch(t, f))
+                {
+                    return false;
+                }
             }
             if (!string.IsNullOrEmpty(t))
             {
                 if (
                     BrowserController.Cache.get(BrowserController.Workdir)
-                        .contains(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.file))))
+                        .toStream().filter(new SimplePathPredicate(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.file)))).findAny().isPresent())
                 {
                     return false;
                 }
                 if (
                     BrowserController.Cache.get(BrowserController.Workdir)
-                        .contains(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.directory))))
+                        .toStream().filter(new SimplePathPredicate(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.directory)))).findAny().isPresent())
                 {
                     return false;
                 }

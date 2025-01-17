@@ -19,19 +19,20 @@ package ch.cyberduck.core.azure;
  */
 
 import ch.cyberduck.core.DirectoryDelimiterPathContainerService;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.input.NullInputStream;
-import org.apache.commons.lang3.RegExUtils;
-import org.apache.commons.lang3.StringUtils;
 
 import java.net.URISyntaxException;
+import java.text.MessageFormat;
 import java.util.EnumSet;
 
 import com.microsoft.azure.storage.OperationContext;
@@ -63,7 +64,7 @@ public class AzureDirectoryFeature implements Directory<Void> {
                 // Container name must be lower case.
                 final CloudBlobContainer container = session.getClient().getContainerReference(containerService.getContainer(folder).getName());
                 container.create(options, context);
-                return folder.withAttributes(new AzureAttributesFinderFeature(session, context).find(folder));
+                return folder;
             }
             else {
                 final EnumSet<Path.Type> type = EnumSet.copyOf(folder.getType());
@@ -81,22 +82,12 @@ public class AzureDirectoryFeature implements Directory<Void> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
         if(workdir.isRoot()) {
-            // Empty argument if not known in validation
-            if(StringUtils.isNotBlank(name)) {
-                // Container names must be lowercase, between 3-63 characters long and must start with a letter or
-                // number. Container names may contain only letters, numbers, and the dash (-) character.
-                if(StringUtils.length(name) > 63) {
-                    return false;
-                }
-                if(StringUtils.length(name) < 3) {
-                    return false;
-                }
-                return StringUtils.isAlphanumeric(RegExUtils.removeAll(name, "-"));
+            if(!AzureTouchFeature.validate(filename)) {
+                throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
             }
         }
-        return true;
     }
 
     @Override

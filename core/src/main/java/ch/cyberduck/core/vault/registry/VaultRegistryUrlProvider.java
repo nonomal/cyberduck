@@ -15,32 +15,35 @@ package ch.cyberduck.core.vault.registry;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.DescriptiveUrlBag;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.UrlProvider;
-import ch.cyberduck.core.vault.DefaultVaultRegistry;
+import ch.cyberduck.core.vault.VaultRegistry;
 import ch.cyberduck.core.vault.VaultUnlockCancelException;
+
+import java.util.EnumSet;
 
 public class VaultRegistryUrlProvider implements UrlProvider {
 
     private final Session<?> session;
     private final UrlProvider proxy;
-    private final DefaultVaultRegistry registry;
+    private final VaultRegistry registry;
 
-    public VaultRegistryUrlProvider(final Session<?> session, final UrlProvider proxy, final DefaultVaultRegistry registry) {
+    public VaultRegistryUrlProvider(final Session<?> session, final UrlProvider proxy, final VaultRegistry registry) {
         this.session = session;
         this.proxy = proxy;
         this.registry = registry;
     }
 
     @Override
-    public DescriptiveUrlBag toUrl(final Path file) {
+    public DescriptiveUrlBag toUrl(final Path file, final EnumSet<DescriptiveUrl.Type> types) {
         try {
-            return registry.find(session, file, false).getFeature(session, UrlProvider.class, proxy).toUrl(file);
+            return registry.find(session, file, false).getFeature(session, UrlProvider.class, proxy).toUrl(file, types);
         }
         catch(VaultUnlockCancelException e) {
-            return proxy.toUrl(file);
+            return proxy.toUrl(file, types);
         }
     }
 

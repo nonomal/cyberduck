@@ -18,34 +18,59 @@ package ch.cyberduck.core.azure;
  * feedback@cyberduck.io
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.shared.DefaultTouchFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.input.NullInputStream;
+import org.apache.commons.lang3.RegExUtils;
+import org.apache.commons.lang3.StringUtils;
+
+import java.text.MessageFormat;
 
 import com.microsoft.azure.storage.OperationContext;
 
 public class AzureTouchFeature extends DefaultTouchFeature<Void> {
 
-    private final AzureSession session;
-    private final OperationContext context;
-
     public AzureTouchFeature(final AzureSession session, final OperationContext context) {
         super(new AzureWriteFeature(session, context));
-        this.session = session;
-        this.context = context;
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String filename) {
-        return !workdir.isRoot();
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(workdir.isRoot()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename)).withFile(workdir);
+        }
+        if(!validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename));
+        }
+    }
+
+    public static boolean validate(final String filename) {
+        // Empty argument if not known in validation
+        if(StringUtils.isNotBlank(filename)) {
+            // Container names must be lowercase, between 3-63 characters long and must start with a letter or
+            // number. Container names may contain only letters, numbers, and the dash (-) character.
+            if(StringUtils.length(filename) > 63) {
+                return false;
+            }
+            if(StringUtils.length(filename) < 3) {
+                return false;
+            }
+            if(!StringUtils.isAlphanumeric(RegExUtils.removeAll(filename, "-"))) {
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
     public Path touch(final Path file, final TransferStatus status) throws BackgroundException {
         status.setChecksum(write.checksum(file, status).compute(new NullInputStream(0L), status));
-        return super.touch(file, status).withAttributes(new AzureAttributesFinderFeature(session, context).find(file));
+        return super.touch(file, status);
     }
 }

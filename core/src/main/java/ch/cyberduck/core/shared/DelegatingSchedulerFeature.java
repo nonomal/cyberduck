@@ -17,7 +17,8 @@ package ch.cyberduck.core.shared;
 
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.features.Scheduler;
-import ch.cyberduck.core.pool.SessionPool;
+
+import java.util.concurrent.Future;
 
 public class DelegatingSchedulerFeature implements Scheduler<Void> {
 
@@ -28,17 +29,25 @@ public class DelegatingSchedulerFeature implements Scheduler<Void> {
     }
 
     @Override
-    public Void repeat(final SessionPool pool, final PasswordCallback callback) {
+    public Future<Void> repeat(final PasswordCallback callback) {
         for(Scheduler scheduler : features) {
-            scheduler.repeat(pool, callback);
+            scheduler.repeat(callback);
         }
         return null;
     }
 
     @Override
-    public void shutdown() {
+    public Future<Void> execute(final PasswordCallback callback) {
         for(Scheduler scheduler : features) {
-            scheduler.shutdown();
+            scheduler.execute(callback);
+        }
+        return null;
+    }
+
+    @Override
+    public void shutdown(final boolean gracefully) {
+        for(Scheduler scheduler : features) {
+            scheduler.shutdown(gracefully);
         }
     }
 }

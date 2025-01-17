@@ -16,9 +16,6 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.exception.AccessDeniedException;
-import ch.cyberduck.core.preferences.MemoryPreferences;
-import ch.cyberduck.core.preferences.Preferences;
-import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 
 import org.junit.Test;
@@ -249,8 +246,6 @@ public class ProtocolFactoryTest {
 
     @Test
     public void testRegisterUnregisterIsEnabled() throws Exception {
-        Preferences preferences = new MemoryPreferences();
-        PreferencesFactory.set(preferences);
         final ProtocolFactory factory = new ProtocolFactory(Stream.of(new TestProtocol() {
             @Override
             public Type getType() {
@@ -259,16 +254,54 @@ public class ProtocolFactoryTest {
 
             @Override
             public boolean isEnabled() {
-                return false;
+                return true;
+            }
+
+            @Override
+            public boolean isBundled() {
+                return true;
             }
         }).collect(Collectors.toSet()));
         final ProfilePlistReader reader = new ProfilePlistReader(factory);
         final Local file = new Local("src/test/resources/Test S3 (HTTP).cyberduckprofile");
-        Profile profile = reader.read(file);
+        final Profile profile = reader.read(file);
         factory.register(file);
         assertTrue(profile.isEnabled());
         factory.unregister(profile);
         assertFalse(profile.isEnabled());
         assertTrue(file.exists());
+    }
+
+    @Test
+    public void testForNameOrDefault() throws Exception {
+        final TestProtocol ftp = new TestProtocol(Scheme.ftp);
+        final TestProtocol dav = new TestProtocol(Scheme.dav);
+        final ProtocolFactory f = new ProtocolFactory(new LinkedHashSet<>(Arrays.asList(ftp, dav)));
+        assertEquals(dav, f.forNameOrDefault("dav"));
+        assertEquals(ftp, f.forNameOrDefault("invalid"));
+        assertEquals(ftp, f.forNameOrDefault("ftp"));
+    }
+
+    @Test
+    public void testForNameOrDefaultWithProvider() throws Exception {
+        final TestProtocol ftp = new TestProtocol(Scheme.ftp);
+        final TestProtocol ftp2 = new TestProtocol(Scheme.ftp) {
+            @Override
+            public String getProvider() {
+                return "test";
+            }
+        };
+        final ProtocolFactory f = new ProtocolFactory(new LinkedHashSet<>(Arrays.asList(ftp, ftp2)));
+        assertEquals(ftp, f.forNameOrDefault("invalid"));
+        assertEquals(ftp, f.forNameOrDefault("ftp"));
+        assertEquals(ftp2, f.forNameOrDefault("ftp", "test"));
+    }
+
+    @Test
+    public void testForNameOrDefaultMissing() throws Exception {
+        final TestProtocol dav = new TestProtocol(Scheme.dav);
+        final ProtocolFactory f = new ProtocolFactory(Collections.singleton(dav));
+        assertEquals(dav, f.forNameOrDefault("dav"));
+        assertNull(f.forNameOrDefault("ftp"));
     }
 }

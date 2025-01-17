@@ -18,6 +18,7 @@ package ch.cyberduck.core.local;
  * dkocher@cyberduck.ch
  */
 
+import ch.cyberduck.binding.foundation.NSData;
 import ch.cyberduck.binding.foundation.NSFileManager;
 import ch.cyberduck.binding.foundation.NSURL;
 import ch.cyberduck.core.AttributedList;
@@ -27,14 +28,11 @@ import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.LocalAccessDeniedException;
 import ch.cyberduck.core.library.Native;
 import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.serializer.Serializer;
 
 import org.apache.commons.io.input.ProxyInputStream;
 import org.apache.commons.io.output.ProxyOutputStream;
-import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.rococoa.Foundation;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -50,40 +48,19 @@ public class FinderLocal extends Local {
         Native.load("core");
     }
 
-    private final FilesystemBookmarkResolver<NSURL> resolver;
+    private static final FilesystemBookmarkResolver<NSData, NSURL> resolver
+            = FilesystemBookmarkResolverFactory.get();
 
     public FinderLocal(final Local parent, final String name) {
-        this(parent, name, FilesystemBookmarkResolverFactory.get());
-    }
-
-    public FinderLocal(final Local parent, final String name, final FilesystemBookmarkResolver<NSURL> resolver) {
         super(parent, name);
-        this.resolver = resolver;
     }
 
     public FinderLocal(final String parent, final String name) {
-        this(parent, name, FilesystemBookmarkResolverFactory.get());
-    }
-
-    public FinderLocal(final String parent, final String name, final FilesystemBookmarkResolver<NSURL> resolver) {
         super(parent, name);
-        this.resolver = resolver;
     }
 
-    public FinderLocal(final String path) {
-        this(resolveAlias(new TildeExpander().expand(path)), FilesystemBookmarkResolverFactory.get());
-    }
-
-    public FinderLocal(final String name, final FilesystemBookmarkResolver<NSURL> resolver) {
+    public FinderLocal(final String name) {
         super(name);
-        this.resolver = resolver;
-    }
-
-    @Override
-    public <T> T serialize(final Serializer dict) {
-        dict.setStringForKey(this.getAbbreviatedPath(), "Path");
-        dict.setStringForKey(this.getBookmark(), "Bookmark");
-        return dict.getSerialized();
     }
 
     /**
@@ -134,30 +111,6 @@ public class FinderLocal extends Local {
         }
     }
 
-    /**
-     * @return Application scoped bookmark to access outside of sandbox
-     */
-    @Override
-    public String getBookmark() {
-        final String path = this.getAbbreviatedPath();
-        String bookmark = PreferencesFactory.get().getProperty(String.format("local.bookmark.%s", path));
-        if(StringUtils.isBlank(bookmark)) {
-            try {
-                bookmark = resolver.create(this);
-            }
-            catch(AccessDeniedException e) {
-                log.warn(String.format("Failure resolving bookmark for %s. %s", this, e));
-            }
-        }
-        return bookmark;
-    }
-
-    @Override
-    public void setBookmark(final String data) {
-        final String path = this.getAbbreviatedPath();
-        PreferencesFactory.get().setProperty(String.format("local.bookmark.%s", path), data);
-    }
-
     @Override
     public AttributedList<Local> list(final Filter<String> filter) throws AccessDeniedException {
         final NSURL resolved;
@@ -171,7 +124,7 @@ public class FinderLocal extends Local {
             return list;
         }
         catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure obtaining lock for %s. %s", this, e));
+            log.warn("Failure obtaining lock for {}. {}", this, e);
             return super.list(filter);
         }
     }
@@ -186,7 +139,7 @@ public class FinderLocal extends Local {
             }
         }
         catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure obtaining lock for %s. %s", this, e));
+            log.warn("Failure obtaining lock for {}. {}", this, e);
             return super.getOutputStream(append);
         }
         return new LockReleaseProxyOutputStream(super.getOutputStream(resolved.path(), append), resolved, append);
@@ -197,15 +150,43 @@ public class FinderLocal extends Local {
      */
     @Override
     public NSURL lock(final boolean interactive) throws AccessDeniedException {
-        final NSURL resolved = resolver.resolve(this, interactive);
-        if(null == resolved) {
-            // Ignore failure resolving path
-            return null; // NSURL.fileURLWithPath(this.getAbsolute());
+        return this.lock(interactive, resolver);
+    }
+
+    protected NSURL lock(final boolean interactive, final FilesystemBookmarkResolver<NSData, NSURL> resolver) throws AccessDeniedException {
+        final String path = this.getAbbreviatedPath();
+        NSURL resolved;
+        if(null != this.getBookmark()) {
+            resolved = resolver.resolve(NSData.dataWithBase64EncodedString(this.getBookmark()));
         }
-        if(resolved.respondsToSelector(Foundation.selector("startAccessingSecurityScopedResource"))) {
-            if(!resolved.startAccessingSecurityScopedResource()) {
-                throw new LocalAccessDeniedException(String.format("Failure accessing security scoped resource for %s", this));
+        else {
+            try {
+                resolved = resolver.resolve(resolver.create(this));
             }
+            catch(AccessDeniedException e) {
+                log.warn("Failure {} creating bookmark for {}", e, path);
+                if(interactive) {
+                    log.warn("Missing security scoped bookmark for file {}", path);
+                    // Prompt user if no bookmark reference is available
+                    final NSData bookmark = resolver.prompt(this);
+                    if(null == bookmark) {
+                        // Prompt canceled by user
+                        return null;
+                    }
+                    resolved = resolver.resolve(bookmark);
+                }
+                else {
+                    log.warn("No security scoped bookmark for {}", path);
+                    // Ignore failure resolving path
+                    return null;
+                }
+            }
+        }
+        if(null == resolved) {
+            return null;
+        }
+        if(!resolved.startAccessingSecurityScopedResource()) {
+            throw new LocalAccessDeniedException(String.format("Failure accessing security scoped resource for %s", path));
         }
         return resolved;
     }
@@ -216,9 +197,7 @@ public class FinderLocal extends Local {
             return;
         }
         final NSURL resolved = (NSURL) lock;
-        if(resolved.respondsToSelector(Foundation.selector("stopAccessingSecurityScopedResource"))) {
-            resolved.stopAccessingSecurityScopedResource();
-        }
+        resolved.stopAccessingSecurityScopedResource();
     }
 
     @Override
@@ -231,7 +210,7 @@ public class FinderLocal extends Local {
             }
         }
         catch(LocalAccessDeniedException e) {
-            log.warn(String.format("Failure obtaining lock for %s. %s", this, e));
+            log.warn("Failure obtaining lock for {}. {}", this, e);
             return super.getInputStream();
         }
         return new LockReleaseProxyInputStream(super.getInputStream(resolved.path()), resolved);

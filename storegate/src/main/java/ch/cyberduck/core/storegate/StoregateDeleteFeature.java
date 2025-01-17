@@ -16,7 +16,6 @@ package ch.cyberduck.core.storegate;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -32,6 +31,7 @@ import org.apache.http.protocol.HTTP;
 import org.apache.http.util.EntityUtils;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.Map;
 
 import static com.google.api.client.json.Json.MEDIA_TYPE;
@@ -53,7 +53,7 @@ public class StoregateDeleteFeature implements Delete {
                 callback.delete(file.getKey());
                 final StoregateApiClient client = session.getClient();
                 final HttpRequestBase request;
-                request = new HttpDelete(String.format("%s/v4/files/%s", client.getBasePath(), fileid.getFileId(file.getKey(), new DisabledListProgressListener())));
+                request = new HttpDelete(String.format("%s/v4.2/files/%s", client.getBasePath(), fileid.getFileId(file.getKey())));
                 if(file.getValue().getLockId() != null) {
                     request.addHeader("X-Lock-Id", file.getValue().getLockId().toString());
                 }
@@ -64,7 +64,8 @@ public class StoregateDeleteFeature implements Delete {
                         case HttpStatus.SC_NO_CONTENT:
                             break;
                         default:
-                            throw new StoregateExceptionMappingService(fileid).map(new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()));
+                            throw new StoregateExceptionMappingService(fileid).map("Cannot delete {0}",
+                                    new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()), file.getKey());
                     }
                 }
                 finally {
@@ -79,7 +80,7 @@ public class StoregateDeleteFeature implements Delete {
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
     }
 }

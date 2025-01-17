@@ -19,6 +19,7 @@ import ch.cyberduck.core.AbstractExceptionMappingService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ChecksumException;
+import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.exception.ExpiredTokenException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.exception.QuotaException;
@@ -28,15 +29,12 @@ import ch.cyberduck.core.http.DefaultHttpResponseExceptionMappingService;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.HttpResponseException;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.time.Duration;
 
 import synapticloop.b2.exception.B2ApiException;
 
 public class B2ExceptionMappingService extends AbstractExceptionMappingService<B2ApiException> {
-    private static final Logger log = LogManager.getLogger(B2ExceptionMappingService.class);
 
     private final B2VersionIdProvider fileid;
 
@@ -66,6 +64,9 @@ public class B2ExceptionMappingService extends AbstractExceptionMappingService<B
                 }
                 break;
             case HttpStatus.SC_BAD_REQUEST:
+                if("duplicate_bucket_name".equalsIgnoreCase(e.getCode())) {
+                    return new ConflictException(buffer.toString(), e);
+                }
                 if("no_such_file".equalsIgnoreCase(e.getCode())) {
                     return new NotfoundException(buffer.toString(), e);
                 }
@@ -73,6 +74,9 @@ public class B2ExceptionMappingService extends AbstractExceptionMappingService<B
                     return new NotfoundException(buffer.toString(), e);
                 }
                 if("bad_bucket_id".equalsIgnoreCase(e.getCode())) {
+                    return new NotfoundException(buffer.toString(), e);
+                }
+                if("already_hidden".equalsIgnoreCase(e.getCode())) {
                     return new NotfoundException(buffer.toString(), e);
                 }
                 if("cap_exceeded".equalsIgnoreCase(e.getCode())) {// Reached the storage cap that you set

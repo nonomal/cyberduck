@@ -19,9 +19,9 @@ import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.date.RFC1123DateFormatter;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Lock;
 import ch.cyberduck.core.features.Timestamp;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.http.HttpHeaders;
@@ -34,31 +34,32 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TimeZone;
 
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineException;
 import com.github.sardine.util.SardineUtil;
 
-public class DAVTimestampFeature extends DefaultTimestampFeature implements Timestamp {
+public class DAVTimestampFeature implements Timestamp {
 
     private final DAVSession session;
 
     public static final QName LAST_MODIFIED_DEFAULT_NAMESPACE =
-        SardineUtil.createQNameWithDefaultNamespace("lastmodified");
+            SardineUtil.createQNameWithDefaultNamespace("lastmodified");
 
     /**
      * Modified timestamp we want to preserve - set by Cyberduck
      */
     public static final QName LAST_MODIFIED_CUSTOM_NAMESPACE =
-        SardineUtil.createQNameWithCustomNamespace("lastmodified");
+            SardineUtil.createQNameWithCustomNamespace("lastmodified");
 
     /**
      * Contains the server side timestamp at the time we have set our custom lastmodified. If this value differs from
      * the modification date on the server the resource has been modified by another user or application.
      */
     public static final QName LAST_MODIFIED_SERVER_CUSTOM_NAMESPACE =
-        SardineUtil.createQNameWithCustomNamespace("lastmodified_server");
+            SardineUtil.createQNameWithCustomNamespace("lastmodified_server");
 
     public DAVTimestampFeature(final DAVSession session) {
         this.session = session;
@@ -67,12 +68,12 @@ public class DAVTimestampFeature extends DefaultTimestampFeature implements Time
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
         try {
-            final List<DavResource> resources = session.getClient().propfind(new DAVPathEncoder().encode(file), 0,
-                Collections.singleton(SardineUtil.createQNameWithDefaultNamespace("getlastmodified")));
-            for(DavResource resource : resources) {
-                session.getClient().patch(new DAVPathEncoder().encode(file), this.getCustomProperties(resource, status.getTimestamp()), Collections.emptyList(),
-                    this.getCustomHeaders(file, status));
-                break;
+            if(null != status.getModified()) {
+                final DavResource resource = this.getResource(file);
+                session.getClient().patch(new DAVPathEncoder().encode(file), this.getCustomProperties(resource, status.getModified()), Collections.emptyList(),
+                        this.getCustomHeaders(file, status));
+                status.setResponse(new DAVAttributesFinderFeature(session).toAttributes(resource).withModificationDate(
+                        Timestamp.toSeconds(status.getModified())));
             }
         }
         catch(SardineException e) {
@@ -83,6 +84,25 @@ public class DAVTimestampFeature extends DefaultTimestampFeature implements Time
         }
     }
 
+    /**
+     * Fetch latest properties from server
+     *
+     * @param file File
+     * @return Latest properties
+     */
+    protected DavResource getResource(final Path file) throws BackgroundException, IOException {
+        final Optional<DavResource> optional = new DAVAttributesFinderFeature(session).list(file).stream().findFirst();
+        if(!optional.isPresent()) {
+            throw new NotfoundException(file.getAbsolute());
+        }
+        return optional.get();
+    }
+
+    /**
+     * @param resource Current properties
+     * @param modified Modification date to set
+     * @return Properties with element added for modification date
+     */
     protected List<Element> getCustomProperties(final DavResource resource, final Long modified) {
         final List<Element> props = new ArrayList<>();
         if(resource.getModified() != null) {
@@ -90,7 +110,7 @@ public class DAVTimestampFeature extends DefaultTimestampFeature implements Time
             element.setTextContent(new RFC1123DateFormatter().format(resource.getModified(), TimeZone.getTimeZone("UTC")));
             props.add(element);
         }
-        Element element = SardineUtil.createElement(LAST_MODIFIED_CUSTOM_NAMESPACE);
+        final Element element = SardineUtil.createElement(LAST_MODIFIED_CUSTOM_NAMESPACE);
         element.setTextContent(new RFC1123DateFormatter().format(modified, TimeZone.getTimeZone("UTC")));
         props.add(element);
         return props;
@@ -99,7 +119,7 @@ public class DAVTimestampFeature extends DefaultTimestampFeature implements Time
     protected Map<String, String> getCustomHeaders(final Path file, final TransferStatus status) {
         final Map<String, String> headers = new HashMap<>();
         if(session.getFeature(Lock.class) != null && status.getLockId() != null) {
-            headers.put(HttpHeaders.IF, String.format("(<%s>)", status.getLockId()));
+            headers.put(HttpHeaders.IF, String.format("<%s> (<%s>)", new DAVPathEncoder().encode(file), status.getLockId()));
         }
         return headers;
     }

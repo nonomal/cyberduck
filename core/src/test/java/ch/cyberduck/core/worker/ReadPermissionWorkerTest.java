@@ -24,8 +24,9 @@ import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.PermissionOverwrite;
 import ch.cyberduck.core.TestPermissionAttributes;
 import ch.cyberduck.core.TestProtocol;
+import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.UnixPermission;
-import ch.cyberduck.core.shared.DefaultUnixPermissionFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.junit.Test;
 
@@ -55,7 +56,7 @@ public class ReadPermissionWorkerTest {
             @SuppressWarnings("unchecked")
             public <T> T _getFeature(final Class<T> type) {
                 if(type == UnixPermission.class) {
-                    return (T) new DefaultUnixPermissionFeature() {
+                    return (T) new UnixPermission() {
                         @Override
                         public void setUnixOwner(final Path file, final String owner) {
                             throw new UnsupportedOperationException();
@@ -72,7 +73,7 @@ public class ReadPermissionWorkerTest {
                         }
 
                         @Override
-                        public void setUnixPermission(final Path file, final Permission permission) {
+                        public void setUnixPermission(final Path file, final TransferStatus status) throws BackgroundException {
                             throw new UnsupportedOperationException();
                         }
                     };

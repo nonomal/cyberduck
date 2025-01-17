@@ -28,35 +28,37 @@ import java.lang.reflect.InvocationTargetException;
 public class AlertCallbackFactory extends Factory<AlertCallback> {
     private static final Logger log = LogManager.getLogger(AlertCallbackFactory.class);
 
-    private Constructor<? extends AlertCallback> constructor;
-
-    protected AlertCallbackFactory() {
+    private AlertCallbackFactory() {
         super("factory.alertcallback.class");
     }
 
     public AlertCallback create(final Controller controller) {
         try {
+            final Constructor<? extends AlertCallback> constructor
+                    = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             if(null == constructor) {
-                constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
-            }
-            if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledAlertCallback();
         }
     }
+
+    private static AlertCallbackFactory singleton;
 
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static AlertCallback get(final Controller c) {
-        return new AlertCallbackFactory().create(c);
+    public static synchronized AlertCallback get(final Controller c) {
+        if(null == singleton) {
+            singleton = new AlertCallbackFactory();
+        }
+        return singleton.create(c);
     }
 }

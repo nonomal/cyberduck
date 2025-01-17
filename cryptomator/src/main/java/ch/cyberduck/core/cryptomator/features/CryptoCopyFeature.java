@@ -20,6 +20,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.cryptomator.CryptoVault;
+import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.cryptomator.random.RotatingNonceGenerator;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
@@ -28,6 +29,9 @@ import ch.cyberduck.core.shared.DefaultCopyFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.cryptomator.cryptolib.api.FileHeader;
+
+import java.util.EnumSet;
+import java.util.Optional;
 
 public class CryptoCopyFeature implements Copy {
 
@@ -50,32 +54,28 @@ public class CryptoCopyFeature implements Copy {
             // Write header to be reused in writer
             final FileHeader header = vault.getFileHeaderCryptor().create();
             status.setHeader(vault.getFileHeaderCryptor().encryptHeader(header));
-            status.setNonces(new RotatingNonceGenerator(vault.numberOfChunks(status.getLength())));
+            status.setNonces(status.getLength() == TransferStatus.UNKNOWN_LENGTH ?
+                    new RandomNonceGenerator(vault.getNonceSize()) :
+                    new RotatingNonceGenerator(vault.getNonceSize(), vault.numberOfChunks(status.getLength())));
         }
         if(vault.contains(source) && vault.contains(copy)) {
             return vault.decrypt(session, proxy.withTarget(target).copy(
-                vault.contains(source) ? vault.encrypt(session, source) : source,
-                vault.contains(copy) ? vault.encrypt(session, copy) : copy, status, callback, listener));
+                    vault.contains(source) ? vault.encrypt(session, source) : source,
+                    vault.contains(copy) ? vault.encrypt(session, copy) : copy, status, callback, listener));
         }
         else {
             // Copy files from or into vault requires to pass through encryption features
             final Path target = new DefaultCopyFeature(session).withTarget(this.target).copy(
                     vault.contains(source) ? vault.encrypt(session, source) : source,
                     vault.contains(copy) ? vault.encrypt(session, copy) : copy,
-                    new TransferStatus(status) {
+                    vault.contains(copy) ? new TransferStatus(status) {
                         @Override
                         public void setResponse(final PathAttributes attributes) {
-                            if(vault.contains(copy)) {
-                                status.setResponse(attributes);
-                                // Will be converted back to clear text when decrypting file below set in default copy feature implementation using writer.
-                                super.setResponse(new PathAttributes(attributes).withSize(vault.toCiphertextSize(0L, attributes.getSize())));
-                            }
-                            else {
-                                status.setResponse(attributes);
-                                super.setResponse(attributes);
-                            }
+                            status.setResponse(attributes);
+                            // Will be converted back to clear text when decrypting file below set in default copy feature implementation using writer.
+                            super.setResponse(new PathAttributes(attributes).withSize(vault.toCiphertextSize(0L, attributes.getSize())));
                         }
-                    },
+                    } : status,
                     callback, listener);
             if(vault.contains(copy)) {
                 return vault.decrypt(session, target);
@@ -85,17 +85,24 @@ public class CryptoCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path copy) {
+    public EnumSet<Flags> features(final Path source, final Path target) {
         // Due to the encrypted folder layout copying is never recursive even when supported by the native implementation
-        return false;
+        return EnumSet.noneOf(Flags.class);
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path copy) {
-        if(vault.contains(source) && vault.contains(copy)) {
-            return proxy.withTarget(target).isSupported(source, copy);
+    public void preflight(final Path source, final Optional<Path> copy) throws BackgroundException {
+        if(copy.isPresent()) {
+            if(vault.contains(source) && vault.contains(copy.get())) {
+                proxy.withTarget(target).preflight(source, copy);
+            }
+            else {
+                new DefaultCopyFeature(session).withTarget(target).preflight(source, copy);
+            }
         }
-        return new DefaultCopyFeature(session).withTarget(target).isSupported(source, copy);
+        else {
+            new DefaultCopyFeature(session).withTarget(target).preflight(source, copy);
+        }
     }
 
     @Override

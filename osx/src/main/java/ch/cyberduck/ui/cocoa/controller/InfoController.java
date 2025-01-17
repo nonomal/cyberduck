@@ -39,6 +39,7 @@ import ch.cyberduck.core.cdn.features.Index;
 import ch.cyberduck.core.cdn.features.Purge;
 import ch.cyberduck.core.date.RFC1123DateFormatter;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.features.AclPermission;
 import ch.cyberduck.core.features.Delete;
@@ -91,12 +92,14 @@ import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 
@@ -1190,8 +1193,8 @@ public class InfoController extends ToolbarWindowController {
     public void setVersionsRevertButton(final NSButton b) {
         this.versionsRevertButton = b;
         this.versionsRevertButton.setTarget(this.id());
-        if(!Factory.Platform.osversion.matches("10\\.(12|13|14|15).*")) {
-            // Available in 10.16 or later
+        if(!Factory.Platform.osversion.matches("(10)\\..*")) {
+            // Available in macOS 11+ or later
             this.versionsRevertButton.setImage(IconCacheFactory.<NSImage>get().iconNamed("clock.arrow.circlepath"));
         }
         this.versionsRevertButton.setAction(Foundation.selector("versionsRevertButtonClicked:"));
@@ -1354,8 +1357,7 @@ public class InfoController extends ToolbarWindowController {
                 return false;
             }
 
-            public void tableView_willDisplayCell_forTableColumn_row(NSTableView view, NSTextFieldCell cell,
-                                                                     NSTableColumn c, NSInteger row) {
+            public void tableView_willDisplayCell_forTableColumn_row(final NSTableView view, final NSTextFieldCell cell, final NSTableColumn c, final NSInteger row) {
                 if(c.identifier().equals(MetadataColumn.VALUE.name())) {
                     final String value = metadata.get(row.intValue()).getValue();
                     if(null == value) {
@@ -1613,8 +1615,7 @@ public class InfoController extends ToolbarWindowController {
         if(count > 0) {
             filenameField.setStringValue(this.getName());
             final Path file = this.getSelected();
-            filenameField.setEnabled(1 == count
-                    && session.getFeature(Move.class).isSupported(file, file));
+            filenameField.setEnabled(1 == count && session.getFeature(Move.class).isSupported(file, Optional.empty()));
             // Where
             String path;
             if(file.isSymbolicLink()) {
@@ -1695,7 +1696,7 @@ public class InfoController extends ToolbarWindowController {
         else {
             this.updateField(webUrlField, LocaleFactory.localizedString("Unknown"));
             final Path file = this.getSelected();
-            final DescriptiveUrl http = session.getFeature(UrlProvider.class).toUrl(file).find(DescriptiveUrl.Type.http);
+            final DescriptiveUrl http = session.getFeature(UrlProvider.class).toUrl(file, EnumSet.of(DescriptiveUrl.Type.http)).find(DescriptiveUrl.Type.http);
             if(!http.equals(DescriptiveUrl.EMPTY)) {
                 webUrlField.setAttributedStringValue(HyperlinkAttributedStringFactory.create(http));
                 webUrlField.setToolTip(LocaleFactory.localizedString("Open in Web Browser"));
@@ -1879,8 +1880,8 @@ public class InfoController extends ToolbarWindowController {
         storageClassPopup.setEnabled(stop && enable && storageclass);
         encryptionPopup.setEnabled(stop && enable && encryption);
         bucketVersioningButton.setEnabled(stop && enable && versioning);
-        bucketMfaButton.setEnabled(stop && enable && versioning
-                && bucketVersioningButton.state() == NSCell.NSOnState);
+        bucketMfaButton.setEnabled(stop && enable && session.getHost().getProtocol().getType() == Protocol.Type.s3
+                && versioning && bucketVersioningButton.state() == NSCell.NSOnState);
         bucketTransferAccelerationButton.setEnabled(stop && enable && acceleration);
         bucketLoggingButton.setEnabled(stop && enable && logging);
         bucketLoggingPopup.setEnabled(stop && enable && logging);
@@ -1970,8 +1971,8 @@ public class InfoController extends ToolbarWindowController {
                         try {
                             transferAcceleration = session.getFeature(TransferAcceleration.class).getStatus(file);
                         }
-                        catch(InteroperabilityException e) {
-                            log.warn(String.format("Ignore failure %s reading transfer acceleration", e));
+                        catch(InteroperabilityException | ConflictException e) {
+                            log.warn("Ignore failure {} reading transfer acceleration", e.getMessage());
                             // 405 The specified method is not allowed against this resource
                         }
                     }
@@ -2297,7 +2298,7 @@ public class InfoController extends ToolbarWindowController {
                 }
             }
         }
-        log.warn(String.format("Invalid octal field input %s", octalField.stringValue()));
+        log.warn("Invalid octal field input {}", octalField.stringValue());
         return null;
     }
 
@@ -2530,7 +2531,7 @@ public class InfoController extends ToolbarWindowController {
                     }
                     else {
                         distributionCnameField.setStringValue(StringUtils.join(cnames, ' '));
-                        final DescriptiveUrl url = new DistributionUrlProvider(distribution).toUrl(file).find(DescriptiveUrl.Type.cname);
+                        final DescriptiveUrl url = new DistributionUrlProvider(distribution).toUrl(file, EnumSet.of(DescriptiveUrl.Type.cname)).find(DescriptiveUrl.Type.cname);
                         if(!url.equals(DescriptiveUrl.EMPTY)) {
                             // We only support one CNAME URL to be displayed
                             distributionCnameUrlField.setAttributedStringValue(HyperlinkAttributedStringFactory.create(url));
@@ -2689,6 +2690,11 @@ public class InfoController extends ToolbarWindowController {
             }
         },
         versions {
+            @Override
+            public String label() {
+                return LocaleFactory.localizedString(StringUtils.capitalize("Versions"), "Info");
+            }
+
             @Override
             public String image() {
                 return "NSMultipleDocuments";

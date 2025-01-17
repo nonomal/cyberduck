@@ -17,10 +17,10 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.concurrency.Interruptibles;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.http.HttpRange;
@@ -32,7 +32,6 @@ import ch.cyberduck.core.threading.DefaultRetryCallable;
 import ch.cyberduck.core.threading.ThreadPool;
 import ch.cyberduck.core.threading.ThreadPoolFactory;
 import ch.cyberduck.core.transfer.TransferStatus;
-import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,16 +42,14 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.Uninterruptibles;
 import synapticloop.b2.exception.B2ApiException;
 import synapticloop.b2.response.B2StartLargeFileResponse;
 import synapticloop.b2.response.B2UploadPartResponse;
 
 import static ch.cyberduck.core.b2.B2LargeUploadService.X_BZ_INFO_LARGE_FILE_SHA1;
+import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_CREATION_DATE_MILLIS;
 import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS;
 
 public class B2LargeCopyFeature implements Copy {
@@ -84,8 +81,11 @@ public class B2LargeCopyFeature implements Copy {
         final ThreadPool pool = ThreadPoolFactory.get("largeupload", concurrency);
         try {
             final Map<String, String> fileinfo = new HashMap<>(status.getMetadata());
-            if(null != status.getTimestamp()) {
-                fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getTimestamp()));
+            if(null != status.getModified()) {
+                fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getModified()));
+            }
+            if(null != status.getCreated()) {
+                fileinfo.put(X_BZ_INFO_SRC_CREATION_DATE_MILLIS, String.valueOf(status.getCreated()));
             }
             final Checksum checksum = status.getChecksum();
             if(Checksum.NONE != checksum) {
@@ -95,7 +95,7 @@ public class B2LargeCopyFeature implements Copy {
                         break;
                 }
             }
-            final B2StartLargeFileResponse response = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(target), new DisabledListProgressListener()),
+            final B2StartLargeFileResponse response = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(target)),
                     containerService.getKey(target), status.getMime(), fileinfo);
             final long size = status.getLength();
             // Submit file segments for concurrent upload
@@ -107,21 +107,14 @@ public class B2LargeCopyFeature implements Copy {
                 final Long length = Math.min(Math.max((size / B2LargeUploadService.MAXIMUM_UPLOAD_PARTS), partSize), remaining);
                 // Submit to queue
                 parts.add(this.submit(pool, source, response.getFileId(), status, partNumber, offset, length, callback));
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Part %s submitted with size %d and offset %d", partNumber, length, offset));
-                }
+                log.debug("Part {} submitted with size {} and offset {}", partNumber, length, offset);
                 remaining -= length;
                 offset += length;
             }
-            try {
-                for(Future<B2UploadPartResponse> f : parts) {
-                    completed.add(Uninterruptibles.getUninterruptibly(f));
-                }
-            }
-            catch(ExecutionException e) {
-                log.warn(String.format("Part upload failed with execution failure %s", e.getMessage()));
-                Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
-                throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
+            for(Future<B2UploadPartResponse> f : parts) {
+                final B2UploadPartResponse part = Interruptibles.await(f);
+                completed.add(part);
+                listener.sent(part.getContentLength());
             }
             completed.sort(new Comparator<B2UploadPartResponse>() {
                 @Override
@@ -134,9 +127,7 @@ public class B2LargeCopyFeature implements Copy {
                 checksums.add(part.getContentSha1());
             }
             session.getClient().finishLargeFileUpload(response.getFileId(), checksums.toArray(new String[checksums.size()]));
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Finished large file upload %s with %d parts", target, completed.size()));
-            }
+            log.info("Finished large file upload {} with {} parts", target, completed.size());
             fileid.cache(target, response.getFileId());
             return target.withAttributes(new PathAttributes(source.attributes()).withVersionId(response.getFileId()));
         }
@@ -144,7 +135,7 @@ public class B2LargeCopyFeature implements Copy {
             throw new B2ExceptionMappingService(fileid).map("Cannot copy {0}", e, source);
         }
         catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map(e);
+            throw new DefaultIOExceptionMappingService().map("Cannot copy {0}", e, source);
         }
         finally {
             pool.shutdown(false);
@@ -155,16 +146,14 @@ public class B2LargeCopyFeature implements Copy {
                                                 final TransferStatus overall,
                                                 final int partNumber, final Long offset, final Long length,
                                                 final ConnectionCallback callback) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Submit part %d of %s to queue with offset %d and length %d", partNumber, file, offset, length));
-        }
+        log.info("Submit part {} of {} to queue with offset {} and length {}", partNumber, file, offset, length);
         return pool.execute(new DefaultRetryCallable<>(session.getHost(), new BackgroundExceptionCallable<B2UploadPartResponse>() {
             @Override
             public B2UploadPartResponse call() throws BackgroundException {
                 overall.validate();
                 try {
                     HttpRange range = HttpRange.byLength(offset, length);
-                    return session.getClient().copyLargePart(fileid.getVersionId(file, new DisabledListProgressListener()), largeFileId, partNumber,
+                    return session.getClient().copyLargePart(fileid.getVersionId(file), largeFileId, partNumber,
                             String.format("bytes=%d-%d", range.getStart(), range.getEnd()));
                 }
                 catch(B2ApiException e) {

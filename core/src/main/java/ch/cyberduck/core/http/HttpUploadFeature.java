@@ -21,6 +21,7 @@ import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ChecksumException;
 import ch.cyberduck.core.features.Upload;
@@ -56,17 +57,10 @@ public class HttpUploadFeature<Reply, Digest> implements Upload<Reply> {
     }
 
     @Override
-    public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return writer.append(file, status);
-    }
-
-    @Override
     public Reply upload(final Path file, final Local local, final BandwidthThrottle throttle,
-                        final StreamListener listener, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        final Reply response = this.upload(file, local, throttle, listener, status, status, status, callback);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Received response %s", response));
-        }
+                        final ProgressListener progress, final StreamListener streamListener, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
+        final Reply response = this.upload(file, local, throttle, streamListener, status, status, status, callback);
+        log.debug("Received response {}", response);
         return response;
     }
 
@@ -75,7 +69,7 @@ public class HttpUploadFeature<Reply, Digest> implements Upload<Reply> {
                         final StreamCancelation cancel, final StreamProgress progress, final ConnectionCallback callback) throws BackgroundException {
         try {
             final Digest digest = this.digest();
-            final Reply response = transfer(file, local, throttle, listener, status, cancel, progress, callback, digest);
+            final Reply response = this.transfer(file, local, throttle, listener, status, cancel, progress, callback, digest);
             this.post(file, digest, response);
             return response;
         }
@@ -87,9 +81,9 @@ public class HttpUploadFeature<Reply, Digest> implements Upload<Reply> {
         }
     }
 
-    public Reply transfer(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
-                          final TransferStatus status, final StreamCancelation cancel, final StreamProgress progress,
-                          final ConnectionCallback callback, final Digest digest) throws IOException, BackgroundException {
+    protected Reply transfer(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
+                             final TransferStatus status, final StreamCancelation cancel, final StreamProgress progress,
+                             final ConnectionCallback callback, final Digest digest) throws IOException, BackgroundException {
         // Wrap with digest stream if available
         final InputStream in = this.decorate(local.getInputStream(), digest);
         final StatusOutputStream<Reply> out = writer.write(file, status, callback);
@@ -111,24 +105,22 @@ public class HttpUploadFeature<Reply, Digest> implements Upload<Reply> {
 
     protected void post(final Path file, final Digest digest, final Reply response) throws BackgroundException {
         // No-op with no checksum verification by default
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Missing checksum verification for %s", file));
-        }
+        log.debug("Missing checksum verification for {}", file);
     }
 
     protected void verify(final Path file, final MessageDigest digest, final Checksum checksum) throws ChecksumException {
         if(file.getType().contains(Path.Type.encrypted)) {
-            log.warn(String.format("Skip checksum verification for %s with client side encryption enabled", file));
+            log.warn("Skip checksum verification for {} with client side encryption enabled", file);
             return;
         }
         if(null == digest) {
-            log.debug(String.format("Digest disabled for file %s", file));
+            log.debug("Digest disabled for file {}", file);
             return;
         }
         // Obtain locally-calculated MD5 hash.
         final Checksum expected = Checksum.parse(Hex.encodeHexString(digest.digest()));
         if(ObjectUtils.notEqual(expected.algorithm, checksum.algorithm)) {
-            log.warn(String.format("ETag %s returned by server is %s but expected %s", checksum.hash, checksum.algorithm, expected.algorithm));
+            log.warn("ETag {} returned by server is {} but expected {}", checksum.hash, checksum.algorithm, expected.algorithm);
         }
         else {
             // Compare our locally-calculated hash with the ETag returned by S3.

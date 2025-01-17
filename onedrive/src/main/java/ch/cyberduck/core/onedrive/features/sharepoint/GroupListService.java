@@ -21,9 +21,10 @@ import ch.cyberduck.core.onedrive.AbstractListService;
 import ch.cyberduck.core.onedrive.SharepointSession;
 import ch.cyberduck.core.onedrive.features.GraphFileIdProvider;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.nuxeo.onedrive.client.Groups;
+import org.nuxeo.onedrive.client.Users;
 import org.nuxeo.onedrive.client.types.GroupItem;
 import org.nuxeo.onedrive.client.types.User;
 
@@ -43,17 +44,21 @@ public class GroupListService extends AbstractListService<GroupItem.Metadata> {
     @Override
     protected Iterator<GroupItem.Metadata> getIterator(final Path directory) {
         final User user = User.getCurrent(session.getClient());
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Return groups for user %s", user));
-        }
-        return Groups.getMemberOfGroups(user);
+        log.debug("Return groups for user {}", user);
+        return Users.memberOfGroups(user);
     }
 
     @Override
     protected Path toPath(final GroupItem.Metadata metadata, final Path directory) {
         final PathAttributes attributes = new PathAttributes();
         attributes.setFileId(metadata.getId());
-        return new Path(directory, metadata.getDisplayName(), EnumSet.of(Path.Type.volume, Path.Type.directory, Path.Type.placeholder),
-                attributes);
+        final String name;
+        if(StringUtils.isBlank(metadata.getDisplayName())) {
+            name = metadata.getId();
+        }
+        else {
+            name = metadata.getDisplayName();
+        }
+        return new Path(directory, name, EnumSet.of(Path.Type.volume, Path.Type.directory, Path.Type.placeholder), attributes);
     }
 }

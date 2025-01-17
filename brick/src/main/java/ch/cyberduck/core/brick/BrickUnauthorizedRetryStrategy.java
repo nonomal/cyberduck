@@ -39,14 +39,12 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class BrickUnauthorizedRetryStrategy extends DisabledServiceUnavailableRetryStrategy implements HttpRequestInterceptor {
     private static final Logger log = LogManager.getLogger(BrickUnauthorizedRetryStrategy.class);
 
-    private static final int MAX_RETRIES = 1;
-
-    private final Semaphore semaphore = new Semaphore(1);
+    private final ReentrantLock lock = new ReentrantLock();
     private final HostPasswordStore store = PasswordStoreFactory.get();
     private final BrickSession session;
     private final LoginCallback prompt;
@@ -64,40 +62,31 @@ public class BrickUnauthorizedRetryStrategy extends DisabledServiceUnavailableRe
     public boolean retryRequest(final HttpResponse response, final int executionCount, final HttpContext context) {
         switch(response.getStatusLine().getStatusCode()) {
             case HttpStatus.SC_UNAUTHORIZED:
-                if(executionCount <= MAX_RETRIES) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Try to acquire semaphore for %s", session));
-                    }
-                    // Pairing token no longer valid
-                    if(!semaphore.tryAcquire()) {
-                        log.warn(String.format("Skip pairing because semaphore cannot be aquired for %s", session));
-                        return false;
-                    }
-                    try {
-                        log.warn(String.format("Run pairing flow for %s", session));
-                        // Blocks until pairing is complete or canceled
-                        final Credentials credentials = session.pair(session.getHost(), prompt, prompt, new BackgroundActionRegistryCancelCallback(cancel),
-                                LocaleFactory.localizedString("You've been logged out", "Brick"),
-                                LocaleFactory.localizedString("Please complete the login process in your browser.", "Brick")
-                        );
-                        store.save(session.getHost());
-                        apiKey = credentials.getPassword();
-                        return true;
-                    }
-                    catch(BackgroundException e) {
-                        log.warn(String.format("Failure %s trying to refresh pairing after error response %s", e, response));
-                    }
-                    finally {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Release semaphore for %s", session));
-                        }
-                        semaphore.release();
-                    }
+                log.debug("Try to acquire semaphore for {}", session);
+                // Pairing token no longer valid
+                if(!lock.tryLock()) {
+                    log.warn("Skip pairing because semaphore cannot be aquired for {}", session);
+                    return false;
                 }
-                else {
-                    if(log.isWarnEnabled()) {
-                        log.warn(String.format("Skip retry for response %s after %d executions", response, executionCount));
+                try {
+                    log.warn("Run pairing flow for {}", session);
+                    // Blocks until pairing is complete or canceled
+                    final Credentials credentials = session.pair(session.getHost(), prompt, prompt, new BackgroundActionRegistryCancelCallback(cancel),
+                            LocaleFactory.localizedString("You've been logged out", "Brick"),
+                            LocaleFactory.localizedString("Please complete the login process in your browser.", "Brick")
+                    );
+                    if(credentials.isSaved()) {
+                        store.save(session.getHost());
                     }
+                    apiKey = credentials.getPassword();
+                    return true;
+                }
+                catch(BackgroundException e) {
+                    log.warn("Failure {} trying to refresh pairing after error response {}", e, response);
+                }
+                finally {
+                    log.debug("Release semaphore for {}", session);
+                    lock.unlock();
                 }
         }
         return false;

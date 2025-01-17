@@ -16,8 +16,12 @@ package ch.cyberduck.core.manta;
  */
 
 import ch.cyberduck.core.AbstractProtocol;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class MantaProtocol extends AbstractProtocol {
 
     @Override
@@ -56,6 +60,11 @@ public class MantaProtocol extends AbstractProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public boolean isUsernameConfigurable() {
         return true;
     }
@@ -73,5 +82,10 @@ public class MantaProtocol extends AbstractProtocol {
     @Override
     public boolean isPrivateKeyConfigurable() {
         return true;
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.custom;
     }
 }

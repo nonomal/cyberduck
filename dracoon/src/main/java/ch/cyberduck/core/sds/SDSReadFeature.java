@@ -17,8 +17,9 @@ package ch.cyberduck.core.sds;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.exception.AntiVirusAccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.http.DefaultHttpResponseExceptionMappingService;
@@ -58,8 +59,7 @@ public class SDSReadFeature implements Read {
     public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         try {
             final SDSApiClient client = session.getClient();
-            final DownloadTokenGenerateResponse token = new NodesApi(session.getClient()).generateDownloadUrl(Long.valueOf(nodeid.getVersionId(file,
-                new DisabledListProgressListener())), StringUtils.EMPTY);
+            final DownloadTokenGenerateResponse token = new NodesApi(session.getClient()).generateDownloadUrl(Long.valueOf(nodeid.getVersionId(file)), StringUtils.EMPTY);
             final HttpUriRequest request = new HttpGet(token.getDownloadUrl());
             request.addHeader("X-Sds-Auth-Token", StringUtils.EMPTY);
             if(status.isAppend()) {
@@ -71,9 +71,7 @@ public class SDSReadFeature implements Read {
                 else {
                     header = String.format("bytes=%d-%d", range.getStart(), range.getEnd());
                 }
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add range header %s for file %s", header, file));
-                }
+                log.debug("Add range header {} for file {}", header, file);
                 request.addHeader(new BasicHeader(HttpHeaders.RANGE, header));
                 // Disable compression
                 request.addHeader(new BasicHeader(HttpHeaders.ACCEPT_ENCODING, "identity"));
@@ -96,6 +94,17 @@ public class SDSReadFeature implements Read {
         }
         catch(IOException e) {
             throw new DefaultIOExceptionMappingService().map("Download {0} failed", e, file);
+        }
+    }
+
+    @Override
+    public void preflight(final Path file) throws BackgroundException {
+        final PathAttributes attr = file.attributes();
+        if(null != attr.getVerdict()) {
+            switch(attr.getVerdict()) {
+                case malicious:
+                    throw new AntiVirusAccessDeniedException().withFile(file);
+            }
         }
     }
 }

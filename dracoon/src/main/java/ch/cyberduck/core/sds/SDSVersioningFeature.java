@@ -16,7 +16,6 @@ package ch.cyberduck.core.sds;
  */
 
 import ch.cyberduck.core.AttributedList;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
@@ -32,6 +31,8 @@ import ch.cyberduck.core.sds.io.swagger.client.model.DeletedNodeVersionsList;
 import ch.cyberduck.core.sds.io.swagger.client.model.RestoreDeletedNodesRequest;
 
 import org.apache.commons.lang3.StringUtils;
+
+import java.util.EnumSet;
 
 public class SDSVersioningFeature implements Versioning {
 
@@ -60,8 +61,8 @@ public class SDSVersioningFeature implements Versioning {
                     new RestoreDeletedNodesRequest()
                             .resolutionStrategy(RestoreDeletedNodesRequest.ResolutionStrategyEnum.OVERWRITE)
                             .keepShareLinks(new HostPreferences(session.getHost()).getBoolean("sds.upload.sharelinks.keep"))
-                            .addDeletedNodeIdsItem(Long.parseLong(nodeid.getVersionId(file, new DisabledListProgressListener())))
-                            .parentId(Long.parseLong(nodeid.getVersionId(file.getParent(), new DisabledListProgressListener()))), StringUtils.EMPTY);
+                            .addDeletedNodeIdsItem(Long.parseLong(nodeid.getVersionId(file)))
+                            .parentId(Long.parseLong(nodeid.getVersionId(file.getParent()))), StringUtils.EMPTY);
         }
         catch(ApiException e) {
             throw new SDSExceptionMappingService(nodeid).map("Failure to write attributes of {0}", e, file);
@@ -70,12 +71,10 @@ public class SDSVersioningFeature implements Versioning {
     }
 
     @Override
-    public boolean isRevertable(final Path file) {
-        return true;
-    }
-
-    @Override
     public AttributedList<Path> list(final Path file, final ListProgressListener listener) throws BackgroundException {
+        if(file.isDirectory()) {
+            return AttributedList.emptyList();
+        }
         final int chunksize = new HostPreferences(session.getHost()).getInteger("sds.listing.chunksize");
         try {
             int offset = 0;
@@ -83,7 +82,7 @@ public class SDSVersioningFeature implements Versioning {
             final AttributedList<Path> versions = new AttributedList<>();
             do {
                 nodes = new NodesApi(session.getClient()).requestDeletedNodeVersions(
-                        Long.parseLong(nodeid.getVersionId(file.getParent(), new DisabledListProgressListener())),
+                        Long.parseLong(nodeid.getVersionId(file.getParent())),
                         file.isFile() ? "file" : "folder", file.getName(), StringUtils.EMPTY, "updatedAt:desc",
                         offset, chunksize, null);
                 for(DeletedNode item : nodes.getItems()) {
@@ -99,5 +98,10 @@ public class SDSVersioningFeature implements Versioning {
         catch(ApiException e) {
             throw new SDSExceptionMappingService(nodeid).map("Failure to read attributes of {0}", e, file);
         }
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.revert, Flags.list);
     }
 }

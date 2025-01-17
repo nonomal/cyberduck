@@ -20,6 +20,7 @@ import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.webloc.UrlFileWriter;
@@ -86,13 +87,11 @@ public abstract class AbstractDriveListService implements ListService {
                     .setPageToken(page)
                     .setFields(fields)
                     .setPageSize(pagesize).execute();
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Chunk of %d retrieved", list.getFiles().size()));
-                }
+                log.debug("Chunk of {} retrieved", list.getFiles().size());
                 for(File f : list.getFiles()) {
                     final PathAttributes properties = attributes.toAttributes(f);
                     if(PathAttributes.EMPTY == properties) {
-                        log.warn(String.format("Ignore file %s with unknown attributes", f));
+                        log.warn("Ignore file {} with unknown attributes", f);
                         continue;
                     }
                     final String filename;
@@ -111,11 +110,17 @@ public abstract class AbstractDriveListService implements ListService {
                         children.add(new Path(parent, filename, type, properties));
                     }
                 }
+                // Mark duplicates
+                children.toStream().forEach(f -> f.attributes().setDuplicate(children.findAll(new SimplePathPredicate(f) {
+                    @Override
+                    public boolean test(final Path f) {
+                        // Exclude trashed
+                        return super.test(f) && !f.attributes().isHidden();
+                    }
+                }).size() > 1));
                 listener.chunk(directory, children);
                 page = list.getNextPageToken();
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Continue with next page token %s", page));
-                }
+                log.debug("Continue with next page token {}", page);
             }
             while(page != null);
             return children;

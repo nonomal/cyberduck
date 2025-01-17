@@ -18,11 +18,12 @@ package ch.cyberduck.core.onedrive.features;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.onedrive.GraphExceptionMappingService;
 import ch.cyberduck.core.onedrive.GraphSession;
-import ch.cyberduck.core.shared.DefaultHomeFinderService;
 
+import org.nuxeo.onedrive.client.ODataQuery;
 import org.nuxeo.onedrive.client.OneDriveAPIException;
 import org.nuxeo.onedrive.client.types.Drive;
 import org.nuxeo.onedrive.client.types.DriveItem;
@@ -33,15 +34,17 @@ public class GraphQuotaFeature implements Quota {
 
     private final GraphSession session;
     private final GraphFileIdProvider fileid;
+    private final Home finder;
 
-    public GraphQuotaFeature(final GraphSession session, final GraphFileIdProvider fileid) {
+    public GraphQuotaFeature(final GraphSession session, final GraphFileIdProvider fileid, final Home finder) {
         this.session = session;
         this.fileid = fileid;
+        this.finder = finder;
     }
 
     @Override
     public Space get() throws BackgroundException {
-        final Path home = new DefaultHomeFinderService(session).find();
+        final Path home = finder.find();
         if(!session.isAccessible(home)) {
             // not accessible (important for Sharepoint)
             return unknown;
@@ -51,7 +54,7 @@ public class GraphQuotaFeature implements Quota {
             // retrieve OneDriveItem from home
             final DriveItem item = session.getItem(home, true);
             // returns drive, which can then query metadata.
-            metadata = item.getDrive().getMetadata();
+            metadata = item.getDrive().getMetadata(new ODataQuery().select(Drive.Property.Quota));
         }
         catch(OneDriveAPIException e) {
             throw new GraphExceptionMappingService(fileid).map("Failure to read attributes of {0}", e, home);

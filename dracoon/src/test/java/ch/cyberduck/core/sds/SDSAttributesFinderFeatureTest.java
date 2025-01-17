@@ -24,6 +24,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
@@ -75,11 +76,14 @@ public class SDSAttributesFinderFeatureTest extends AbstractSDSTest {
         final Path test = new SDSTouchFeature(session, nodeid).touch(new Path(room, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
         final SDSAttributesFinderFeature f = new SDSAttributesFinderFeature(session, nodeid);
         final PathAttributes attributes = f.find(test);
+        assertNotNull(attributes.getRevision());
         assertEquals(0L, attributes.getSize());
         assertNotEquals(-1L, attributes.getModificationDate());
+        assertEquals(Checksum.NONE, attributes.getChecksum());
         assertTrue(attributes.getPermission().isReadable());
         assertTrue(attributes.getPermission().isWritable());
         assertNotNull(attributes.getCustom().get(SDSAttributesFinderFeature.KEY_CLASSIFICATION));
+        assertNotNull(attributes.getCustom().get(SDSAttributesFinderFeature.KEY_ENCRYPTED));
         // Test wrong type
         try {
             f.find(new Path(test.getAbsolute(), EnumSet.of(Path.Type.directory)));
@@ -158,8 +162,10 @@ public class SDSAttributesFinderFeatureTest extends AbstractSDSTest {
         final PathAttributes updated = new SDSAttributesFinderFeature(session, nodeid).find(test, new DisabledListProgressListener());
         assertEquals(status.getResponse().getVersionId(), updated.getVersionId());
         assertEquals(previous.getModificationDate(), new SDSAttributesFinderFeature(session, nodeid).find(folder, new DisabledListProgressListener()).getModificationDate());
+        assertEquals(previous.getChecksum(), new SDSAttributesFinderFeature(session, nodeid).find(folder, new DisabledListProgressListener()).getChecksum());
+        assertEquals(previous.getModificationDate(), new SDSAttributesFinderFeature(session, nodeid).find(folder, new DisabledListProgressListener()).getModificationDate());
         // Branch version is changing with background task only
-        // assertNotEquals(previous.getRevision(), new SDSAttributesFinderFeature(session, nodeid).find(folder, 1).getRevision());
+        // assertNotEquals(previous.getRevision(), new SDSAttributesFinderFeature(session, nodeid).find(folder, new DisabledListProgressListener()).getRevision());
         new SDSDeleteFeature(session, nodeid).delete(Collections.singletonList(room), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 

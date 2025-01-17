@@ -18,6 +18,7 @@ package ch.cyberduck.core.b2;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.features.Write;
@@ -52,17 +53,20 @@ public class B2ThresholdUploadService implements Upload<BaseB2Response> {
 
     @Override
     public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return writer.append(file, status);
+        if(this.threshold(status)) {
+            return new B2LargeUploadService(session, fileid, writer).append(file, status);
+        }
+        return new Write.Append(false).withStatus(status);
     }
 
     @Override
-    public BaseB2Response upload(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
+    public BaseB2Response upload(final Path file, final Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener,
                                  final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        if(this.threshold(status.getLength())) {
-            return new B2LargeUploadService(session, fileid, writer).upload(file, local, throttle, listener, status, callback);
+        if(this.threshold(status)) {
+            return new B2LargeUploadService(session, fileid, writer).upload(file, local, throttle, progress, streamListener, status, callback);
         }
         else {
-            return new B2SingleUploadService(session, writer).upload(file, local, throttle, listener, status, callback);
+            return new B2SingleUploadService(session, writer).upload(file, local, throttle, progress, streamListener, status, callback);
         }
     }
 
@@ -72,16 +76,20 @@ public class B2ThresholdUploadService implements Upload<BaseB2Response> {
         return this;
     }
 
-    protected boolean threshold(final Long length) {
-        if(length > threshold) {
-            if(!new HostPreferences(session.getHost()).getBoolean("b2.upload.largeobject")) {
-                // Disabled by user
-                if(length < new HostPreferences(session.getHost()).getLong("b2.upload.largeobject.required.threshold")) {
-                    log.warn("Large upload is disabled with property b2.upload.largeobject.required.threshold");
-                    return false;
+    protected boolean threshold(final TransferStatus status) {
+        if(status.getLength() > threshold) {
+            if(status.getLength() > new HostPreferences(session.getHost()).getLong("b2.upload.largeobject.size")) {
+                if(!new HostPreferences(session.getHost()).getBoolean("b2.upload.largeobject")) {
+                    // Disabled by user
+                    if(status.getLength() < new HostPreferences(session.getHost()).getLong("b2.upload.largeobject.required.threshold")) {
+                        log.warn("Large upload is disabled with property b2.upload.largeobject.required.threshold");
+                        return false;
+                    }
                 }
+                return true;
             }
-            return true;
+            // Large files must have at least 2 parts
+            return false;
         }
         else {
             // Below threshold

@@ -18,7 +18,6 @@ package ch.cyberduck.core.cryptomator.impl;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DisabledPasswordCallback;
-import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.LoginOptions;
 import ch.cyberduck.core.NullSession;
@@ -26,6 +25,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.TestProtocol;
 import ch.cyberduck.core.cryptomator.CryptoDirectory;
 import ch.cyberduck.core.cryptomator.CryptoVault;
+import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -69,17 +69,20 @@ public class CryptoDirectoryV6ProviderTest {
                 if(type == Read.class) {
                     return (T) new Read() {
                         @Override
-                        public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) {
+                        public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
                             final String masterKey = "{\n" +
-                                "  \"scryptSalt\": \"NrC7QGG/ouc=\",\n" +
-                                "  \"scryptCostParam\": 16384,\n" +
-                                "  \"scryptBlockSize\": 8,\n" +
-                                "  \"primaryMasterKey\": \"Q7pGo1l0jmZssoQh9rXFPKJE9NIXvPbL+HcnVSR9CHdkeR8AwgFtcw==\",\n" +
-                                "  \"hmacMasterKey\": \"xzBqT4/7uEcQbhHFLC0YmMy4ykVKbuvJEA46p1Xm25mJNuTc20nCbw==\",\n" +
-                                "  \"versionMac\": \"hlNr3dz/CmuVajhaiGyCem9lcVIUjDfSMLhjppcXOrM=\",\n" +
-                                "  \"version\": 5\n" +
-                                "}";
-                            return IOUtils.toInputStream(masterKey, Charset.defaultCharset());
+                                    "  \"scryptSalt\": \"NrC7QGG/ouc=\",\n" +
+                                    "  \"scryptCostParam\": 16384,\n" +
+                                    "  \"scryptBlockSize\": 8,\n" +
+                                    "  \"primaryMasterKey\": \"Q7pGo1l0jmZssoQh9rXFPKJE9NIXvPbL+HcnVSR9CHdkeR8AwgFtcw==\",\n" +
+                                    "  \"hmacMasterKey\": \"xzBqT4/7uEcQbhHFLC0YmMy4ykVKbuvJEA46p1Xm25mJNuTc20nCbw==\",\n" +
+                                    "  \"versionMac\": \"hlNr3dz/CmuVajhaiGyCem9lcVIUjDfSMLhjppcXOrM=\",\n" +
+                                    "  \"version\": 5\n" +
+                                    "}";
+                            if("masterkey.cryptomator".equals(file.getName())) {
+                                return IOUtils.toInputStream(masterKey, Charset.defaultCharset());
+                            }
+                            throw new NotfoundException(String.format("%s not found", file.getName()));
                         }
 
                         @Override
@@ -97,7 +100,7 @@ public class CryptoDirectoryV6ProviderTest {
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
                 return new VaultCredentials("vault");
             }
-        }, new DisabledPasswordStore());
+        });
         final CryptoDirectory provider = new CryptoDirectoryV6Provider(home, vault);
         assertNotNull(provider.toEncrypted(session, null, home));
         final Path f = new Path("/vault/f", EnumSet.of(Path.Type.directory));

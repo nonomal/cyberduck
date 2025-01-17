@@ -1,5 +1,5 @@
 ﻿// 
-// Copyright (c) 2010-2017 Yves Langisch. All rights reserved.
+// Copyright (c) 2010-2022 Yves Langisch. All rights reserved.
 // http://cyberduck.io/
 // 
 // This program is free software; you can redistribute it and/or modify
@@ -22,15 +22,14 @@ using System.Security.Cryptography.X509Certificates;
 using ch.cyberduck.core;
 using ch.cyberduck.core.exception;
 using ch.cyberduck.core.preferences;
+using Ch.Cyberduck.Core.Interactivity;
 using Ch.Cyberduck.Core.Ssl;
-using Ch.Cyberduck.Core.TaskDialog;
 using java.io;
 using java.security;
 using java.security.cert;
 using java.util;
 using org.apache.logging.log4j;
 using X509Certificate = java.security.cert.X509Certificate;
-using static Windows.Win32.UI.WindowsAndMessaging.MESSAGEBOX_RESULT;
 
 namespace Ch.Cyberduck.Core
 {
@@ -38,7 +37,8 @@ namespace Ch.Cyberduck.Core
     {
         private static readonly Logger Log = LogManager.getLogger(typeof(SystemCertificateStore).FullName);
 
-        public X509Certificate choose(CertificateIdentityCallback prompt, string[] keyTypes, Principal[] issuers, Host bookmark)
+        public X509Certificate choose(CertificateIdentityCallback prompt, string[] keyTypes, Principal[] issuers,
+            Host bookmark)
         {
             X509Store store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
             try
@@ -47,7 +47,7 @@ namespace Ch.Cyberduck.Core
                 X509Certificate2Collection found = new X509Certificate2Collection();
                 foreach (Principal issuer in issuers)
                 {
-                    // JBA 20141028, windows is expecting EMAILADDRESS in issuer name, but the rfc1779 emmits it as an OID, which makes it not match
+                    // JBA 20141028, windows is expecting EMAILADDRESS in issuer name, but the rfc1779 emits it as an OID, which makes it not match
                     // this is not the best way to fix the issue, but I can't find anyway to get an X500Principal to not emit EMAILADDRESS as an OID
                     string rfc1779 = issuer.toString()
                         .Replace("EMAILADDRESS=", "E=")
@@ -63,17 +63,19 @@ namespace Ch.Cyberduck.Core
                         Log.debug("Found certificate with DN " + certificate.IssuerName.Name);
                     }
                 }
+
                 if (found.Count > 0)
                 {
                     X509Certificate2Collection selected = X509Certificate2UI.SelectFromCollection(found,
                         LocaleFactory.localizedString("Choose"), string.Format(LocaleFactory.localizedString(
-                             "The server requires a certificate to validate your identity. Select the certificate to authenticate yourself to {0}."),
-                             bookmark.getHostname()), X509SelectionFlag.SingleSelection);
+                                "The server requires a certificate to validate your identity. Select the certificate to authenticate yourself to {0}."),
+                            bookmark.getHostname()), X509SelectionFlag.SingleSelection);
                     foreach (X509Certificate2 c in selected)
                     {
                         return ConvertCertificate(c);
                     }
                 }
+
                 throw new ConnectionCanceledException();
             }
             finally
@@ -84,7 +86,7 @@ namespace Ch.Cyberduck.Core
 
         public bool verify(CertificateTrustCallback prompt, String hostName, List certs)
         {
-            X509Certificate2 serverCert = ConvertCertificate(certs.iterator().next() as X509Certificate);
+            X509Certificate2 serverCert = ConvertCertificate(certs.get(0) as X509Certificate);
             X509Chain chain = new X509Chain();
             chain.ChainPolicy.RevocationMode =
                 PreferencesFactory.get().getBoolean("connection.ssl.x509.revocation.online")
@@ -97,10 +99,9 @@ namespace Ch.Cyberduck.Core
             {
                 chain.ChainPolicy.ExtraStore.Add(ConvertCertificate(certs.get(index) as X509Certificate));
             }
-            chain.Build(serverCert);
 
-            bool isException = CheckForException(hostName, serverCert);
-            if (isException)
+            chain.Build(serverCert);
+            if (CheckForException(hostName, serverCert))
             {
                 // Exceptions always have precedence
                 return true;
@@ -109,7 +110,7 @@ namespace Ch.Cyberduck.Core
             string errorFromChainStatus = GetErrorFromChainStatus(chain, hostName);
             bool certError = null != errorFromChainStatus;
             bool hostnameMismatch = hostName != null &&
-                                    !HostnameVerifier.CheckServerIdentity(certs.iterator().next() as X509Certificate,
+                                    !HostnameVerifier.CheckServerIdentity(certs.get(0) as X509Certificate,
                                         serverCert, hostName);
 
             // check if host name matches
@@ -123,77 +124,48 @@ namespace Ch.Cyberduck.Core
 
             if (null != errorFromChainStatus)
             {
-                // Title: LocaleFactory.localizedString("Certificate Error", "Keychain")
-                // Main Instruction: LocaleFactory.localizedString("Certificate Error", "Keychain")
-                // Content: errorFromChainStatus
-                // Verification Text: LocaleFactory.localizedString("Always Trust", "Keychain")
-                // CommandButtons: { LocaleFactory.localizedString("Continue", "Credentials"), LocaleFactory.localizedString("Disconnect"), LocaleFactory.localizedString("Show Certificate", "Keychain") }
-                // ShowCancelButton: false
-                // Main Icon: Warning
-                // Footer Icon: Information
-
-                var result = TaskDialog.TaskDialog.Create()
-                    .Title(LocaleFactory.localizedString("Certificate Error", "Keychain"))
-                    .Instruction(LocaleFactory.localizedString("Certificate Error", "Keychain"))
-                    .VerificationText(LocaleFactory.localizedString("Always Trust", "Keychain"), false)
-                    .Content(errorFromChainStatus)
-                    .CommandLinks(c =>
-                    {
-                        c(IDCONTINUE, LocaleFactory.localizedString("Continue", "Credentials"), false);
-                        c(IDABORT, LocaleFactory.localizedString("Disconnect"), true);
-                        c(IDHELP, LocaleFactory.localizedString("Show Certificate", "Keychain"), false);
-                    })
-                    .Callback((sender, e) =>
-                    {
-                        if (e is TaskDialogButtonClickedEventArgs buttonClicked)
-                        {
-                            if (buttonClicked.ButtonId == (int)IDHELP)
-                            {
-                                X509Certificate2UI.DisplayCertificate(serverCert);
-                                return true;
-                            }
-                        }
-                        return false;
-                    })
-                    .Show();
-                if (result.Button == IDCONTINUE)
+                // Force use of ThreadLocal, otherwise we can't persist X.certificate.accept
+                using (DialogPromptCertificateTrustCallback.Register(() =>
                 {
-                    if (result.VerificationChecked == true)
+                    if (certError)
                     {
-                        if (certError)
-                        {
-                            //todo can we use the Trusted People and Third Party Certificate Authority Store? Currently X509Chain is the problem.
-                            AddCertificate(serverCert, StoreName.Root);
-                        }
-                        PreferencesFactory.get()
-                            .setProperty(hostName + ".certificate.accept", serverCert.Thumbprint);
+                        AddCertificate(serverCert, StoreName.Root);
                     }
-                    return true;
-                }
-                else
+
+                    PreferencesFactory.get()
+                        .setProperty(hostName + ".certificate.accept", serverCert.Thumbprint);
+                }))
                 {
-                    return false;
+                    try
+                    {
+                        prompt.prompt(errorFromChainStatus, certs);
+                    }
+                    catch (ConnectionCanceledException)
+                    {
+                        return false;
+                    }
                 }
             }
+
             return true;
         }
 
-        public static IList<string> ListAliases()
+        public static IReadOnlyCollection<string> ListAliases()
         {
-            X509Store store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
-            IList<string> certs = new List<string>();
-            try
+            using X509Store store = new(StoreName.My, StoreLocation.CurrentUser);
+            HashSet<string> certs = new();
+            store.Open(OpenFlags.ReadOnly);
+            foreach (X509Certificate2 certificate in store.Certificates)
             {
-                store.Open(OpenFlags.ReadOnly);
-                foreach (X509Certificate2 certificate in store.Certificates)
+                var alias = string.IsNullOrWhiteSpace(certificate.FriendlyName)
+                    ? certificate.GetNameInfo(X509NameType.SimpleName, false)
+                    : certificate.FriendlyName;
+                if (!certs.Add(alias) && Log.isDebugEnabled())
                 {
-                    certs.Add(certificate.GetNameInfo(X509NameType.SimpleName, false));
+                    Log.debug($"Skipping duplicate alias \"{alias}\"");
                 }
             }
-            finally
-            {
-                store.Close();
-            }
+
             return certs;
         }
 
@@ -230,6 +202,7 @@ namespace Ch.Cyberduck.Core
             {
                 return accCert.Equals(cert.Thumbprint);
             }
+
             return false;
         }
 
@@ -246,6 +219,7 @@ namespace Ch.Cyberduck.Core
                     //due to the offline revocation check
                     continue;
                 }
+
                 if ((status.Status & X509ChainStatusFlags.NotTimeValid) == X509ChainStatusFlags.NotTimeValid)
                 {
                     //certificate is expired, CSSM_CERT_STATUS_EXPIRED
@@ -253,8 +227,9 @@ namespace Ch.Cyberduck.Core
                         string.Format(LocaleFactory.localizedString(
                             "The certificate for this server has expired. You might be connecting to a server that is pretending to be {0} which could put your confidential information at risk. Would you like to connect to the server anyway?",
                             "Keychain"), hostName);
-                    return error;
+                    break;
                 }
+
                 if (((status.Status & X509ChainStatusFlags.UntrustedRoot) == X509ChainStatusFlags.UntrustedRoot) ||
                     (status.Status & X509ChainStatusFlags.PartialChain) == X509ChainStatusFlags.PartialChain)
                 {
@@ -263,7 +238,7 @@ namespace Ch.Cyberduck.Core
                         string.Format(LocaleFactory.localizedString(
                             "The certificate for this server was signed by an unknown certifying authority. You might be connecting to a server that is pretending to be {0} which could put your confidential information at risk. Would you like to connect to the server anyway?",
                             "Keychain"), hostName);
-                    return error;
+                    break;
                 }
 
                 //all other errors we map to !CSSM_CERT_STATUS_IS_IN_ANCHORS
@@ -273,6 +248,7 @@ namespace Ch.Cyberduck.Core
                         "The certificate for this server is invalid. You might be connecting to a server that is pretending to be {0} which could put your confidential information at risk. Would you like to connect to the server anyway?",
                         "Keychain"), hostName);
             }
+
             return error;
         }
     }

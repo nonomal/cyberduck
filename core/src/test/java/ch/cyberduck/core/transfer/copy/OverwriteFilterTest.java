@@ -13,7 +13,6 @@ import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.features.UnixPermission;
 import ch.cyberduck.core.shared.DefaultTimestampFeature;
-import ch.cyberduck.core.shared.DefaultUnixPermissionFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.transfer.upload.UploadFilterOptions;
 
@@ -33,7 +32,7 @@ public class OverwriteFilterTest {
         files.put(source, new Path("a", EnumSet.of(Path.Type.directory)));
         AbstractCopyFilter f = new OverwriteFilter(new NullSession(new Host(new TestProtocol())),
                 new NullSession(new Host(new TestProtocol())), files);
-        assertTrue(f.accept(source, null, new TransferStatus()));
+        assertTrue(f.accept(source, null, new TransferStatus(), new DisabledProgressListener()));
     }
 
     @Test
@@ -57,7 +56,7 @@ public class OverwriteFilterTest {
                 return super._getFeature(type);
             }
         }, files);
-        assertTrue(f.accept(source, null, new TransferStatus().exists(true)));
+        assertTrue(f.accept(source, null, new TransferStatus().exists(true), new DisabledProgressListener()));
         final TransferStatus status = f.prepare(source, null, new TransferStatus().exists(true), new DisabledProgressListener());
         assertTrue(status.isExists());
     }
@@ -107,13 +106,13 @@ public class OverwriteFilterTest {
 
                         @Override
                         public void setTimestamp(final Path file, final TransferStatus status) {
-                            assertEquals(time, status.getTimestamp());
+                            assertEquals(time, status.getModified());
                             timestampWrite[0] = true;
                         }
                     };
                 }
                 if(type.equals(UnixPermission.class)) {
-                    return (T) new DefaultUnixPermissionFeature() {
+                    return (T) new UnixPermission() {
                         @Override
                         public void setUnixOwner(final Path file, final String owner) {
                             throw new UnsupportedOperationException();
@@ -130,8 +129,8 @@ public class OverwriteFilterTest {
                         }
 
                         @Override
-                        public void setUnixPermission(final Path file, final Permission permission) {
-                            assertEquals(new Permission(777), permission);
+                        public void setUnixPermission(final Path file, final TransferStatus status) {
+                            assertEquals(new Permission(777), status.getPermission());
                             permissionWrite[0] = true;
                         }
                     };

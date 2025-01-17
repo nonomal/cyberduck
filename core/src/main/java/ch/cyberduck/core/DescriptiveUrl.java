@@ -20,15 +20,14 @@ package ch.cyberduck.core;
 
 import org.apache.commons.lang3.StringUtils;
 
-import java.net.URI;
 import java.text.MessageFormat;
 import java.util.Objects;
 
 public class DescriptiveUrl {
 
-    public static final DescriptiveUrl EMPTY = new DescriptiveUrl(URI.create(StringUtils.EMPTY));
+    public static final DescriptiveUrl EMPTY = new DescriptiveUrl(StringUtils.EMPTY);
 
-    private final URI url;
+    private final String url;
     private final Type type;
     private final String help;
 
@@ -50,15 +49,17 @@ public class DescriptiveUrl {
         encrypted
     }
 
-    public DescriptiveUrl(final URI url) {
-        this(url, Type.http, MessageFormat.format(LocaleFactory.localizedString("{0} URL"), StringUtils.upperCase(url.getScheme())));
+    public DescriptiveUrl(final String url) {
+        this(url, Type.http, MessageFormat.format(LocaleFactory.localizedString("{0} URL"),
+                StringUtils.upperCase(StringUtils.substringBefore(url, "://"))));
     }
 
-    public DescriptiveUrl(final URI url, Type type) {
-        this(url, type, MessageFormat.format(LocaleFactory.localizedString("{0} URL"), StringUtils.upperCase(url.getScheme())));
+    public DescriptiveUrl(final String url, Type type) {
+        this(url, type, MessageFormat.format(LocaleFactory.localizedString("{0} URL"),
+                StringUtils.upperCase(StringUtils.substringBefore(url, "://"))));
     }
 
-    public DescriptiveUrl(final URI url, Type type, final String help) {
+    public DescriptiveUrl(final String url, Type type, final String help) {
         this.url = url;
         this.type = type;
         this.help = help;
@@ -71,9 +72,6 @@ public class DescriptiveUrl {
     }
 
     public String getUrl() {
-        if(null == url) {
-            return null;
-        }
         return url.toString();
     }
 
@@ -83,6 +81,10 @@ public class DescriptiveUrl {
 
     public String getHelp() {
         return help;
+    }
+
+    public String getPreview() {
+        return this.getUrl();
     }
 
     @Override
@@ -104,6 +106,11 @@ public class DescriptiveUrl {
 
     @Override
     public String toString() {
-        return this.getUrl();
+        final StringBuilder sb = new StringBuilder("DescriptiveUrl{");
+        sb.append("url=").append(url);
+        sb.append(", type=").append(type);
+        sb.append(", help='").append(help).append('\'');
+        sb.append('}');
+        return sb.toString();
     }
 }

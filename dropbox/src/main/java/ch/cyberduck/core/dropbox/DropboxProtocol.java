@@ -17,8 +17,12 @@ package ch.cyberduck.core.dropbox;
 
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.LocaleFactory;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class DropboxProtocol extends AbstractProtocol {
 
     @Override
@@ -47,6 +51,11 @@ public class DropboxProtocol extends AbstractProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public boolean isPasswordConfigurable() {
         // Only provide account email
         return false;
@@ -68,7 +77,17 @@ public class DropboxProtocol extends AbstractProtocol {
     }
 
     @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
+    }
+
+    @Override
     public Scheme getScheme() {
         return Scheme.https;
+    }
+
+    @Override
+    public Case getCaseSensitivity() {
+        return Case.insensitive;
     }
 }

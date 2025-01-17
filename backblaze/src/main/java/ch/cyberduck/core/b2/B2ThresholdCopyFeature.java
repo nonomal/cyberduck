@@ -23,11 +23,10 @@ import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import java.util.EnumSet;
+import java.util.Optional;
 
 public class B2ThresholdCopyFeature implements Copy {
-    private static final Logger log = LogManager.getLogger(B2ThresholdCopyFeature.class);
 
     private final B2Session session;
     private final B2VersionIdProvider fileid;
@@ -45,7 +44,7 @@ public class B2ThresholdCopyFeature implements Copy {
 
     @Override
     public Path copy(final Path source, final Path target, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
-        if(new B2ThresholdUploadService(session, fileid, threshold).threshold(status.getLength())) {
+        if(new B2ThresholdUploadService(session, fileid, threshold).threshold(status)) {
             return new B2LargeCopyFeature(session, fileid).copy(source, target, status, callback, listener);
         }
         else {
@@ -54,12 +53,12 @@ public class B2ThresholdCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return new B2CopyFeature(session, fileid).isSupported(source, target);
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        new B2CopyFeature(session, fileid).preflight(source, target);
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return new B2CopyFeature(session, fileid).isRecursive(source, target);
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return new B2CopyFeature(session, fileid).features(source, target);
     }
 }

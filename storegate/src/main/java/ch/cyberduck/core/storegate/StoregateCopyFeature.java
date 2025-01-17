@@ -16,7 +16,6 @@ package ch.cyberduck.core.storegate;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Copy;
@@ -26,6 +25,11 @@ import ch.cyberduck.core.storegate.io.swagger.client.api.FilesApi;
 import ch.cyberduck.core.storegate.io.swagger.client.model.CopyFileRequest;
 import ch.cyberduck.core.storegate.io.swagger.client.model.File;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class StoregateCopyFeature implements Copy {
 
@@ -41,11 +45,11 @@ public class StoregateCopyFeature implements Copy {
     public Path copy(final Path source, final Path target, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
         try {
             final CopyFileRequest copy = new CopyFileRequest()
-                .name(target.getName())
-                .parentID(fileid.getFileId(target.getParent(), new DisabledListProgressListener()))
-                .mode(1); // Overwrite
+                    .name(target.getName())
+                    .parentID(fileid.getFileId(target.getParent()))
+                    .mode(1); // Overwrite
             final File file = new FilesApi(session.getClient()).filesCopy(
-                fileid.getFileId(source, new DisabledListProgressListener()), copy);
+                    fileid.getFileId(source), copy);
             listener.sent(status.getLength());
             fileid.cache(target, file.getId());
             return target.withAttributes(new StoregateAttributesFinderFeature(session, fileid).toAttributes(file));
@@ -56,12 +60,15 @@ public class StoregateCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return true;
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        Copy.super.preflight(source, target);
+        if(target.isPresent()) {
+            validate(session.getCaseSensitivity(), source, target.get());
+        }
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

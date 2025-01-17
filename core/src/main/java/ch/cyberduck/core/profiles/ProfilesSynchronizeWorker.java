@@ -24,19 +24,13 @@ import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.preferences.SupportDirectoryFinderFactory;
 import ch.cyberduck.core.worker.Worker;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import java.util.Collections;
-import java.util.HashSet;
-import java.util.Optional;
 import java.util.Set;
 
 /**
  * Merge local set with latest versions from server
  */
 public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
-    private static final Logger log = LogManager.getLogger(ProfilesSynchronizeWorker.class.getName());
 
     private final ProtocolFactory registry;
     private final Local directory;
@@ -52,7 +46,7 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
      */
     public ProfilesSynchronizeWorker(final ProtocolFactory registry, final ProfilesFinder.Visitor visitor) {
         this(registry, LocalFactory.get(SupportDirectoryFinderFactory.get().find(),
-            PreferencesFactory.get().getProperty("profiles.folder.name")), visitor);
+                PreferencesFactory.get().getProperty("profiles.folder.name")), visitor);
     }
 
     public ProfilesSynchronizeWorker(final ProtocolFactory registry, final Local directory, final ProfilesFinder.Visitor visitor) {
@@ -64,7 +58,7 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
     @Override
     public Set<ProfileDescription> initialize() {
         try {
-            return new LocalProfilesFinder(registry, directory).find();
+            return new LocalProfilesFinder(registry, directory, ProtocolFactory.BUNDLED_PROFILE_PREDICATE).find();
         }
         catch(BackgroundException e) {
             return Collections.emptySet();
@@ -73,55 +67,8 @@ public class ProfilesSynchronizeWorker extends Worker<Set<ProfileDescription>> {
 
     @Override
     public Set<ProfileDescription> run(final Session<?> session) throws BackgroundException {
-        final Set<ProfileDescription> returned = new HashSet<>();
-        // Find all locally installed profiles
-        final Set<ProfileDescription> installed = new LocalProfilesFinder(registry, directory).find();
-        // Find all profiles from repository
-        final Set<ProfileDescription> remote = new RemoteProfilesFinder(registry, session).find();
-        final ProfileMatcher matcher = new ChecksumProfileMatcher(remote);
-        // Iterate over every installed profile and find match in repository
-        installed.forEach(local -> {
-            // Check for matching remote checksum and download profile if this version is not equal to latest
-            final Optional<ProfileDescription> match = matcher.compare(local);
-            if(match.isPresent()) {
-                // Found matching checksum for profile in remote list which is not marked as latest version
-                log.warn(String.format("Override %s with latest profile verison %s", local, match));
-                // Remove previous version
-                local.getProfile().ifPresent(registry::unregister);
-                // Register updated profile by copying temporary file to application support
-                match.get().getFile().ifPresent(value -> {
-                    final Local copy = registry.register(value);
-                    if(null != copy) {
-                        final LocalProfileDescription d = new LocalProfileDescription(registry, copy);
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Add synched profile %s", d));
-                        }
-                        returned.add(d);
-                        visitor.visit(d);
-                    }
-                });
-            }
-            else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add local only profile %s", local));
-                }
-                returned.add(local);
-                visitor.visit(local);
-            }
-        });
-        // Iterate over all fetched profiles and when not installed
-        remote.forEach(description -> {
-            if(description.isLatest()) {
-                // Check if not already added previously when syncing with local list
-                if(!returned.contains(description)) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Add remote profile %s", description));
-                    }
-                    returned.add(description);
-                    visitor.visit(description);
-                }
-            }
-        });
-        return returned;
+        return new ProtocolFactoryProfilesSynchronizer(session).sync(
+                // Match profiles by ETag and MD5 checksum of profile on disk
+                new ChecksumProfileMatcher(), visitor);
     }
 }

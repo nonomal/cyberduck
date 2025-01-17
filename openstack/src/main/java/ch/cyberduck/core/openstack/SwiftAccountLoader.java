@@ -18,7 +18,6 @@ package ch.cyberduck.core.openstack;
 import ch.cyberduck.core.AsciiRandomStringService;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.PasswordCallback;
-import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.shared.OneTimeSchedulerFeature;
 
@@ -29,9 +28,8 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 import ch.iterate.openstack.swift.exception.GenericException;
 import ch.iterate.openstack.swift.model.AccountInfo;
@@ -43,38 +41,33 @@ public class SwiftAccountLoader extends OneTimeSchedulerFeature<Map<Region, Acco
     private final SwiftSession session;
 
     public SwiftAccountLoader(final SwiftSession session) {
-        super(new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory)));
         this.session = session;
     }
 
     @Override
-    protected Map<Region, AccountInfo> operate(final PasswordCallback callback, final Path file) throws BackgroundException {
-        final Map<Region, AccountInfo> accounts = new ConcurrentHashMap<>();
+    protected Map<Region, AccountInfo> operate(final PasswordCallback callback) throws BackgroundException {
+        final Map<Region, AccountInfo> accounts = new HashMap<>();
         for(Region region : session.getClient().getRegions()) {
             try {
                 final AccountInfo info = session.getClient().getAccountInfo(region);
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Signing key is %s", info.getTempUrlKey()));
-                }
+                log.info("Signing key is {}", info.getTempUrlKey());
                 if(StringUtils.isBlank(info.getTempUrlKey())) {
                     // Update account info setting temporary URL key
                     try {
                         final String key = new AsciiRandomStringService().random();
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Set acccount temp URL key to %s", key));
-                        }
+                        log.debug("Set acccount temp URL key to {}", key);
                         session.getClient().updateAccountMetadata(region, Collections.singletonMap("X-Account-Meta-Temp-URL-Key", key));
                         info.setTempUrlKey(key);
                     }
                     catch(GenericException e) {
-                        log.warn(String.format("Ignore failure %s updating account metadata", e));
+                        log.warn("Ignore failure {} updating account metadata", e.getMessage());
                     }
                 }
                 accounts.put(region, info);
             }
             catch(GenericException e) {
                 if(e.getHttpStatusCode() == HttpStatus.SC_SERVICE_UNAVAILABLE) {
-                    log.warn(String.format("Ignore failure %s for region %s", e, region));
+                    log.warn("Ignore failure {} for region {}", e, region);
                     continue;
                 }
                 throw new SwiftExceptionMappingService().map(e);

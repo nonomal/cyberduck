@@ -21,14 +21,18 @@ package ch.cyberduck.core.openstack;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DefaultPathContainerService;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
+import java.text.MessageFormat;
+import java.util.Optional;
 
 import ch.iterate.openstack.swift.exception.GenericException;
 
@@ -54,8 +58,8 @@ public class SwiftDefaultCopyFeature implements Copy {
             // If segmented file, copies manifest (creating a link between new object and original segments)
             // Use with caution.
             session.getClient().copyObject(regionService.lookup(source),
-                containerService.getContainer(source).getName(), containerService.getKey(source),
-                containerService.getContainer(target).getName(), containerService.getKey(target));
+                    containerService.getContainer(source).getName(), containerService.getKey(source),
+                    containerService.getContainer(target).getName(), containerService.getKey(target));
             listener.sent(status.getLength());
             // Copy original file attributes
             return target.withAttributes(source.attributes());
@@ -69,7 +73,14 @@ public class SwiftDefaultCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return !containerService.isContainer(source) && !containerService.isContainer(target);
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(containerService.isContainer(source)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            if(containerService.isContainer(target.get())) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@
     <ApplicationIcon>$(CyberduckDir)cyberduck-application.ico</ApplicationIcon>
     <DefaultItemExcludes>$(DefaultItemExcludes);ch/cyberduck/ui/winforms/commondialog/**</DefaultItemExcludes>
     <ApplicationManifest>ch\cyberduck\properties\app.manifest</ApplicationManifest>
+    <StartupObject>Ch.Cyberduck.Ui.Program</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
@@ -16,26 +17,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="$(CyberduckDir)Acknowledgments.rtf">
-      <Link>$(Filename)$(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="$(CyberduckDir)i18n/src/main/resources/en.lproj/License.txt">
-      <Link>$(Filename)$(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <Content Include="$(TargetBuildDir)ikvm/bin/ikvm-native-win32-*.dll">
       <Link>$(Filename)$(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
-
-    <Content Include="$(CyberduckDir)bookmarks/*.duck">
-      <Link>bookmarks/%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="$(CyberduckDir)profiles/default/*.cyberduckprofile">
-      <Link>profiles/%(Filename)%(Extension)</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    <Content Include="$(TargetBuildDir)sunmscapi.dll;$(TargetBuildDir)jnidispatch.dll;$(TargetBuildDir)msvcr120.dll;$(TargetBuildDir)sunec.dll;$(TargetBuildDir)winsparkle.dll">
+      <Link>$(Filename)$(Extension)</Link>
     </Content>
   </ItemGroup>
 
@@ -48,9 +35,7 @@
     <Reference Include="CustomOpenFileFolderDialog">
       <HintPath>$(TargetBuildDir)CustomOpenFileFolderDialog.dll</HintPath>
     </Reference>
-    <Reference Include="ObjectListView">
-      <HintPath>$(TargetBuildDir)ObjectListView.dll</HintPath>
-    </Reference>
+    <Reference Include="PresentationFramework.Aero" />
     <Reference Include="System.Design" />
     <Reference Include="System.Security" />
     <Reference Include="System.ServiceModel" />
@@ -58,27 +43,18 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" />
     <PackageReference Include="DotNetProjects.Extended.Wpf.Toolkit" />
     <PackageReference Include="ExceptionReporter" />
     <PackageReference Include="Microsoft.Toolkit.Uwp.Notifications" />
-    <PackageReference Include="Microsoft.Windows.CsWin32" />
+    <PackageReference Include="Microsoft.Windows.CsWin32">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.Windows.SDK.Contracts" />
-    <PackageReference Include="ReactiveUI.Fody" />
+    <PackageReference Include="ObjectListView.Official" />
     <PackageReference Include="ReactiveUI.WPF" />
     <PackageReference Include="StructureMap" />
     <PackageReference Include="System.Memory" />
-    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <COMReference Include="Bonjour">
-      <Guid>{18FBED6D-F2B7-4EC8-A4A4-46282E635308}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-    </COMReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -101,6 +77,16 @@
       <LastGenOutput>ResourcesBundle.Designer.cs</LastGenOutput>
       <Generator>PublicResXFileCodeGenerator</Generator>
     </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="App.xaml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="ch\cyberduck\ui\winforms\*Form.cs">
+      <SubType>Form</SubType>
+    </Compile>
   </ItemGroup>
 
 </Project>

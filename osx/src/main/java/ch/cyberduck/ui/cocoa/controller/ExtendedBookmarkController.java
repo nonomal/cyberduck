@@ -28,6 +28,7 @@ import ch.cyberduck.binding.application.NSText;
 import ch.cyberduck.binding.application.NSTextField;
 import ch.cyberduck.binding.application.NSTextFieldCell;
 import ch.cyberduck.binding.application.NSTextView;
+import ch.cyberduck.binding.application.NSWindow;
 import ch.cyberduck.binding.application.SheetCallback;
 import ch.cyberduck.binding.foundation.NSData;
 import ch.cyberduck.binding.foundation.NSNotification;
@@ -86,6 +87,13 @@ public class ExtendedBookmarkController extends DefaultBookmarkController {
     }
 
     @Override
+    public void setWindow(final NSWindow window) {
+        window.setContentMinSize(window.frame().size);
+        window.setContentMaxSize(new NSSize(600, window.frame().size.height.doubleValue()));
+        super.setWindow(window);
+    }
+
+    @Override
     public void windowWillClose(final NSNotification notification) {
         preferences.setProperty("bookmark.toggle.options", toggleOptionsButton.state());
         super.windowWillClose(notification);
@@ -113,7 +121,6 @@ public class ExtendedBookmarkController extends DefaultBookmarkController {
     @Action
     public void commentInputDidChange(final NSNotification sender) {
         bookmark.setComment(commentField.textStorage().string());
-        this.update();
     }
 
     public void setConnectmodePopup(final NSPopUpButton button) {

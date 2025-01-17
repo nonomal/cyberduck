@@ -29,6 +29,7 @@ import ch.cyberduck.core.NullLocal;
 import ch.cyberduck.core.NullSession;
 import ch.cyberduck.core.NullTransferSession;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathCache;
 import ch.cyberduck.core.TestProtocol;
 import ch.cyberduck.core.local.DefaultLocalDirectoryFeature;
@@ -85,7 +86,7 @@ public class SyncTransferTest {
         final TransferPathFilter filter = t.filter(session, null, TransferAction.download, new DisabledProgressListener());
         final Path test = new Path(p, "a", EnumSet.of(Path.Type.file));
         assertFalse(filter.accept(test, new NullLocal(System.getProperty("java.io.tmpdir"), "a"),
-            new TransferStatus().exists(true)));
+                new TransferStatus().exists(true), new DisabledProgressListener()));
     }
 
     @Test
@@ -111,14 +112,14 @@ public class SyncTransferTest {
                     };
                 }
             },
-            new TransferStatus().exists(true)));
+                new TransferStatus().exists(true), new DisabledProgressListener()));
     }
 
     @Test
     public void testFilterMirror() throws Exception {
         final Path p = new Path("t", EnumSet.of(Path.Type.directory));
-        final Path a = new Path(p, "a", EnumSet.of(Path.Type.file));
-        final Path b = new Path(p, "b", EnumSet.of(Path.Type.file));
+        final Path a = new Path(p, "a", EnumSet.of(Path.Type.file)).withAttributes(new PathAttributes().withSize(2L));
+        final Path b = new Path(p, "b", EnumSet.of(Path.Type.file)).withAttributes(new PathAttributes().withSize(1L));
         final PathCache cache = new PathCache(1);
         cache.put(p, new AttributedList<>(Arrays.asList(a, b)));
         SyncTransfer t = new SyncTransfer(new Host(new TestProtocol()), new TransferItem(p, new NullLocal(System.getProperty("java.io.tmpdir"), "t")));
@@ -140,7 +141,7 @@ public class SyncTransferTest {
                     }
                 };
             }
-        }, new TransferStatus().exists(true)));
+        }, new TransferStatus().exists(true), new DisabledProgressListener()));
         assertTrue(filter.accept(b, new NullLocal(System.getProperty("java.io.tmpdir"), "b") {
             @Override
             public boolean exists() {
@@ -156,7 +157,7 @@ public class SyncTransferTest {
                     }
                 };
             }
-        }, new TransferStatus().exists(true)));
+        }, new TransferStatus().exists(true), new DisabledProgressListener()));
         assertEquals(Comparison.local, t.compare(new TransferItem(a, new NullLocal(System.getProperty("java.io.tmpdir"), "a"))));
         assertEquals(Comparison.remote, t.compare(new TransferItem(b, new NullLocal(System.getProperty("java.io.tmpdir"), "b"))));
     }
@@ -224,9 +225,9 @@ public class SyncTransferTest {
                 return true;
             }
         };
-        assertFalse(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true)));
-        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true)));
-        assertTrue(t.filter(session, null, TransferAction.mirror, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true)));
+        assertFalse(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertTrue(t.filter(session, null, TransferAction.mirror, new DisabledProgressListener()).accept(root, local, new TransferStatus().exists(true), new DisabledProgressListener()));
     }
 
     @Test
@@ -262,12 +263,12 @@ public class SyncTransferTest {
                 return false;
             }
         };
-        assertTrue(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true)));
-        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true)));
-        assertTrue(t.filter(session, null, TransferAction.mirror, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true)));
-        assertTrue(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(a, local, new TransferStatus().exists(true)));
+        assertTrue(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertTrue(t.filter(session, null, TransferAction.mirror, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertTrue(t.filter(session, null, TransferAction.download, new DisabledProgressListener()).accept(a, local, new TransferStatus().exists(true), new DisabledProgressListener()));
         // Because root is directory
-        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true)));
-        assertFalse(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(a, local, new TransferStatus().exists(true)));
+        assertTrue(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(root, directory, new TransferStatus().exists(true), new DisabledProgressListener()));
+        assertFalse(t.filter(session, null, TransferAction.upload, new DisabledProgressListener()).accept(a, local, new TransferStatus().exists(true), new DisabledProgressListener()));
     }
 }

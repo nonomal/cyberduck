@@ -38,7 +38,6 @@ import ch.cyberduck.core.transfer.TransferOptions;
 import ch.cyberduck.core.transfer.TransferPrompt;
 import ch.cyberduck.core.transfer.TransferSpeedometer;
 import ch.cyberduck.core.transfer.UploadTransfer;
-import ch.cyberduck.core.transfer.upload.AbstractUploadFilter;
 import ch.cyberduck.core.transfer.upload.UploadFilterOptions;
 import ch.cyberduck.core.worker.SingleTransferWorker;
 import ch.cyberduck.core.worker.Worker;
@@ -73,29 +72,22 @@ public class EditSaveWorker extends Worker<Transfer> {
                                          final TransferPrompt prompt, final ListProgressListener listener) {
                 return TransferAction.overwrite;
             }
-
-            @Override
-            public AbstractUploadFilter filter(final Session<?> session, final Session<?> destination, final TransferAction action, final ProgressListener listener) {
-                return super.filter(session, destination, action, listener).withOptions(new UploadFilterOptions(host)
-                    .withTemporary(PreferencesFactory.get().getBoolean("queue.upload.file.temporary"))
-                    .withPermission(PreferencesFactory.get().getBoolean("editor.upload.permissions.change")));
-            }
-        };
+        }.withOptions(new UploadFilterOptions(bookmark)
+                .withVersioning(PreferencesFactory.get().getBoolean("editor.upload.file.versioning"))
+                .withPermission(PreferencesFactory.get().getBoolean("editor.upload.permissions.change")));
         this.listener = listener;
     }
 
     @Override
     public Transfer run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run upload action for editor %s", editor));
-        }
+        log.debug("Run upload action for editor {}", editor);
         final SingleTransferWorker worker
-            = new SingleTransferWorker(session, session, upload, new TransferOptions(),
+                = new SingleTransferWorker(session, session, upload, new TransferOptions(),
                 new TransferSpeedometer(upload), new DisabledTransferPrompt(), callback,
-            listener, new DisabledStreamListener(), new DisabledLoginCallback(), notification);
+                listener, new DisabledStreamListener(), new DisabledLoginCallback(), notification);
         worker.run(session);
         if(!upload.isComplete()) {
-            log.warn(String.format("File size changed for %s", file));
+            log.warn("File size changed for {}", file);
         }
         else {
             // Update known remote file size
@@ -121,22 +113,28 @@ public class EditSaveWorker extends Worker<Transfer> {
     }
 
     @Override
-    public boolean equals(Object o) {
+    public boolean equals(final Object o) {
         if(this == o) {
             return true;
         }
         if(o == null || getClass() != o.getClass()) {
             return false;
         }
-        EditSaveWorker that = (EditSaveWorker) o;
-        if(!Objects.equals(editor, that.editor)) {
-            return false;
-        }
-        return true;
+        final EditSaveWorker that = (EditSaveWorker) o;
+        return Objects.equals(editor, that.editor) && Objects.equals(file, that.file);
     }
 
     @Override
     public int hashCode() {
-        return editor != null ? editor.hashCode() : 0;
+        return Objects.hash(editor, file);
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("EditSaveWorker{");
+        sb.append("editor=").append(editor);
+        sb.append(", file=").append(file);
+        sb.append('}');
+        return sb.toString();
     }
 }

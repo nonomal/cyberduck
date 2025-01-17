@@ -3,7 +3,7 @@ package ch.cyberduck.core;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.threading.CancelCallback;
 
 import org.junit.Test;
@@ -22,13 +22,13 @@ public class KeychainLoginServiceTest {
         host.setDefaultPath("/dav/basic");
         final Session session = new NullSession(host) {
             @Override
-            public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+            public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
                 throw new LoginCanceledException();
             }
         };
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
         LoginService l = new KeychainLoginService(new DisabledPasswordStore());
-        l.authenticate(Proxy.DIRECT, session, new ProgressListener() {
+        l.authenticate(new DisabledProxyFinder(), session, new ProgressListener() {
             int i = 0;
 
             @Override
@@ -51,7 +51,7 @@ public class KeychainLoginServiceTest {
     @Test(expected = LoginCanceledException.class)
     public void testCancel() throws Exception {
         LoginService l = new KeychainLoginService(new DisabledPasswordStore());
-        l.validate(new Host(new TestProtocol(), "h"), "", new DisabledLoginCallback(), new LoginOptions());
+        l.validate(new Host(new TestProtocol(), "h"), new DisabledLoginCallback(), new LoginOptions());
     }
 
     @Test
@@ -68,7 +68,7 @@ public class KeychainLoginServiceTest {
         final Credentials credentials = new Credentials();
         credentials.setUsername("u");
         final Host host = new Host(new TestProtocol(), "test.cyberduck.ch", credentials);
-        l.validate(host, "m", new DisabledLoginCallback(), new LoginOptions(host.getProtocol()));
+        l.validate(host, new DisabledLoginCallback(), new LoginOptions(host.getProtocol()));
         assertTrue(keychain.get());
         assertFalse(host.getCredentials().isSaved());
         assertEquals("P", host.getCredentials().getPassword());

@@ -21,6 +21,7 @@ package ch.cyberduck.core.s3;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
@@ -57,38 +58,47 @@ public class S3ThresholdUploadService implements Upload<StorageObject> {
 
     @Override
     public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return writer.append(file, status);
+        if(this.threshold(status)) {
+            return new S3MultipartUploadService(session, writer, acl).append(file, status);
+        }
+        return new Write.Append(false).withStatus(status);
     }
 
     @Override
-    public StorageObject upload(final Path file, Local local, final BandwidthThrottle throttle, final StreamListener listener,
+    public StorageObject upload(final Path file, Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener,
                                 final TransferStatus status, final ConnectionCallback prompt) throws BackgroundException {
-        if(status.getLength() >= threshold) {
-            if(!new HostPreferences(session.getHost()).getBoolean("s3.upload.multipart")) {
-                log.warn("Multipart upload is disabled with property s3.upload.multipart");
-                // Disabled by user
-                if(status.getLength() < new HostPreferences(session.getHost()).getLong("s3.upload.multipart.required.threshold")) {
-                    // Use single upload service
-                    return new S3SingleUploadService(session, writer).upload(file, local, throttle, listener, status, prompt);
-                }
-            }
+        if(this.threshold(status)) {
             try {
-                return new S3MultipartUploadService(session, writer, acl).upload(file, local, throttle, listener, status, prompt);
+                return new S3MultipartUploadService(session, writer, acl).upload(file, local, throttle, progress, streamListener, status, prompt);
             }
             catch(NotfoundException | InteroperabilityException e) {
-                log.warn(String.format("Failure %s using multipart upload. Fallback to single upload.", e));
+                log.warn("Failure {} using multipart upload. Fallback to single upload.", e.getMessage());
                 status.append(false);
                 try {
-                    return new S3SingleUploadService(session, writer).upload(file, local, throttle, listener, status, prompt);
+                    return new S3SingleUploadService(session, writer).upload(file, local, throttle, progress, streamListener, status, prompt);
                 }
                 catch(BackgroundException f) {
-                    log.warn(String.format("Failure %s using single upload. Throw original multipart failure %s", e, e));
+                    log.warn("Failure {} using single upload. Throw original multipart failure {}", e, e);
                     throw e;
                 }
             }
         }
         // Use single upload service
-        return new S3SingleUploadService(session, writer).upload(file, local, throttle, listener, status, prompt);
+        return new S3SingleUploadService(session, writer).upload(file, local, throttle, progress, streamListener, status, prompt);
+    }
+
+    protected boolean threshold(final TransferStatus status) {
+        if(status.getLength() >= threshold) {
+            if(!new HostPreferences(session.getHost()).getBoolean("s3.upload.multipart")) {
+                log.warn("Multipart upload is disabled with property s3.upload.multipart");
+                // Disabled by user
+                if(status.getLength() < new HostPreferences(session.getHost()).getLong("s3.upload.multipart.required.threshold")) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return false;
     }
 
     @Override

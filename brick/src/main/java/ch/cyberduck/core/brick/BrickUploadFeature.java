@@ -19,6 +19,7 @@ import ch.cyberduck.core.BytecountStreamListener;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.brick.io.swagger.client.ApiException;
 import ch.cyberduck.core.brick.io.swagger.client.api.FileActionsApi;
 import ch.cyberduck.core.brick.io.swagger.client.api.FilesApi;
@@ -26,6 +27,7 @@ import ch.cyberduck.core.brick.io.swagger.client.model.BeginUploadPathBody;
 import ch.cyberduck.core.brick.io.swagger.client.model.FileEntity;
 import ch.cyberduck.core.brick.io.swagger.client.model.FileUploadPartEntity;
 import ch.cyberduck.core.brick.io.swagger.client.model.FilesPathBody;
+import ch.cyberduck.core.concurrency.Interruptibles;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Write;
@@ -38,7 +40,6 @@ import ch.cyberduck.core.threading.ThreadPool;
 import ch.cyberduck.core.threading.ThreadPoolFactory;
 import ch.cyberduck.core.transfer.SegmentRetryCallable;
 import ch.cyberduck.core.transfer.TransferStatus;
-import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -49,12 +50,8 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.Uninterruptibles;
 
 public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDigest> {
     private static final Logger log = LogManager.getLogger(BrickUploadFeature.class);
@@ -83,14 +80,13 @@ public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDig
     }
 
     @Override
-    public FileEntity upload(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
+    public FileEntity upload(final Path file, final Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener,
                              final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final ThreadPool pool = ThreadPoolFactory.get("multipart", concurrency);
         try {
             // Full size of file
             final long size = status.getLength() + status.getOffset();
             final List<Future<TransferStatus>> parts = new ArrayList<>();
-            final List<TransferStatus> checksums = new ArrayList<>();
             long offset = 0;
             long remaining = status.getLength();
             String ref = null;
@@ -103,22 +99,13 @@ public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDig
                 else {
                     length = remaining;
                 }
-                parts.add(this.submit(pool, file, local, throttle, listener, status,
-                    uploadPartEntity.getUploadUri(), partNumber, offset, length, callback));
+                parts.add(this.submit(pool, file, local, throttle, streamListener, status,
+                        uploadPartEntity.getUploadUri(), partNumber, offset, length, callback));
                 remaining -= length;
                 offset += length;
                 ref = uploadPartEntity.getRef();
             }
-            for(Future<TransferStatus> f : parts) {
-                try {
-                    checksums.add(Uninterruptibles.getUninterruptibly(f));
-                }
-                catch(ExecutionException e) {
-                    log.warn(String.format("Part upload failed with execution failure %s", e.getMessage()));
-                    Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
-                    throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
-                }
-            }
+            final List<TransferStatus> checksums = Interruptibles.awaitAll(parts);
             final FileEntity entity = this.completeUpload(file, ref, status, checksums);
             // Mark parent status as complete
             status.withResponse(new BrickAttributesFinderFeature(session).toAttributes(entity)).setComplete();
@@ -138,7 +125,7 @@ public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDig
         final List<FileUploadPartEntity> uploadPartEntities;
         try {
             uploadPartEntities = new FileActionsApi(new BrickApiClient(session))
-                .beginUpload(StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)), new BeginUploadPathBody().ref(ref).part(partNumber));
+                    .beginUpload(StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)), new BeginUploadPathBody().ref(ref).part(partNumber));
         }
         catch(ApiException e) {
             throw new BrickExceptionMappingService().map("Upload {0} failed", e, file);
@@ -153,11 +140,11 @@ public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDig
     protected FileEntity completeUpload(final Path file, final String ref, final TransferStatus status, final List<TransferStatus> checksums) throws BackgroundException {
         try {
             return new FilesApi(new BrickApiClient(session)).postFilesPath(new FilesPathBody()
-                .etagsEtag(checksums.stream().map(s -> s.getChecksum().hash).collect(Collectors.toList()))
-                .etagsPart(checksums.stream().map(TransferStatus::getPart).collect(Collectors.toList()))
-                .providedMtime(null != status.getTimestamp() ? new DateTime(status.getTimestamp()) : null)
-                .ref(ref)
-                .action("end"), StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)));
+                    .etagsEtag(checksums.stream().map(s -> s.getChecksum().hash).collect(Collectors.toList()))
+                    .etagsPart(checksums.stream().map(TransferStatus::getPart).collect(Collectors.toList()))
+                    .providedMtime(null != status.getModified() ? new DateTime(status.getModified()) : null)
+                    .ref(ref)
+                    .action("end"), StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)));
         }
         catch(ApiException e) {
             throw new BrickExceptionMappingService().map("Upload {0} failed", e, file);
@@ -168,27 +155,23 @@ public class BrickUploadFeature extends HttpUploadFeature<FileEntity, MessageDig
                                           final BandwidthThrottle throttle, final StreamListener listener,
                                           final TransferStatus overall, final String url, final Integer partNumber,
                                           final long offset, final long length, final ConnectionCallback callback) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Submit part %d of %s to queue with offset %d and length %d", partNumber, file, offset, length));
-        }
+        log.info("Submit part {} of {} to queue with offset {} and length {}", partNumber, file, offset, length);
         final BytecountStreamListener counter = new BytecountStreamListener(listener);
         return pool.execute(new SegmentRetryCallable<>(session.getHost(), new BackgroundExceptionCallable<TransferStatus>() {
             @Override
             public TransferStatus call() throws BackgroundException {
                 overall.validate();
                 final TransferStatus status = new TransferStatus()
-                    .segment(true)
-                    .withLength(length)
-                    .withOffset(offset);
+                        .segment(true)
+                        .withLength(length)
+                        .withOffset(offset);
                 status.setChecksum(writer.checksum(file, status).compute(local.getInputStream(), status));
                 status.setUrl(url);
                 status.setPart(partNumber);
                 status.setHeader(overall.getHeader());
                 BrickUploadFeature.super.upload(
-                    file, local, throttle, listener, status, overall, status, callback);
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Received response for part number %d", partNumber));
-                }
+                        file, local, throttle, listener, status, overall, status, callback);
+                log.info("Received response for part number {}", partNumber);
                 return status;
             }
         }, overall, counter));

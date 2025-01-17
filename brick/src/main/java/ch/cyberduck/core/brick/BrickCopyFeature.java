@@ -32,6 +32,10 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy {
     private static final Logger log = LogManager.getLogger(BrickCopyFeature.class);
@@ -47,14 +51,12 @@ public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy 
         try {
             final BrickApiClient client = new BrickApiClient(session);
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Delete file %s to be replaced with %s", target, file));
-                }
+                log.warn("Delete file {} to be replaced with {}", target, file);
                 new BrickDeleteFeature(session).delete(Collections.singletonList(target), callback, new Delete.DisabledCallback());
             }
             final FileActionEntity entity = new FileActionsApi(client)
-                .copy(new CopyPathBody().destination(StringUtils.removeStart(target.getAbsolute(), String.valueOf(Path.DELIMITER))),
-                    StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)));
+                    .copy(new CopyPathBody().destination(StringUtils.removeStart(target.getAbsolute(), String.valueOf(Path.DELIMITER))),
+                            StringUtils.removeStart(file.getAbsolute(), String.valueOf(Path.DELIMITER)));
             listener.sent(status.getLength());
             if(entity.getFileMigrationId() != null) {
                 this.poll(client, entity);
@@ -67,7 +69,15 @@ public class BrickCopyFeature extends BrickFileMigrationFeature implements Copy 
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
+    }
+
+    @Override
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        Copy.super.preflight(source, target);
+        if(target.isPresent()) {
+            validate(session.getCaseSensitivity(), source, target.get());
+        }
     }
 }

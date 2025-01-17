@@ -16,7 +16,6 @@ package ch.cyberduck.core.sds;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Version;
@@ -45,6 +44,7 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.joda.time.DateTime;
@@ -91,18 +91,30 @@ public class SDSUploadService {
         try {
             final CreateFileUploadRequest body = new CreateFileUploadRequest()
                     .size(TransferStatus.UNKNOWN_LENGTH == status.getLength() ? null : status.getLength())
-                    .parentId(Long.parseLong(nodeid.getVersionId(file.getParent(), new DisabledListProgressListener())))
+                    .parentId(Long.parseLong(nodeid.getVersionId(file.getParent())))
                     .name(file.getName())
                     .directS3Upload(null);
-            if(status.getTimestamp() != null) {
+            if(status.getModified() != null) {
                 final SoftwareVersionData version = session.softwareVersion();
                 final Matcher matcher = Pattern.compile(SDSSession.VERSION_REGEX).matcher(version.getRestApiVersion());
                 if(matcher.matches()) {
                     if(new Version(matcher.group(1)).compareTo(new Version("4.22")) >= 0) {
-                        body.timestampModification(new DateTime(status.getTimestamp()));
+                        log.debug("Set modification timestamp to {} for {}", status.getModified(), file);
+                        body.timestampModification(new DateTime(status.getModified()));
                     }
                 }
             }
+            if(status.getCreated() != null) {
+                final SoftwareVersionData version = session.softwareVersion();
+                final Matcher matcher = Pattern.compile(SDSSession.VERSION_REGEX).matcher(version.getRestApiVersion());
+                if(matcher.matches()) {
+                    if(new Version(matcher.group(1)).compareTo(new Version("4.22")) >= 0) {
+                        log.debug("Set creation timestamp to {} for {}", status.getCreated(), file);
+                        body.timestampCreation(new DateTime(status.getCreated()));
+                    }
+                }
+            }
+            log.debug("Start file upload for {} with {}", file, body);
             return new NodesApi(session.getClient()).createFileUploadChannel(body, StringUtils.EMPTY);
         }
         catch(ApiException e) {
@@ -124,6 +136,7 @@ public class SDSUploadService {
                     .keepShareLinks(new HostPreferences(session.getHost()).getBoolean("sds.upload.sharelinks.keep"))
                     .resolutionStrategy(CompleteUploadRequest.ResolutionStrategyEnum.OVERWRITE);
             if(status.getFilekey() != null) {
+                log.debug("Set file key to {} for {}", status.getFilekey(), file);
                 final ObjectReader reader = session.getClient().getJSON().getContext(null).readerFor(FileKey.class);
                 final FileKey fileKey = reader.readValue(status.getFilekey().array());
                 final EncryptedFileKey encryptFileKey = Crypto.encryptFileKey(
@@ -132,7 +145,8 @@ public class SDSUploadService {
                 );
                 body.setFileKey(TripleCryptConverter.toSwaggerFileKey(encryptFileKey));
             }
-            final Node upload = new UploadsApi(session.getClient()).completeFileUploadByToken(body, uploadToken, StringUtils.EMPTY);
+            log.debug("Complete file upload for {} with token {}", file, uploadToken);
+            final Node upload = new UploadsApi(session.getClient()).completeFileUploadByToken(uploadToken, body, StringUtils.EMPTY);
             if(!upload.isIsEncrypted()) {
                 final Checksum checksum = status.getChecksum();
                 if(Checksum.NONE != checksum) {
@@ -169,7 +183,7 @@ public class SDSUploadService {
      * @param uploadToken Upload token
      */
     public void cancel(final Path file, final String uploadToken) throws BackgroundException {
-        log.warn(String.format("Cancel failed upload %s for %s", uploadToken, file));
+        log.warn("Cancel failed upload {} for {}", uploadToken, file);
         try {
             new UploadsApi(session.getClient()).cancelFileUploadByToken(uploadToken);
         }
@@ -188,6 +202,7 @@ public class SDSUploadService {
      * @throws BackgroundException Error status received
      */
     public S3FileUploadStatus await(final Path file, final TransferStatus status, final String uploadId) throws BackgroundException {
+        log.debug("Await file upload for {} with upload ID {}", file, uploadId);
         final CountDownLatch signal = new CountDownLatch(1);
         final AtomicReference<S3FileUploadStatus> response = new AtomicReference<>();
         final AtomicReference<BackgroundException> failure = new AtomicReference<>();
@@ -198,13 +213,11 @@ public class SDSUploadService {
                 failure.set(new BackgroundException(e));
                 signal.countDown();
             }
-        });
+        }, "uploadstatus");
         final AtomicLong polls = new AtomicLong();
         final ScheduledFuture<?> f = polling.repeat(() -> {
                     try {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Query upload status for %s (%d)", uploadId, polls.incrementAndGet()));
-                        }
+                        log.debug("Query upload status for {} ({})", uploadId, polls.incrementAndGet());
                         final S3FileUploadStatus uploadStatus = new NodesApi(session.getClient())
                                 .requestUploadStatusFiles(uploadId, StringUtils.EMPTY, null);
                         response.set(uploadStatus);
@@ -217,12 +230,13 @@ public class SDSUploadService {
                                 signal.countDown();
                                 break;
                             case "error":
-                                log.warn(String.format("Error polling for upload status of %s (%d)", file, polls.incrementAndGet()));
+                                log.warn("Error polling for upload status of {} ({})", file, polls.incrementAndGet());
                                 if(null == uploadStatus.getErrorDetails()) {
-                                    log.warn(String.format("Missing error details for upload status %s", uploadStatus));
+                                    log.warn("Missing error details for upload status {}", uploadStatus);
                                     failure.set(new InteroperabilityException());
                                 }
                                 else {
+                                    log.debug("Error in upload status {}", uploadStatus);
                                     failure.set(new InteroperabilityException(uploadStatus.getErrorDetails().getMessage()));
                                 }
                                 signal.countDown();
@@ -250,22 +264,20 @@ public class SDSUploadService {
                     Uninterruptibles.getUninterruptibly(f);
                 }
                 if(System.currentTimeMillis() - start > timeout) {
-                    log.error(String.format("Cancel polling for upload status of %s after %dms (%d)",
-                            file, System.currentTimeMillis() - start, polls.get()));
+                    log.error("Cancel polling for upload status of {} after {}ms ({})", file, System.currentTimeMillis() - start, polls.get());
                     failure.set(new TransferCanceledException(new ConnectionTimeoutException(file.getAbsolute())));
                     signal.countDown();
                 }
             }
             catch(ExecutionException e) {
-                Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
+                for(Throwable cause : ExceptionUtils.getThrowableList(e)) {
+                    Throwables.throwIfInstanceOf(cause, BackgroundException.class);
+                }
                 throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
             }
         }
-        polling.shutdown();
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Polling completed for %s with %d polls in %dms ",
-                    file, polls.get(), System.currentTimeMillis() - start));
-        }
+        polling.shutdown(true);
+        log.debug("Polling completed for {} with {} polls in {}ms ", file, polls.get(), System.currentTimeMillis() - start);
         if(null != failure.get()) {
             throw failure.get();
         }

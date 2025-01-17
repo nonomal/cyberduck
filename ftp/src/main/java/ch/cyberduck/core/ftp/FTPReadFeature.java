@@ -18,7 +18,6 @@ package ch.cyberduck.core.ftp;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Read;
@@ -32,15 +31,25 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.EnumSet;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class FTPReadFeature implements Read {
     private static final Logger log = LogManager.getLogger(FTPReadFeature.class);
 
     private final FTPSession session;
+    /**
+     * Server process supports RESTart in STREAM mode
+     */
+    private final EnumSet<Flags> flags = EnumSet.noneOf(Flags.class);
 
     public FTPReadFeature(final FTPSession session) {
         this.session = session;
+    }
+
+    public void configure(final EnumSet<Flags> flags) {
+        this.flags.clear();
+        this.flags.addAll(flags);
     }
 
     @Override
@@ -62,7 +71,7 @@ public class FTPReadFeature implements Read {
                         throw new FTPExceptionMappingService().map(e);
                     }
                 }
-            }, new DisabledProgressListener());
+            });
             return new ReadReplyInputStream(in, status);
         }
         catch(IOException e) {
@@ -71,14 +80,8 @@ public class FTPReadFeature implements Read {
     }
 
     @Override
-    public boolean offset(final Path file) throws BackgroundException {
-        // Where a server process supports RESTart in STREAM mode
-        try {
-            return session.getClient().hasFeature("REST", "STREAM");
-        }
-        catch(IOException e) {
-            throw new FTPExceptionMappingService().map("Download {0} failed", e, file);
-        }
+    public EnumSet<Flags> features(final Path file) {
+        return flags;
     }
 
     private final class ReadReplyInputStream extends ProxyInputStream {
@@ -94,7 +97,7 @@ public class FTPReadFeature implements Read {
         @Override
         public void close() throws IOException {
             if(close.get()) {
-                log.warn(String.format("Skip double close of stream %s", this));
+                log.warn("Skip double close of stream {}", this);
                 return;
             }
             try {
@@ -106,13 +109,13 @@ public class FTPReadFeature implements Read {
                         final String text = session.getClient().getReplyString();
                         if(status.isSegment()) {
                             // Ignore 451 and 426 response because stream was prematurely closed
-                            log.warn(String.format("Ignore unexpected reply %s when completing file segment %s", text, status));
+                            log.warn("Ignore unexpected reply {} when completing file segment {}", text, status);
                         }
                         else if(!status.isComplete()) {
-                            log.warn(String.format("Ignore unexpected reply %s with incomplete transfer status %s", text, status));
+                            log.warn("Ignore unexpected reply {} with incomplete transfer status {}", text, status);
                         }
                         else {
-                            log.warn(String.format("Unexpected reply %s when completing file download with status %s", text, status));
+                            log.warn("Unexpected reply {} when completing file download with status {}", text, status);
                             throw new FTPException(session.getClient().getReplyCode(), text);
                         }
                     }

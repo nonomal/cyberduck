@@ -16,7 +16,7 @@ package ch.cyberduck.core.eue;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.eue.io.swagger.client.ApiException;
 import ch.cyberduck.core.eue.io.swagger.client.api.CopyChildrenApi;
@@ -30,6 +30,7 @@ import ch.cyberduck.core.eue.io.swagger.client.model.ResourceUpdateModel;
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceUpdateModelUpdate;
 import ch.cyberduck.core.eue.io.swagger.client.model.Uifs;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.io.StreamListener;
@@ -40,7 +41,12 @@ import org.apache.http.HttpStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class EueCopyFeature implements Copy {
     private static final Logger log = LogManager.getLogger(EueCopyFeature.class);
@@ -58,14 +64,11 @@ public class EueCopyFeature implements Copy {
         try {
             final EueApiClient client = new EueApiClient(session);
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Trash file %s to be replaced with %s", target, file));
-                }
+                log.warn("Trash file {} to be replaced with {}", target, file);
                 new EueTrashFeature(session, fileid).delete(Collections.singletonMap(target, status), callback, new Delete.DisabledCallback());
             }
-            final String resourceId = fileid.getFileId(file, new DisabledListProgressListener());
-            final String parentResourceId = fileid.getFileId(target.getParent(), new DisabledListProgressListener());
-            String targetResourceId = null;
+            final String resourceId = fileid.getFileId(file);
+            final String parentResourceId = fileid.getFileId(target.getParent());
             final ResourceCopyResponseEntries resourceCopyResponseEntries;
             switch(parentResourceId) {
                 case EueResourceIdProvider.ROOT:
@@ -91,7 +94,7 @@ public class EueCopyFeature implements Copy {
                             fileid.cache(target, EueResourceIdProvider.getResourceIdFromResourceUri(resourceCopyResponseEntry.getHeaders().getLocation()));
                             break;
                         default:
-                            log.warn(String.format("Failure %s copying file %s", resourceCopyResponseEntries, file));
+                            log.warn("Failure {} copying file {}", resourceCopyResponseEntries, file);
                             throw new EueExceptionMappingService().map(new ApiException(resourceCopyResponseEntry.getReason(),
                                     null, resourceCopyResponseEntry.getStatusCode(), client.getResponseHeaders()));
                     }
@@ -106,7 +109,7 @@ public class EueCopyFeature implements Copy {
                 uifs.setName(target.getName());
                 resourceUpdateModelUpdate.setUifs(uifs);
                 resourceUpdateModel.setUpdate(resourceUpdateModelUpdate);
-                final ResourceMoveResponseEntries resourceMoveResponseEntries = new UpdateResourceApi(client).resourceResourceIdPatch(fileid.getFileId(target, new DisabledListProgressListener()),
+                final ResourceMoveResponseEntries resourceMoveResponseEntries = new UpdateResourceApi(client).resourceResourceIdPatch(fileid.getFileId(target),
                         resourceUpdateModel, null, null, null);
                 if(null == resourceMoveResponseEntries) {
                     // Move of single file will return 200 status code with empty response body
@@ -117,14 +120,14 @@ public class EueCopyFeature implements Copy {
                             case HttpStatus.SC_CREATED:
                                 break;
                             default:
-                                log.warn(String.format("Failure %s renaming file %s", resourceMoveResponseEntry, file));
+                                log.warn("Failure {} renaming file {}", resourceMoveResponseEntry, file);
                                 throw new EueExceptionMappingService().map(new ApiException(resourceMoveResponseEntry.getReason(),
                                         null, resourceMoveResponseEntry.getStatusCode(), client.getResponseHeaders()));
                         }
                     }
                 }
             }
-            return target.withAttributes(new EueAttributesFinderFeature(session, fileid).find(target, new DisabledListProgressListener()));
+            return target;
         }
         catch(ApiException e) {
             throw new EueExceptionMappingService().map("Cannot copy {0}", e, file);
@@ -132,12 +135,18 @@ public class EueCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return new EueTouchFeature(session, fileid).isSupported(target.getParent(), target.getName());
+    public void preflight(final Path source, final Optional<Path> optional) throws BackgroundException {
+        if(optional.isPresent()) {
+            final Path target = optional.get();
+            if(!EueTouchFeature.validate(target.getName())) {
+                throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), target.getName()));
+            }
+            validate(session.getCaseSensitivity(), source, target);
+        }
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

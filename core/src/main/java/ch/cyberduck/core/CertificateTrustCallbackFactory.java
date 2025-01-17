@@ -31,7 +31,7 @@ public class CertificateTrustCallbackFactory extends Factory<CertificateTrustCal
 
     private Constructor<? extends CertificateTrustCallback> constructor;
 
-    protected CertificateTrustCallbackFactory() {
+    private CertificateTrustCallbackFactory() {
         super("factory.certificatetrustcallback.class");
     }
 
@@ -41,23 +41,28 @@ public class CertificateTrustCallbackFactory extends Factory<CertificateTrustCal
                 constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, controller.getClass());
             }
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", controller.getClass()));
+                log.warn("No matching constructor for parameter {}", controller.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(controller);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledCertificateTrustCallback();
         }
     }
+
+    private static CertificateTrustCallbackFactory singleton;
 
     /**
      * @param c Window controller
      * @return Login controller instance for the current platform.
      */
-    public static CertificateTrustCallback get(final Controller c) {
-        return new CertificateTrustCallbackFactory().create(c);
+    public static synchronized CertificateTrustCallback get(final Controller c) {
+        if(null == singleton) {
+            singleton = new CertificateTrustCallbackFactory();
+        }
+        return singleton.create(c);
     }
 }

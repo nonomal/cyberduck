@@ -65,8 +65,8 @@ public class FTPDefaultListService implements ListService {
                         throw new FTPExceptionMappingService().map(e);
                     }
                 }
-            }, listener);
-            return reader.read(directory, list, listener);
+            });
+            return reader.read(directory, list);
         }
         catch(IOException e) {
             throw new FTPExceptionMappingService().map("Listing directory {0} failed", e, directory);

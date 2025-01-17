@@ -16,9 +16,18 @@ package ch.cyberduck.core.owncloud;
  */
 
 import ch.cyberduck.core.AbstractProtocol;
+import ch.cyberduck.core.CredentialsConfigurator;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
+import ch.cyberduck.core.WindowsIntegratedCredentialsConfigurator;
 import ch.cyberduck.core.dav.DAVSSLProtocol;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
+import ch.cyberduck.core.synchronization.ETagComparisonService;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class OwncloudProtocol extends AbstractProtocol {
 
     @Override
@@ -29,6 +38,11 @@ public class OwncloudProtocol extends AbstractProtocol {
     @Override
     public String getIdentifier() {
         return Type.owncloud.name();
+    }
+
+    @Override
+    public String getName() {
+        return "ownCloud";
     }
 
     @Override
@@ -49,5 +63,26 @@ public class OwncloudProtocol extends AbstractProtocol {
     @Override
     public String icon() {
         return new DAVSSLProtocol().icon();
+    }
+
+    @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.implicit;
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
+    }
+
+    @Override
+    public <T> T getFeature(final Class<T> type) {
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(DefaultComparisonService.forFiles(this), new ETagComparisonService());
+        }
+        if(type == CredentialsConfigurator.class) {
+            return (T) new WindowsIntegratedCredentialsConfigurator();
+        }
+        return super.getFeature(type);
     }
 }

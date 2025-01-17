@@ -17,9 +17,11 @@ package ch.cyberduck.core.onedrive.features;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.io.StreamListener;
@@ -36,10 +38,15 @@ import org.nuxeo.onedrive.client.OneDriveAPIException;
 import org.nuxeo.onedrive.client.types.DriveItem;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class GraphCopyFeature implements Copy {
-    private static final Logger logger = LogManager.getLogger(GraphCopyFeature.class);
+    private static final Logger log = LogManager.getLogger(GraphCopyFeature.class);
 
     private final GraphSession session;
     private final GraphAttributesFinderFeature attributes;
@@ -58,19 +65,17 @@ public class GraphCopyFeature implements Copy {
             copyOperation.rename(target.getName());
         }
         if(status.isExists()) {
-            if(logger.isWarnEnabled()) {
-                logger.warn(String.format("Delete file %s to be replaced with %s", target, file));
-            }
+            log.warn("Delete file {} to be replaced with {}", target, file);
             new GraphDeleteFeature(session, fileid).delete(Collections.singletonMap(target, status), callback, new Delete.DisabledCallback());
         }
         final DriveItem targetItem = session.getItem(target.getParent());
         copyOperation.copy(targetItem);
         final DriveItem item = session.getItem(file);
         try {
-            Files.copy(item, copyOperation).await(statusObject -> logger.info(String.format("Copy Progress Operation %s progress %f status %s",
-                statusObject.getOperation(),
-                statusObject.getPercentage(),
-                statusObject.getStatus())));
+            Files.copy(item, copyOperation).await(statusObject -> log.info("Copy Progress Operation {} progress {} status {}",
+                    statusObject.getOperation(),
+                    statusObject.getPercentage(),
+                    statusObject.getStatus()));
             listener.sent(status.getLength());
             target.attributes().setFileId(null);
             final PathAttributes attr = attributes.find(target);
@@ -86,21 +91,30 @@ public class GraphCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        if(!session.isAccessible(target, true)) {
-            return false;
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(target.isPresent()) {
+            if(!session.isAccessible(target.get(), true)) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
         }
         if(!session.isAccessible(source, false)) {
-            return false;
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
         }
-        if(!session.getContainer(source).equals(session.getContainer(target))) {
-            return false;
+        if(target.isPresent()) {
+            if(!session.getContainer(source).equals(session.getContainer(target.get()))) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
         }
-        return !source.getType().contains(Path.Type.shared);
+        if(source.getType().contains(Path.Type.shared)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            validate(session.getCaseSensitivity(), source, target.get());
+        }
     }
 }

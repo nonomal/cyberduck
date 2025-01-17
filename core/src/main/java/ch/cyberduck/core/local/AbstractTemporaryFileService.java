@@ -15,7 +15,9 @@ package ch.cyberduck.core.local;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.Local;
+import ch.cyberduck.core.LocalFactory;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.NotfoundException;
 
@@ -32,6 +34,12 @@ import java.util.concurrent.CopyOnWriteArraySet;
 public abstract class AbstractTemporaryFileService implements TemporaryFileService {
     private static final Logger log = LogManager.getLogger(AbstractTemporaryFileService.class);
 
+    private final Local temp;
+
+    public AbstractTemporaryFileService(final Local temp) {
+        this.temp = temp;
+    }
+
     /**
      * Set of filenames to be deleted on VM exit through a shutdown hook.
      */
@@ -43,6 +51,7 @@ public abstract class AbstractTemporaryFileService implements TemporaryFileServi
      * @param file File reference
      */
     protected Local delete(final Local file) {
+        log.debug("Add temporary file {}", file);
         files.add(file);
         return file;
     }
@@ -60,11 +69,26 @@ public abstract class AbstractTemporaryFileService implements TemporaryFileServi
         Collections.reverse(list);
         for(Local f : list) {
             try {
+                log.debug("Delete file {}", f);
                 f.delete();
             }
             catch(AccessDeniedException | NotfoundException e) {
-                log.warn(String.format("Failure deleting file %s in shutdown hook. %s", f, e.getMessage()));
+                log.warn("Failure deleting file {} in shutdown hook. {}", f, e.getMessage());
             }
         }
+    }
+
+    protected Local create(final Local folder, final String filename) {
+        try {
+            log.debug("Creating intermediate folder {}", folder);
+            folder.mkdir();
+        }
+        catch(AccessDeniedException e) {
+            log.warn("Failure {} creating intermediate folder", e.getMessage());
+            return this.delete(LocalFactory.get(temp,
+                    String.format("%s-%s", new AlphanumericRandomStringService().random(), filename)));
+        }
+        this.delete(folder);
+        return this.delete(LocalFactory.get(folder, filename));
     }
 }

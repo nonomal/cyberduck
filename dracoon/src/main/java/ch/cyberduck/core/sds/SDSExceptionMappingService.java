@@ -21,6 +21,7 @@ import ch.cyberduck.core.DefaultSocketExceptionMappingService;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.AccessDeniedException;
+import ch.cyberduck.core.exception.AntiVirusAccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.ExpiredTokenException;
@@ -110,14 +111,12 @@ public class SDSExceptionMappingService extends AbstractExceptionMappingService<
                 if(json.has("errorCode")) {
                     if(json.get("errorCode").isJsonPrimitive()) {
                         final int errorCode = json.getAsJsonPrimitive("errorCode").getAsInt();
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Failure with errorCode %s", errorCode));
-                        }
+                        log.debug("Failure with errorCode {}", errorCode);
                         final String key = String.format("Error %d", errorCode);
                         final String localized = LocaleFactory.get().localize(key, "SDS");
                         this.append(buffer, localized);
                         if(StringUtils.equals(localized, key)) {
-                            log.warn(String.format("Missing user message for error code %d", errorCode));
+                            log.warn("Missing user message for error code {}", errorCode);
                             if(json.has("debugInfo")) {
                                 if(json.get("debugInfo").isJsonPrimitive()) {
                                     this.append(buffer, json.getAsJsonPrimitive("debugInfo").getAsString());
@@ -149,9 +148,7 @@ public class SDSExceptionMappingService extends AbstractExceptionMappingService<
                                         if(json.has("replyMessage")) {
                                             if(json.get("replyMessage").isJsonPrimitive()) {
                                                 final JsonPrimitive replyMessage = json.getAsJsonPrimitive("replyMessage");
-                                                if(log.isDebugEnabled()) {
-                                                    log.debug(String.format("Failure with replyMessage %s", replyMessage));
-                                                }
+                                                log.debug("Failure with replyMessage {}", replyMessage);
                                                 buffer.append(replyMessage.getAsString());
                                             }
                                         }
@@ -165,6 +162,20 @@ public class SDSExceptionMappingService extends AbstractExceptionMappingService<
                                         return new ExpiredTokenException(buffer.toString(), failure);
                                 }
                                 break;
+                            case HttpStatus.SC_FORBIDDEN:
+                                switch(errorCode) {
+                                    case -40764: // Anti-virus scan still in progress
+                                        return new AntiVirusAccessDeniedException(
+                                                LocaleFactory.localizedString("Please wait. The file is being checked for malicious content", "SDS"),
+                                                LocaleFactory.localizedString("The content is being scanned for viruses. Please wait a moment and try again in a few minutes.", "SDS"),
+                                                failure);
+                                    case -40765: // Anti-virus scan determined malicious file
+                                        return new AntiVirusAccessDeniedException(
+                                                LocaleFactory.localizedString("Threat detected", "SDS"),
+                                                LocaleFactory.localizedString("Malicious content has been detected in this file. We recommend that you do not perform any further actions with the file and inform your system administrator immediately.", "SDS"),
+                                                failure);
+                                }
+                                break;
                         }
                     }
                 }
@@ -174,7 +185,7 @@ public class SDSExceptionMappingService extends AbstractExceptionMappingService<
                             break;
                         default:
                             if(json.has("debugInfo")) {
-                                log.warn(String.format("Missing error code for failure %s", json));
+                                log.warn("Missing error code for failure {}", json);
                                 if(json.get("debugInfo").isJsonPrimitive()) {
                                     this.append(buffer, json.getAsJsonPrimitive("debugInfo").getAsString());
                                 }

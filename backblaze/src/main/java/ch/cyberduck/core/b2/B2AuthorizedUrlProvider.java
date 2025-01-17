@@ -17,7 +17,6 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
@@ -25,21 +24,20 @@ import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.URIEncoder;
 import ch.cyberduck.core.UserDateFormatterFactory;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
-import java.net.URI;
 import java.text.MessageFormat;
 import java.util.Calendar;
 import java.util.TimeZone;
 
 import synapticloop.b2.exception.B2ApiException;
 
-public class B2AuthorizedUrlProvider implements PromptUrlProvider<Void, Void> {
+public class B2AuthorizedUrlProvider implements Share<Void, Void> {
     private static final Logger log = LogManager.getLogger(B2AuthorizedUrlProvider.class);
 
     private final PathContainerService containerService
@@ -63,21 +61,19 @@ public class B2AuthorizedUrlProvider implements PromptUrlProvider<Void, Void> {
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final Void none, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final Void none, final PasswordCallback callback) throws BackgroundException {
         final String download = String.format("%s/file/%s/%s", session.getClient().getDownloadUrl(),
-            URIEncoder.encode(containerService.getContainer(file).getName()),
-            URIEncoder.encode(containerService.getKey(file)));
+                URIEncoder.encode(containerService.getContainer(file).getName()),
+                URIEncoder.encode(containerService.getKey(file)));
         try {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Create download authorization for %s", file));
-            }
+            log.debug("Create download authorization for {}", file);
             final int seconds = 604800;
             // Determine expiry time for URL
             final Calendar expiry = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
             expiry.add(Calendar.SECOND, seconds);
-            final String token = session.getClient().getDownloadAuthorization(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()),
+            final String token = session.getClient().getDownloadAuthorization(fileid.getVersionId(containerService.getContainer(file)),
                 StringUtils.EMPTY, seconds);
-            return new DescriptiveUrl(URI.create(String.format("%s?Authorization=%s", download, token)), DescriptiveUrl.Type.signed,
+            return new DescriptiveUrl(String.format("%s?Authorization=%s", download, token), DescriptiveUrl.Type.signed,
                 MessageFormat.format(LocaleFactory.localizedString("{0} URL"), LocaleFactory.localizedString("Pre-Signed", "S3"))
                     + " (" + MessageFormat.format(LocaleFactory.localizedString("Expires {0}", "S3") + ")",
                     UserDateFormatterFactory.get().getMediumFormat(expiry.getTimeInMillis()))
@@ -92,7 +88,7 @@ public class B2AuthorizedUrlProvider implements PromptUrlProvider<Void, Void> {
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final Void none, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final Void none, final PasswordCallback callback) throws BackgroundException {
         return DescriptiveUrl.EMPTY;
     }
 }

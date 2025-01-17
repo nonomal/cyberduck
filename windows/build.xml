@@ -82,9 +82,20 @@
         </condition>
         <property name="msbuild.sign" value="" />
 
+        <copy todir="${build}/generated" overwrite="True" encoding="UTF-8" outputencoding="UTF-8">
+            <fileset dir="${module}/src/main/package">
+                <include name="**/*.template"/>
+            </fileset>
+            <filterchain>
+                <expandproperties/>
+            </filterchain>
+            <globmapper from="*.template" to="*"/>
+        </copy>
+
         <msbuild buildfile="build.proj">
             <target name="Build" />
 
+            <property name="Platform" value="x64" />
             <property name="BuildModule" value="Installer" />
             <property name="BuildProjectReferences" value="false" />
             <property name="Configuration" value="${msbuild.configuration}" />
@@ -117,7 +128,7 @@
             <remove path="//*[local-name()='minimumSystemVersion']"/>
         </xmltask>
         <xmltask sourcebuffer="xmltaskbuffer" dest="${build}/update/changelog.rss">
-            <attr path="//item/enclosure" attr="sparkle:installerArguments" value="/passive Autostart=1"/>
+            <attr path="//item/enclosure" attr="sparkle:installerArguments" value="/passive InstallBonjour=0 Autostart=1"/>
         </xmltask>
         <copy todir="${build}/update" overwrite="true">
             <fileset dir="${www.update}">

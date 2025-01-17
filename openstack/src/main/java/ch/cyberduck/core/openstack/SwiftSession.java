@@ -30,11 +30,13 @@ import ch.cyberduck.core.cdn.Distribution;
 import ch.cyberduck.core.cdn.DistributionConfiguration;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.features.*;
 import ch.cyberduck.core.http.HttpSession;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.shared.DelegatingSchedulerFeature;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
@@ -61,17 +63,38 @@ public class SwiftSession extends HttpSession<Client> {
     private static final Logger log = LogManager.getLogger(SwiftSession.class);
 
     private final SwiftRegionService regionService
-        = new SwiftRegionService(this);
+            = new SwiftRegionService(this);
 
     private final Map<Region, AccountInfo> accounts = new ConcurrentHashMap<>();
     private final Map<Path, Set<Distribution>> distributions = new ConcurrentHashMap<>();
+
+    private final DelegatingSchedulerFeature scheduler = new DelegatingSchedulerFeature(
+            new HostPreferences(host).getBoolean("openstack.account.preload") ? new SwiftAccountLoader(this) {
+                @Override
+                protected Map<Region, AccountInfo> operate(final PasswordCallback callback) throws BackgroundException {
+                    final Map<Region, AccountInfo> result = super.operate(callback);
+                    // Only executed single time
+                    accounts.putAll(result);
+                    return result;
+                }
+            } : Scheduler.noop,
+            new HostPreferences(host).getBoolean("openstack.cdn.preload") ? new SwiftDistributionConfigurationLoader(this) {
+                @Override
+                protected Map<Path, Set<Distribution>> operate(final PasswordCallback callback) throws BackgroundException {
+                    final Map<Path, Set<Distribution>> result = super.operate(callback);
+                    // Only executed single time
+                    distributions.putAll(result);
+                    return result;
+                }
+            } : Scheduler.noop
+    );
 
     public SwiftSession(final Host host, final X509TrustManager trust, final X509KeyManager key) {
         super(host, trust, key);
     }
 
     @Override
-    protected Client connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) {
+    protected Client connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws ConnectionCanceledException {
         // Always inject new pool to builder on connect because the pool is shutdown on disconnect
         final HttpClientBuilder pool = builder.build(proxy, this, prompt);
         pool.disableContentCompression();
@@ -81,6 +104,7 @@ public class SwiftSession extends HttpSession<Client> {
     @Override
     protected void logout() throws BackgroundException {
         try {
+            scheduler.shutdown(false);
             client.disconnect();
         }
         catch(IOException e) {
@@ -89,23 +113,21 @@ public class SwiftSession extends HttpSession<Client> {
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         try {
             final Set<? extends AuthenticationRequest> options = new SwiftAuthenticationService().getRequest(host, prompt);
             for(Iterator<? extends AuthenticationRequest> iter = options.iterator(); iter.hasNext(); ) {
                 try {
                     final AuthenticationRequest auth = iter.next();
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Attempt authentication with %s", auth));
-                    }
+                    log.info("Attempt authentication with {}", auth);
                     client.authenticate(auth);
                     break;
                 }
                 catch(GenericException failure) {
                     final BackgroundException reason = new SwiftExceptionMappingService().map(failure);
                     if(reason instanceof LoginFailureException
-                        || reason instanceof AccessDeniedException
-                        || reason instanceof InteroperabilityException) {
+                            || reason instanceof AccessDeniedException
+                            || reason instanceof InteroperabilityException) {
                         if(!iter.hasNext()) {
                             throw failure;
                         }
@@ -170,7 +192,7 @@ public class SwiftSession extends HttpSession<Client> {
         if(type == DistributionConfiguration.class) {
             for(Region region : accounts.keySet()) {
                 if(null == region.getCDNManagementUrl()) {
-                    log.warn(String.format("Missing CDN Management URL for region %s", region.getRegionId()));
+                    log.warn("Missing CDN Management URL for region {}", region.getRegionId());
                     return null;
                 }
             }
@@ -178,9 +200,7 @@ public class SwiftSession extends HttpSession<Client> {
                 @Override
                 public Distribution read(final Path container, final Distribution.Method method, final LoginCallback prompt) throws BackgroundException {
                     final Distribution distribution = super.read(container, method, prompt);
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Cache distribution %s", distribution));
-                    }
+                    log.debug("Cache distribution {}", distribution);
                     // Replace previously cached value
                     final Set<Distribution> cached = distributions.getOrDefault(container, new HashSet<>());
                     cached.add(distribution);
@@ -190,7 +210,7 @@ public class SwiftSession extends HttpSession<Client> {
             };
         }
         if(type == UrlProvider.class) {
-            return (T) new SwiftUrlProvider(this, accounts, regionService, distributions);
+            return (T) new SwiftUrlProvider(this, accounts, distributions);
         }
         if(type == Find.class) {
             return (T) new SwiftFindFeature(this);
@@ -199,17 +219,7 @@ public class SwiftSession extends HttpSession<Client> {
             return (T) new SwiftAttributesFinderFeature(this, regionService);
         }
         if(type == Scheduler.class) {
-            return (T) new DelegatingSchedulerFeature(
-                new SwiftAccountLoader(this) {
-                    @Override
-                    public Map<Region, AccountInfo> operate(final PasswordCallback callback, final Path container) throws BackgroundException {
-                        final Map<Region, AccountInfo> result = super.operate(callback, container);
-                        // Only executed single time
-                        accounts.putAll(result);
-                        return result;
-                    }
-                },
-                new SwiftDistributionConfigurationLoader(this));
+            return (T) scheduler;
         }
         return super._getFeature(type);
     }

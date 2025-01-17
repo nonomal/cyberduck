@@ -17,16 +17,23 @@ package ch.cyberduck.core.googlestorage;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import org.apache.commons.lang3.StringUtils;
+import org.jets3t.service.utils.ServiceUtils;
+
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.EnumSet;
 
+import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.Bucket;
 import com.google.api.services.storage.model.StorageObject;
 
@@ -41,7 +48,7 @@ public class GoogleStorageDirectoryFeature implements Directory<StorageObject> {
 
     public GoogleStorageDirectoryFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
         this.writer = new GoogleStorageWriteFeature(session);
     }
 
@@ -49,11 +56,12 @@ public class GoogleStorageDirectoryFeature implements Directory<StorageObject> {
     public Path mkdir(final Path folder, final TransferStatus status) throws BackgroundException {
         try {
             if(containerService.isContainer(folder)) {
-                final Bucket bucket = session.getClient().buckets().insert(session.getHost().getCredentials().getUsername(),
+                final Storage.Buckets.Insert request = session.getClient().buckets().insert(session.getHost().getCredentials().getUsername(),
                         new Bucket()
                                 .setLocation(status.getRegion())
                                 .setStorageClass(status.getStorageClass())
-                                .setName(containerService.getContainer(folder).getName())).execute();
+                                .setName(containerService.getContainer(folder).getName()));
+                final Bucket bucket = request.execute();
                 final EnumSet<Path.Type> type = EnumSet.copyOf(folder.getType());
                 type.add(Path.Type.volume);
                 return folder.withType(type).withAttributes(new GoogleStorageAttributesFinderFeature(session).toAttributes(bucket));
@@ -68,6 +76,23 @@ public class GoogleStorageDirectoryFeature implements Directory<StorageObject> {
         }
         catch(IOException e) {
             throw new GoogleStorageExceptionMappingService().map("Cannot create folder {0}", e, folder);
+        }
+    }
+
+    @Override
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(workdir.isRoot()) {
+            if(StringUtils.isNotBlank(filename)) {
+                if(StringUtils.startsWith(filename, "goog")) {
+                    throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
+                }
+                if(StringUtils.contains(filename, "google")) {
+                    throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
+                }
+                if(!ServiceUtils.isBucketNameValidDNSName(filename)) {
+                    throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
+                }
+            }
         }
     }
 

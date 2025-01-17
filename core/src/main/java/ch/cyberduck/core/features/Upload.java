@@ -18,14 +18,28 @@ package ch.cyberduck.core.features;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.io.BandwidthThrottle;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+@Optional
 public interface Upload<Reply> {
 
-    Reply upload(Path file, Local local, BandwidthThrottle throttle, StreamListener listener,
+    /**
+     * Copy file on disk to server
+     *
+     * @param file           File on server
+     * @param local          File on local disk
+     * @param throttle       Bandwidth management
+     * @param progress
+     * @param streamListener Progress callback
+     * @param status         Transfer status holder
+     * @param callback       Prompt
+     * @see AttributesAdapter#toAttributes(Reply)
+     */
+    Reply upload(Path file, Local local, BandwidthThrottle throttle, final ProgressListener progress, StreamListener streamListener,
                  TransferStatus status, ConnectionCallback callback) throws BackgroundException;
 
     /**
@@ -35,7 +49,9 @@ public interface Upload<Reply> {
      * @param status Transfer status including attributes of file on server and size of file to write
      * @return True if can append to existing file
      */
-    Write.Append append(Path file, TransferStatus status) throws BackgroundException;
+    default Write.Append append(Path file, TransferStatus status) throws BackgroundException {
+        return new Write.Append(false).withStatus(status);
+    }
 
     Upload<Reply> withWriter(Write<Reply> writer);
 }

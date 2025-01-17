@@ -22,17 +22,17 @@ import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.DisabledPasswordCallback;
 import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.box.AbtractBoxTest;
+import ch.cyberduck.core.box.AbstractBoxTest;
 import ch.cyberduck.core.box.BoxDeleteFeature;
 import ch.cyberduck.core.box.BoxDirectoryFeature;
 import ch.cyberduck.core.box.BoxFileidProvider;
 import ch.cyberduck.core.box.BoxFindFeature;
 import ch.cyberduck.core.box.BoxReadFeature;
-import ch.cyberduck.core.cryptomator.features.CryptoFindV6Feature;
 import ch.cyberduck.core.cryptomator.features.CryptoReadFeature;
 import ch.cyberduck.core.cryptomator.features.CryptoWriteFeature;
 import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.shared.BufferWriteFeature;
@@ -58,7 +58,7 @@ import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
 @RunWith(value = Parameterized.class)
-public class BufferWriteFeatureTest extends AbtractBoxTest {
+public class BufferWriteFeatureTest extends AbstractBoxTest {
 
     @Test
     public void testWriteVault() throws Exception {
@@ -67,14 +67,14 @@ public class BufferWriteFeatureTest extends AbtractBoxTest {
         final Path vault = new Path(container, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         final Path test = new Path(vault, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final CryptoVault cryptomator = new CryptoVault(vault);
-        cryptomator.create(session, new VaultCredentials("test"), new DisabledPasswordStore(), vaultVersion);
+        cryptomator.create(session, new VaultCredentials("test"), vaultVersion);
         session.withRegistry(new DefaultVaultRegistry(new DisabledPasswordStore(), new DisabledPasswordCallback(), cryptomator));
         final CryptoWriteFeature feature = new CryptoWriteFeature<>(session, new BufferWriteFeature(session), cryptomator);
         final byte[] content = RandomUtils.nextBytes(1024 * 1024);
         final TransferStatus writeStatus = new TransferStatus();
         final FileHeader header = cryptomator.getFileHeaderCryptor().create();
         writeStatus.setHeader(cryptomator.getFileHeaderCryptor().encryptHeader(header));
-        writeStatus.setNonces(new RandomNonceGenerator());
+        writeStatus.setNonces(new RandomNonceGenerator(cryptomator.getNonceSize()));
         writeStatus.setChecksum(feature.checksum(test, new TransferStatus()).compute(new ByteArrayInputStream(content), new TransferStatus()));
         writeStatus.setLength(content.length);
         final StatusOutputStream out = feature.write(test, writeStatus, new DisabledConnectionCallback());
@@ -84,7 +84,7 @@ public class BufferWriteFeatureTest extends AbtractBoxTest {
         new StreamCopier(new TransferStatus(), progress).withListener(count).transfer(in, out);
         assertEquals(content.length, count.getSent());
         assertEquals(content.length, count.getRecv());
-        assertTrue(new CryptoFindV6Feature(session, new BoxFindFeature(session, fileid), cryptomator).find(test));
+        assertTrue(cryptomator.getFeature(session, Find.class, new BoxFindFeature(session, fileid)).find(test));
         final byte[] compare = new byte[content.length];
         final InputStream stream = new CryptoReadFeature(session, new BoxReadFeature(session, fileid), cryptomator).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
         IOUtils.readFully(stream, compare);

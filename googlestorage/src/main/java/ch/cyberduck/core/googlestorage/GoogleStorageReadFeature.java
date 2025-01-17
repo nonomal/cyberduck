@@ -44,7 +44,7 @@ public class GoogleStorageReadFeature implements Read {
 
     public GoogleStorageReadFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
@@ -54,9 +54,12 @@ public class GoogleStorageReadFeature implements Read {
                 return new NullInputStream(0L);
             }
             final Storage.Objects.Get request = session.getClient().objects().get(
-                containerService.getContainer(file).getName(), containerService.getKey(file));
+                    containerService.getContainer(file).getName(), containerService.getKey(file));
+            if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                request.setUserProject(session.getHost().getCredentials().getUsername());
+            }
             final VersioningConfiguration versioning = null != session.getFeature(Versioning.class) ? session.getFeature(Versioning.class).getConfiguration(
-                containerService.getContainer(file)
+                    containerService.getContainer(file)
             ) : VersioningConfiguration.empty();
             if(versioning.isEnabled()) {
                 if(StringUtils.isNotBlank(file.attributes().getVersionId())) {
@@ -72,9 +75,7 @@ public class GoogleStorageReadFeature implements Read {
                 else {
                     header = String.format("bytes=%d-%d", range.getStart(), range.getEnd());
                 }
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add range header %s for file %s", header, file));
-                }
+                log.debug("Add range header {} for file {}", header, file);
                 final HttpHeaders headers = request.getRequestHeaders();
                 headers.setRange(header);
                 // Disable compression

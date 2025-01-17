@@ -17,8 +17,20 @@ package ch.cyberduck.core;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Required;
 
+import java.text.MessageFormat;
+
+@Required
 public interface ListService {
     AttributedList<Path> list(Path directory, ListProgressListener listener) throws BackgroundException;
+
+    default void preflight(final Path directory) throws BackgroundException {
+        if(!directory.attributes().getPermission().isExecutable() || !directory.attributes().getPermission().isReadable()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Listing directory {0} failed", "Error"),
+                    directory.getName())).withFile(directory);
+        }
+    }
 }

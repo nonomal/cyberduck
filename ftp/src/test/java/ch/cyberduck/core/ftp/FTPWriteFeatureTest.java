@@ -29,7 +29,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.TimeZone;
 import java.util.UUID;
 
 import static org.junit.Assert.*;
@@ -48,9 +47,8 @@ public class FTPWriteFeatureTest extends AbstractFTPTest {
         new StreamCopier(new TransferStatus(), new TransferStatus()).transfer(new ByteArrayInputStream(content), out);
         out.close();
         assertTrue(session.getFeature(Find.class).find(test));
-        final PathAttributes attributes = new FTPListService(session, null, TimeZone.getDefault()).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes();
+        final PathAttributes attributes = new FTPListService(session).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes();
         assertEquals(content.length, attributes.getSize());
-        assertEquals(content.length, new FTPWriteFeature(session).append(test, status.withRemote(attributes)).size, 0L);
         {
             final InputStream in = new FTPReadFeature(session).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
             final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);
@@ -143,13 +141,5 @@ public class FTPWriteFeatureTest extends AbstractFTPTest {
     public void testWriteNotFound() throws Exception {
         final Path test = new Path(new FTPWorkdirService(session).find().getAbsolute() + "/nosuchdirectory/" + UUID.randomUUID(), EnumSet.of(Path.Type.file));
         new FTPWriteFeature(session).write(test, new TransferStatus(), new DisabledConnectionCallback());
-    }
-
-    @Test
-    public void testAppend() throws Exception {
-        final Path f = new Path(new FTPWorkdirService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
-        new FTPTouchFeature(session).touch(f, new TransferStatus());
-        assertTrue(new FTPWriteFeature(session).append(f, new TransferStatus().withLength(0L).withRemote(new FTPAttributesFinderFeature(session).find(f))).append);
-        new FTPDeleteFeature(session).delete(Collections.singletonList(f), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

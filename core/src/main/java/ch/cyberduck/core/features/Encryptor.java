@@ -1,4 +1,6 @@
-package ch.cyberduck.core.features;/*
+package ch.cyberduck.core.features;
+
+/*
  * Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -19,6 +21,16 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.InputStream;
 
+@Optional
 public interface Encryptor {
-    InputStream encrypt(final Path file, InputStream proxy, final TransferStatus status) throws BackgroundException;
+
+    /**
+     * Wrap proxy with stream encrypting content on the fly
+     *
+     * @param file   File
+     * @param proxy  File input stream
+     * @param status Encryption properties
+     * @return Wrapped stream
+     */
+    InputStream encrypt(Path file, InputStream proxy, TransferStatus status) throws BackgroundException;
 }

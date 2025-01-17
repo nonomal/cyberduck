@@ -20,8 +20,8 @@ package ch.cyberduck.core.openstack;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.BandwidthThrottle;
@@ -31,9 +31,6 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.util.ArrayList;
-import java.util.List;
 
 import ch.iterate.openstack.swift.model.StorageObject;
 
@@ -63,42 +60,37 @@ public class SwiftThresholdUploadService implements Upload<StorageObject> {
 
     @Override
     public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return writer.append(file, status);
+        if(this.threshold(status)) {
+            return new SwiftLargeObjectUploadFeature(session, regionService, writer).append(file, status);
+        }
+        return new Write.Append(false).withStatus(status);
     }
 
     @Override
-    public StorageObject upload(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener,
+    public StorageObject upload(final Path file, final Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener,
                                 final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final Upload<StorageObject> feature;
+        if(this.threshold(status)) {
+            feature = new SwiftLargeObjectUploadFeature(session, regionService, writer);
+        }
+        else {
+            feature = new SwiftSmallObjectUploadFeature(session, writer);
+        }
+        return feature.upload(file, local, throttle, progress, streamListener, status, callback);
+    }
+
+    protected boolean threshold(final TransferStatus status) {
         if(status.getLength() > threshold) {
             if(!new HostPreferences(session.getHost()).getBoolean("openstack.upload.largeobject")) {
                 // Disabled by user
                 if(status.getLength() < new HostPreferences(session.getHost()).getLong("openstack.upload.largeobject.required.threshold")) {
                     log.warn("Large upload is disabled with property openstack.upload.largeobject");
-                    return new SwiftSmallObjectUploadFeature(session, writer).upload(file, local, throttle, listener, status, callback);
+                    return false;
                 }
             }
-            feature = new SwiftLargeObjectUploadFeature(session, regionService, writer,
-                new HostPreferences(session.getHost()).getLong("openstack.upload.largeobject.size"),
-                new HostPreferences(session.getHost()).getInteger("openstack.upload.largeobject.concurrency"));
+            return true;
         }
-        else {
-            feature = new SwiftSmallObjectUploadFeature(session, writer);
-        }
-        // Previous segments to delete
-        final List<Path> segments = new ArrayList<>();
-        if(new HostPreferences(session.getHost()).getBoolean("openstack.upload.largeobject.cleanup")) {
-            if(!status.isAppend()) {
-                // Cleanup if necessary
-                segments.addAll(new SwiftSegmentService(session, regionService).list(file));
-            }
-        }
-        final StorageObject checksum = feature.upload(file, local, throttle, listener, status, callback);
-        if(!segments.isEmpty()) {
-            // Clean up any old segments
-            new SwiftMultipleDeleteFeature(session).delete(segments, callback, new Delete.DisabledCallback());
-        }
-        return checksum;
+        return false;
     }
 
     @Override

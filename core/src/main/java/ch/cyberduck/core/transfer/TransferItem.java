@@ -41,8 +41,10 @@ public class TransferItem implements Referenceable, Serializable {
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
-        dict.setObjectForKey(remote, "Remote");
+    public <T> T serialize(final Serializer<T> dict) {
+        if(remote != null) {
+            dict.setObjectForKey(remote, "Remote");
+        }
         if(local != null) {
             dict.setObjectForKey(local, "Local Dictionary");
         }

@@ -51,36 +51,47 @@ public class S3ListService implements ListService {
         if(directory.isRoot()) {
             final String bucket = RequestEntityRestStorageService.findBucketInHostname(session.getHost());
             if(StringUtils.isEmpty(bucket)) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("No bucket name in host %s", session.getHost().getHostname()));
-                }
+                log.debug("No bucket name in host {}", session.getHost().getHostname());
                 // List all buckets
                 try {
-                    return new S3BucketListService(session, new S3LocationFeature.S3Region(session.getHost().getRegion())).list(directory, listener);
+                    return new S3BucketListService(session).list(directory, listener);
                 }
                 catch(InteroperabilityException e) {
                     // Bucket set in hostname that leads to parser failure for XML reply
-                    log.warn(String.format("Ignore failure %s listing buckets.", e));
+                    log.warn("Failure {} listing buckets", e.getMessage());
+                    try {
+                        return this.listObjects(directory, listener);
+                    }
+                    catch(BackgroundException ignored) {
+                        log.warn("Ignore failure {} listing objects", ignored.getMessage());
+                        // Throw original failure
+                        throw e;
+                    }
                 }
             }
             // If bucket is specified in hostname, try to connect to this particular bucket only.
         }
+        return this.listObjects(directory, listener);
+    }
+
+    private AttributedList<Path> listObjects(final Path directory, final ListProgressListener listener) throws BackgroundException {
         AttributedList<Path> objects;
-        final VersioningConfiguration versioning = null != session.getFeature(Versioning.class) ? session.getFeature(Versioning.class)
+        final VersioningConfiguration versioning = new HostPreferences(session.getHost()).getBoolean("s3.listing.versioning.enable")
+                && null != session.getFeature(Versioning.class) ? session.getFeature(Versioning.class)
                 .getConfiguration(directory) : VersioningConfiguration.empty();
         if(versioning.isEnabled()) {
             try {
                 objects = new S3VersionedObjectListService(session, acl).list(directory, listener);
             }
             catch(AccessDeniedException | InteroperabilityException e) {
-                log.warn(String.format("Ignore failure listing versioned objects. %s", e));
+                log.warn("Ignore failure listing versioned objects. {}", e.getMessage());
                 objects = new S3ObjectListService(session, acl).list(directory, listener);
             }
         }
         else {
             objects = new S3ObjectListService(session, acl).list(directory, listener);
         }
-        if(new HostPreferences(session.getHost()).getBoolean("s3.upload.multipart")) {
+        if(new HostPreferences(session.getHost()).getBoolean("s3.upload.multipart.lookup")) {
             try {
                 for(MultipartUpload upload : new S3DefaultMultipartService(session).find(directory)) {
                     final PathAttributes attributes = new PathAttributes();
@@ -91,7 +102,7 @@ public class S3ListService implements ListService {
                 }
             }
             catch(AccessDeniedException | InteroperabilityException e) {
-                log.warn(String.format("Ignore failure listing incomplete multipart uploads. %s", e));
+                log.warn("Ignore failure listing incomplete multipart uploads. {}", e.getMessage());
             }
         }
         return objects;

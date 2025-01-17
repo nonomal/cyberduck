@@ -25,18 +25,11 @@ import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.HashAlgorithm;
 
-import org.apache.commons.codec.binary.Hex;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.EnumSet;
 
 import com.joyent.manta.client.MantaObject;
 
 public final class MantaObjectAttributeAdapter implements AttributesAdapter<MantaObject> {
-    private static final Logger log = LogManager.getLogger(MantaObjectAttributeAdapter.class);
 
     private final MantaSession session;
 
@@ -62,19 +55,13 @@ public final class MantaObjectAttributeAdapter implements AttributesAdapter<Mant
         if(session.isWorldReadable(object)) {
             // mantaObject.getPath() starts with /
             final String joinedPath = new DefaultWebUrlProvider().toUrl(session.getHost()) + URIEncoder.encode(object.getPath());
-            try {
-                final URI link = new URI(joinedPath);
-                attributes.setLink(new DescriptiveUrl(link, DescriptiveUrl.Type.http));
-            }
-            catch(URISyntaxException e) {
-                log.warn(String.format("Cannot set link. Web URL returned %s", joinedPath), e);
-            }
+            attributes.setLink(new DescriptiveUrl(joinedPath, DescriptiveUrl.Type.http));
         }
         attributes.setSize(object.getContentLength());
         attributes.setETag(object.getEtag());
         final byte[] md5Bytes = object.getMd5Bytes();
         if(md5Bytes != null) {
-            attributes.setChecksum(new Checksum(HashAlgorithm.md5, Hex.encodeHexString(md5Bytes)));
+            attributes.setChecksum(new Checksum(HashAlgorithm.md5, md5Bytes));
         }
         final String storageClass = object.getHeaderAsString(HEADER_KEY_STORAGE_CLASS);
         if(storageClass != null) {

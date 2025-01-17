@@ -18,22 +18,24 @@ package ch.cyberduck.core.cryptomator.features;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
-import ch.cyberduck.core.cryptomator.CryptoInvalidFilesizeException;
 import ch.cyberduck.core.cryptomator.CryptoOutputStream;
+import ch.cyberduck.core.cryptomator.CryptoTransferStatus;
 import ch.cyberduck.core.cryptomator.CryptoVault;
+import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.cryptomator.random.RotatingNonceGenerator;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.ChecksumCompute;
 import ch.cyberduck.core.io.StatusOutputStream;
+import ch.cyberduck.core.random.NonceGenerator;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.EnumSet;
 
 public class CryptoWriteFeature<Reply> implements Write<Reply> {
     private static final Logger log = LogManager.getLogger(CryptoWriteFeature.class);
@@ -52,25 +54,14 @@ public class CryptoWriteFeature<Reply> implements Write<Reply> {
     public StatusOutputStream<Reply> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         try {
             if(null == status.getNonces()) {
-                // If not previously set in bulk feature
-                status.setNonces(new RotatingNonceGenerator(vault.numberOfChunks(status.getLength())));
+                final NonceGenerator nonces = status.getLength() == TransferStatus.UNKNOWN_LENGTH ?
+                        new RandomNonceGenerator(vault.getNonceSize()) :
+                        new RotatingNonceGenerator(vault.getNonceSize(), vault.numberOfChunks(status.getLength()));
+                log.debug("Using {}", nonces);
+                status.setNonces(nonces);
             }
             final StatusOutputStream<Reply> cleartext = proxy.write(vault.encrypt(session, file),
-                    new TransferStatus(status) {
-                        @Override
-                        public void setResponse(final PathAttributes attributes) {
-                            try {
-                                status.setResponse(attributes.withSize(vault.toCleartextSize(0L, attributes.getSize())));
-                            }
-                            catch(CryptoInvalidFilesizeException e) {
-                                log.warn(String.format("Failure %s translating file size from response %s", e, attributes));
-                            }
-                        }
-                    }
-                            .withLength(vault.toCiphertextSize(status.getOffset(), status.getLength()))
-                            // Assume single chunk upload
-                            .withOffset(0L == status.getOffset() ? 0L : vault.toCiphertextSize(0L, status.getOffset()))
-                            .withMime(null), callback);
+                    new CryptoTransferStatus(vault, status), callback);
             if(status.getOffset() == 0L) {
                 cleartext.write(status.getHeader().array());
             }
@@ -89,18 +80,8 @@ public class CryptoWriteFeature<Reply> implements Write<Reply> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
-    public boolean random() {
-        return proxy.random();
-    }
-
-    @Override
-    public boolean timestamp() {
-        return proxy.timestamp();
+    public EnumSet<Flags> features(final Path file) {
+        return proxy.features(file);
     }
 
     @Override

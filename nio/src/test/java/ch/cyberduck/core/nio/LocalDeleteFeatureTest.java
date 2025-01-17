@@ -15,13 +15,14 @@ package ch.cyberduck.core.nio;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.DisabledCancelCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.features.Delete;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.junit.Test;
@@ -29,24 +30,41 @@ import org.junit.Test;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.EnumSet;
-import java.util.UUID;
 
 import static junit.framework.TestCase.assertFalse;
+import static junit.framework.TestCase.assertTrue;
 
 public class LocalDeleteFeatureTest {
 
     @Test
     public void testDelete() throws Exception {
         final LocalSession session = new LocalSession(new Host(new LocalProtocol(), new LocalProtocol().getDefaultHostname()));
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
-        final Path file = new Path(new LocalHomeFinderFeature().find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
+        final Path file = new Path(new LocalHomeFinderFeature().find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new LocalTouchFeature(session).touch(file, new TransferStatus());
-        final Path folder = new Path(new LocalHomeFinderFeature().find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.directory));
+        final Path folder = new Path(new LocalHomeFinderFeature().find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         new LocalDirectoryFeature(session).mkdir(folder, new TransferStatus());
         new LocalDeleteFeature(session).delete(new ArrayList<>(Arrays.asList(file, folder)), new DisabledLoginCallback(), new Delete.DisabledCallback());
         assertFalse(Files.exists(session.toPath(file)));
-        assertFalse(Files.exists(session.toPath(folder.getAbsolute())));
+        assertFalse(Files.exists(session.toPath(folder)));
+    }
+
+    @Test
+    public void testDeleteSymlink() throws Exception {
+        final LocalSession session = new LocalSession(new Host(new LocalProtocol(), new LocalProtocol().getDefaultHostname()));
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
+        final Path folder = new Path(new LocalHomeFinderFeature().find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
+        new LocalDirectoryFeature(session).mkdir(folder, new TransferStatus());
+        final Path file = new Path(folder, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        new LocalTouchFeature(session).touch(file, new TransferStatus());
+        final Path symlink = new Path(new LocalHomeFinderFeature().find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        new LocalSymlinkFeature(session).symlink(symlink, folder.getAbsolute());
+        new LocalDeleteFeature(session).delete(new ArrayList<>(Collections.singletonList(symlink)), new DisabledLoginCallback(), new Delete.DisabledCallback());
+        assertFalse(Files.exists(session.toPath(symlink)));
+        assertTrue(Files.exists(session.toPath(folder)));
     }
 }

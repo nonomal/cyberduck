@@ -2,7 +2,7 @@ package ch.cyberduck.core.onedrive.features.sharepoint;
 
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.Filter;
+import ch.cyberduck.core.NullFilter;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -13,7 +13,9 @@ import ch.cyberduck.core.onedrive.features.GraphFileIdProvider;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.nuxeo.onedrive.client.ODataQuery;
 import org.nuxeo.onedrive.client.Sites;
+import org.nuxeo.onedrive.client.types.BaseItem;
 import org.nuxeo.onedrive.client.types.SharePointIds;
 import org.nuxeo.onedrive.client.types.Site;
 
@@ -25,7 +27,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 public class SitesListService extends AbstractListService<Site.Metadata> {
     private static final Logger log = LogManager.getLogger(SitesListService.class);
@@ -39,13 +40,21 @@ public class SitesListService extends AbstractListService<Site.Metadata> {
 
     @Override
     protected Iterator<Site.Metadata> getIterator(final Path directory) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Return sites for %s", directory));
-        }
+        log.debug("Return sites for {}", directory);
+        final ODataQuery query = new ODataQuery().select(
+                BaseItem.Property.Id,
+                BaseItem.Property.Name,
+                BaseItem.Property.WebUrl,
+                Site.Property.DisplayName,
+                Site.Property.Root,
+                Site.Property.SharepointIds);
         if(!session.isSingleSite() && directory.getParent().isRoot()) {
-            return Sites.getSites(session.getClient(), "*", Site.Select.SharepointIDs);
+            // .search() uses OData $search, which doesn't support '*'.
+            // But GET sites has query-parameter "search" which does support '*'.
+            // (┛ಠ_ಠ)┛彡┻━┻
+            return Sites.getSites(session.getClient(), query.set("search", "*"));
         }
-        return Sites.getSites(session.getSite(directory.getParent()), Site.Select.SharepointIDs);
+        return Sites.getSites(session.getSite(directory.getParent()), query);
     }
 
     @Override
@@ -109,7 +118,7 @@ public class SitesListService extends AbstractListService<Site.Metadata> {
         final PathAttributes attributes = new PathAttributes();
         attributes.setFileId(metadata.getId());
         attributes.setDisplayname(metadata.getDisplayName());
-        attributes.setLink(new DescriptiveUrl(URI.create(metadata.getWebUrl())));
+        attributes.setLink(new DescriptiveUrl(metadata.getWebUrl()));
 
         return new Path(directory, metadata.getName(),
             EnumSet.of(Path.Type.volume, Path.Type.directory, Path.Type.placeholder), attributes);
@@ -120,15 +129,10 @@ public class SitesListService extends AbstractListService<Site.Metadata> {
         final Map<String, Set<Integer>> duplicates = new HashMap<>();
         for(int i = 0; i < list.size(); i++) {
             final Path file = list.get(i);
-            final AttributedList<Path> result = list.filter(new Filter<Path>() {
+            final AttributedList<Path> result = list.filter(new NullFilter<Path>() {
                 @Override
                 public boolean accept(Path test) {
                     return file != test && file.getName().equals(test.getName());
-                }
-
-                @Override
-                public Pattern toPattern() {
-                    return null;
                 }
             });
             if(result.size() > 0) {

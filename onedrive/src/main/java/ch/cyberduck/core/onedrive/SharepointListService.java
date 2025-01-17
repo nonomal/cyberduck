@@ -40,10 +40,10 @@ public class SharepointListService extends AbstractSharepointListService {
     public static final String GROUPS_CONTAINER = "Groups";
     public static final String SITES_CONTAINER = "Sites";
 
-    public static final Path DEFAULT_NAME = new Path(Path.DELIMITER + DEFAULT_SITE, EnumSet.of(Path.Type.volume, Path.Type.placeholder, Path.Type.directory, Path.Type.symboliclink));
-    public static final Path DRIVES_NAME = new Path(Path.DELIMITER + DRIVES_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
-    public static final Path GROUPS_NAME = new Path(Path.DELIMITER + GROUPS_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
-    public static final Path SITES_NAME = new Path(Path.DELIMITER + SITES_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
+    public static final Path DEFAULT_NAME = new Path(DEFAULT_SITE, EnumSet.of(Path.Type.volume, Path.Type.placeholder, Path.Type.directory, Path.Type.symboliclink));
+    public static final Path DRIVES_NAME = new Path(DRIVES_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
+    public static final Path GROUPS_NAME = new Path(GROUPS_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
+    public static final Path SITES_NAME = new Path(SITES_CONTAINER, EnumSet.of(Path.Type.placeholder, Path.Type.directory));
 
     private final SharepointSession session;
     private final GraphFileIdProvider fileid;
@@ -57,7 +57,7 @@ public class SharepointListService extends AbstractSharepointListService {
     private Optional<Path> getDefault(final Path directory) {
         try {
             final Site site = Site.byId(session.getClient(), "root");
-            final Site.Metadata metadata = site.getMetadata();
+            final Site.Metadata metadata = site.getMetadata(null); // query: null: Default return set.
             final EnumSet<Path.Type> type = EnumSet.copyOf(DEFAULT_NAME.getType());
             final Path path = new Path(directory, DEFAULT_NAME.getName(), type, new PathAttributes().withFileId(metadata.getId()));
             path.setSymlinkTarget(

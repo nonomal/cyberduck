@@ -19,6 +19,7 @@ import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.LocalAccessDeniedException;
 import ch.cyberduck.core.io.watchservice.WatchServiceFactory;
 import ch.cyberduck.core.local.FileWatcher;
+import ch.cyberduck.core.local.FileWatcherListener;
 import ch.cyberduck.core.preferences.Preferences;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 
@@ -29,12 +30,16 @@ import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Comparator;
+import java.util.Set;
+import java.util.concurrent.CopyOnWriteArraySet;
 
-public class MonitorFolderHostCollection extends AbstractFolderHostCollection {
+public class MonitorFolderHostCollection extends AbstractFolderHostCollection implements FileWatcherListener {
     private static final Logger log = LogManager.getLogger(MonitorFolderHostCollection.class);
 
     private final Preferences preferences = PreferencesFactory.get();
     private final FileWatcher monitor = new FileWatcher(WatchServiceFactory.get());
+
+    private final Set<HostFileListener> listeners = new CopyOnWriteArraySet<>();
 
     public MonitorFolderHostCollection(final Local f) {
         super(f);
@@ -56,7 +61,7 @@ public class MonitorFolderHostCollection extends AbstractFolderHostCollection {
     @Override
     public void fileWritten(final Local file) {
         if(this.isLocked()) {
-            log.debug(String.format("Skip reading bookmark from %s", file));
+            log.debug("Skip reading bookmark from {}", file);
         }
         else {
             try {
@@ -66,15 +71,13 @@ public class MonitorFolderHostCollection extends AbstractFolderHostCollection {
                 if(index != -1) {
                     // Found bookmark with matching UUID
                     if(new HostEditComparator().compare(bookmark, this.get(index)) != 0) {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Replace bookmark %s at index %d", bookmark, index));
-                        }
-                        this.replace(index, bookmark);
+                        log.debug("Replace bookmark {} at index {}", bookmark, index);
+                        this.set(index, bookmark);
                     }
                 }
             }
             catch(AccessDeniedException e) {
-                log.warn(String.format("Failure reading file %s", file));
+                log.warn("Failure reading file {}", file);
             }
         }
     }
@@ -104,13 +107,16 @@ public class MonitorFolderHostCollection extends AbstractFolderHostCollection {
     @Override
     public void fileDeleted(final Local file) {
         if(this.isLocked()) {
-            log.debug(String.format("Skip reading bookmark from %s", file));
+            log.debug("Skip reading bookmark from {}", file);
         }
         else {
             final Host bookmark = this.lookup(FilenameUtils.getBaseName(file.getName()));
             if(bookmark != null) {
-                log.warn(String.format("Delete bookmark %s", bookmark));
+                log.warn("Delete bookmark {}", bookmark);
                 this.remove(bookmark);
+                for(HostFileListener listener : listeners) {
+                    listener.fileDeleted(bookmark);
+                }
             }
         }
     }
@@ -118,17 +124,36 @@ public class MonitorFolderHostCollection extends AbstractFolderHostCollection {
     @Override
     public void fileCreated(final Local file) {
         if(this.isLocked()) {
-            log.debug(String.format("Skip reading bookmark from %s", file));
+            log.debug("Skip reading bookmark from {}", file);
         }
         else {
             try {
                 final Host bookmark = HostReaderFactory.get().read(file);
-                log.warn(String.format("Add bookmark %s", bookmark));
-                this.add(bookmark);
+                if(!this.contains(bookmark)) {
+                    log.warn("Add bookmark {}", bookmark);
+                    this.add(bookmark);
+                    for(HostFileListener listener : listeners) {
+                        listener.fileCreated(bookmark);
+                    }
+                }
             }
             catch(AccessDeniedException e) {
-                log.warn(String.format("Failure reading file %s", file));
+                log.warn("Failure reading file {}", file);
             }
         }
+    }
+
+    public void addListener(final HostFileListener listener) {
+        listeners.add(listener);
+    }
+
+    public void removeListener(final HostFileListener listener) {
+        listeners.remove(listener);
+    }
+
+    public interface HostFileListener {
+        void fileDeleted(Host host);
+
+        void fileCreated(Host host);
     }
 }

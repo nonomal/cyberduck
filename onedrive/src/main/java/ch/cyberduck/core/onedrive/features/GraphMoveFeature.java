@@ -17,9 +17,13 @@ package ch.cyberduck.core.onedrive.features;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.SimplePathPredicate;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Move;
 import ch.cyberduck.core.onedrive.GraphExceptionMappingService;
@@ -36,12 +40,15 @@ import org.nuxeo.onedrive.client.types.DriveItem;
 import org.nuxeo.onedrive.client.types.FileSystemInfo;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
 
 public class GraphMoveFeature implements Move {
-    private static final Logger logger = LogManager.getLogger(GraphMoveFeature.class);
+    private static final Logger log = LogManager.getLogger(GraphMoveFeature.class);
 
     private final GraphSession session;
     private final Delete delete;
@@ -56,16 +63,16 @@ public class GraphMoveFeature implements Move {
     @Override
     public Path move(final Path file, final Path renamed, final TransferStatus status, final Delete.Callback callback, final ConnectionCallback connectionCallback) throws BackgroundException {
         if(status.isExists()) {
-            if(logger.isWarnEnabled()) {
-                logger.warn(String.format("Delete file %s to be replaced with %s", renamed, file));
+            if(!fileid.getFileId(file).equals(fileid.getFileId(renamed))) {
+                log.warn("Delete file {} to be replaced with {}", renamed, file);
+                delete.delete(Collections.singletonMap(renamed, status), connectionCallback, callback);
             }
-            delete.delete(Collections.singletonMap(renamed, status), connectionCallback, callback);
         }
         final PatchOperation patchOperation = new PatchOperation();
         if(!StringUtils.equals(file.getName(), renamed.getName())) {
             patchOperation.rename(renamed.getName());
         }
-        if(!file.getParent().equals(renamed.getParent())) {
+        if(!new SimplePathPredicate(file.getParent()).test(renamed.getParent())) {
             final DriveItem moveTarget = session.getItem(renamed.getParent());
             patchOperation.move(moveTarget);
         }
@@ -75,8 +82,8 @@ public class GraphMoveFeature implements Move {
         patchOperation.facet("fileSystemInfo", info);
         final DriveItem item = session.getItem(file);
         try {
-            Files.patch(item, patchOperation);
-            final PathAttributes attributes = new GraphAttributesFinderFeature(session, fileid).toAttributes(item.getMetadata());
+            final DriveItem.Metadata metadata = Files.patch(item, patchOperation);
+            final PathAttributes attributes = new GraphAttributesFinderFeature(session, fileid).toAttributes(metadata);
             fileid.cache(file, null);
             fileid.cache(renamed, attributes.getFileId());
             return renamed.withAttributes(attributes);
@@ -90,21 +97,26 @@ public class GraphMoveFeature implements Move {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        if(!session.isAccessible(target, true)) {
-            return false;
-        }
+    public void preflight(final Path source, final Optional<Path> optional) throws BackgroundException {
         if(!session.isAccessible(source, false)) {
-            return false;
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
         }
-        if(!session.getContainer(source).equals(session.getContainer(target))) {
-            return false;
+        if(source.getType().contains(Path.Type.shared)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
         }
-        return !source.getType().contains(Path.Type.shared);
+        if(optional.isPresent()) {
+            final Path target = optional.get();
+            if(!session.isAccessible(target, true)) {
+                throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
+            }
+            if(!session.getContainer(source).equals(session.getContainer(target))) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
+            }
+        }
     }
 }

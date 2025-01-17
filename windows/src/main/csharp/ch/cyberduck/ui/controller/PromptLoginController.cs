@@ -23,6 +23,7 @@ using ch.cyberduck.core;
 using ch.cyberduck.core.exception;
 using ch.cyberduck.core.preferences;
 using ch.cyberduck.core.sftp.openssh;
+using ch.cyberduck.ui.core;
 using Ch.Cyberduck.Core;
 using Ch.Cyberduck.Core.Native;
 using Ch.Cyberduck.Core.TaskDialog;
@@ -31,23 +32,24 @@ using org.apache.logging.log4j;
 using StructureMap;
 using static Ch.Cyberduck.ImageHelper;
 using Path = System.IO.Path;
+using UiUtils = Ch.Cyberduck.Ui.Core.Utils;
 
 namespace Ch.Cyberduck.Ui.Controller
 {
     public class PromptLoginController : PromptPasswordController, LoginCallback
     {
         private static readonly Logger Log = LogManager.getLogger(typeof(PromptLoginController).FullName);
-        private readonly WindowController _browser;
+        private readonly IWindowController _browser;
         private readonly List<string> _keys = new List<string> { LocaleFactory.localizedString("None") };
 
         private readonly HostPasswordStore keychain = PasswordStoreFactory.get();
 
-        public PromptLoginController(WindowController c) : base(c)
+        public PromptLoginController(IWindowController c) : base(c)
         {
             _browser = c;
         }
 
-        public ILoginView View { get; set; }
+        public new ILoginView View { get; set; }
 
         public void await(CountDownLatch signal, Host bookmark, string title, string message) => Dialogs.AwaitBackgroundAction(signal, bookmark, title, message, Images.CyberduckApplication);
 
@@ -56,38 +58,41 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             AsyncDelegate d = delegate
             {
-                _browser.CommandBox(title, title, message, String.Format("{0}|{1}", continueButton, disconnectButton),
-                    false, Utils.IsNotBlank(preference) ? LocaleFactory.localizedString("Don't show again", "Credentials") : null, TaskDialogIcon.Question,
-                    ProviderHelpServiceFactory.get().help(bookmark.getProtocol().getScheme()),
-                    delegate (int option, Boolean verificationChecked)
-                    {
-                        if (verificationChecked)
-                        {
-                            // Never show again.
-                            PreferencesFactory.get().setProperty(preference, true);
-                        }
-                        switch (option)
-                        {
-                            case 1:
-                                throw new LoginCanceledException();
-                        }
-                    });
+                var result = UiUtils.Show(
+                    owner: _browser.Window,
+                    title: title,
+                    mainInstruction: title,
+                    content: message,
+                    commandLinks: [continueButton, disconnectButton],
+                    mainIcon: TaskDialogIcon.Question,
+                    verificationText: Utils.IsNotBlank(preference) ? LocaleFactory.localizedString("Don't show again", "Credentials") : null,
+                    footerText: UiUtils.FormatHelp(ProviderHelpServiceFactory.get().help(bookmark.getProtocol())));
+
+                if (result.VerificationChecked == true)
+                {
+                    // Never show again.
+                    PreferencesFactory.get().setProperty(preference, true);
+                }
+
+                if ((int)result.Button == 1)
+                {
+                    throw new LoginCanceledException();
+                }
             };
-            _browser.Invoke(d);
+            _browser.Invoke(d, true);
             //Proceed nevertheless.
         }
 
         public Credentials prompt(Host bookmark, String username, String title, String reason, LoginOptions options)
         {
             View = ObjectFactory.GetInstance<ILoginView>();
-            var credentials = new Credentials().withSaved(options.keychain()).withUsername(username);
+            var credentials = new Credentials().withSaved(options.save()).withUsername(username);
             InitEventHandlers(bookmark, credentials, options);
 
 
             View.Title = LocaleFactory.localizedString(title, "Credentials");
             View.Message = LocaleFactory.localizedString(reason, "Credentials");
             View.Username = username;
-            View.SavePasswordState = options.keychain();
             View.DiskIcon = Images.Get(options.icon()).Size(64);
 
             InitPrivateKeys();
@@ -96,12 +101,12 @@ namespace Ch.Cyberduck.Ui.Controller
 
             AsyncDelegate d = delegate
             {
-                if (DialogResult.Cancel == View.ShowDialog(_browser.View))
+                if (DialogResult.Cancel == View.ShowDialog(_browser.Window))
                 {
                     throw new LoginCanceledException();
                 }
             };
-            _browser.Invoke(d);
+            _browser.Invoke(d, true);
             return credentials;
         }
 
@@ -212,10 +217,8 @@ namespace Ch.Cyberduck.Ui.Controller
             View.PasswordEnabled = options.password() && !credentials.isAnonymousLogin();
             View.UsernameLabel = options.getUsernamePlaceholder() + ":";
             View.PasswordLabel = options.getPasswordPlaceholder() + ":";
-            {
-                View.SavePasswordEnabled = options.keychain() && !credentials.isAnonymousLogin();
-                View.SavePasswordState = credentials.isSaved();
-            }
+            View.SavePasswordEnabled = options.keychain() && !credentials.isAnonymousLogin();
+            View.SavePasswordState = credentials.isSaved();
             View.AnonymousEnabled = options.anonymous();
             if (options.anonymous() && credentials.isAnonymousLogin())
             {

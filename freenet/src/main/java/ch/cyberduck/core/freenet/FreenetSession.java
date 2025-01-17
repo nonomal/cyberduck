@@ -27,11 +27,11 @@ import ch.cyberduck.core.dav.DAVSession;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ChecksumException;
 import ch.cyberduck.core.exception.LocalAccessDeniedException;
-import ch.cyberduck.core.features.Find;
+import ch.cyberduck.core.features.Metadata;
 import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.http.PreferencesRedirectCallback;
 import ch.cyberduck.core.io.MD5ChecksumCompute;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.CancelCallback;
@@ -52,7 +52,7 @@ public class FreenetSession extends DAVSession {
     }
 
     @Override
-    protected DAVClient connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    protected DAVClient connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         // Always inject new pool to builder on connect because the pool is shutdown on disconnect
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
         configuration.setRedirectStrategy(new DAVRedirectStrategy(new PreferencesRedirectCallback()));
@@ -67,7 +67,7 @@ public class FreenetSession extends DAVSession {
             });
         }
         catch(LocalAccessDeniedException | ChecksumException e) {
-            log.warn(String.format("Failure %s retrieving MAC address", e));
+            log.warn("Failure {} retrieving MAC address", e.getMessage());
             final String identifier = new MD5ChecksumCompute().compute(System.getProperty("user.name")).hash;
             configuration.addInterceptorLast(new HttpRequestInterceptor() {
                 @Override
@@ -81,16 +81,16 @@ public class FreenetSession extends DAVSession {
 
     @Override
     @SuppressWarnings("unchecked")
-    public <T> T getFeature(final Class<T> type) {
+    public <T> T _getFeature(final Class<T> type) {
         if(type == UrlProvider.class) {
             return (T) new FreenetUrlProvider(host);
-        }
-        if(type == Find.class) {
-            return (T) new FreenetFindFeature(this);
         }
         if(type == Timestamp.class) {
             return null;
         }
-        return super.getFeature(type);
+        if(type == Metadata.class) {
+            return null;
+        }
+        return super._getFeature(type);
     }
 }

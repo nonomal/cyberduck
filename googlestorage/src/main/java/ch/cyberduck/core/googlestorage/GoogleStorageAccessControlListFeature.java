@@ -16,16 +16,16 @@ package ch.cyberduck.core.googlestorage;
  */
 
 import ch.cyberduck.core.Acl;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AclPermission;
 import ch.cyberduck.core.preferences.HostPreferences;
-import ch.cyberduck.core.shared.DefaultAclFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -34,11 +34,11 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
+import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.Bucket;
 import com.google.api.services.storage.model.BucketAccessControl;
 import com.google.api.services.storage.model.BucketAccessControls;
@@ -46,16 +46,16 @@ import com.google.api.services.storage.model.ObjectAccessControl;
 import com.google.api.services.storage.model.ObjectAccessControls;
 import com.google.api.services.storage.model.StorageObject;
 
-public class GoogleStorageAccessControlListFeature extends DefaultAclFeature implements AclPermission {
+public class GoogleStorageAccessControlListFeature implements AclPermission {
     private static final Logger log = LogManager.getLogger(GoogleStorageAccessControlListFeature.class);
 
     public static final Set<? extends Acl> CANNED_LIST = new LinkedHashSet<>(Arrays.asList(
-        Acl.CANNED_PRIVATE,
-        Acl.CANNED_PUBLIC_READ,
-        Acl.CANNED_PUBLIC_READ_WRITE,
-        Acl.CANNED_BUCKET_OWNER_READ,
-        Acl.CANNED_BUCKET_OWNER_FULLCONTROL,
-        Acl.CANNED_AUTHENTICATED_READ)
+            Acl.CANNED_PRIVATE,
+            Acl.CANNED_PUBLIC_READ,
+            Acl.CANNED_PUBLIC_READ_WRITE,
+            Acl.CANNED_BUCKET_OWNER_READ,
+            Acl.CANNED_BUCKET_OWNER_FULLCONTROL,
+            Acl.CANNED_AUTHENTICATED_READ)
     );
 
     private final PathContainerService containerService;
@@ -63,32 +63,37 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
 
     public GoogleStorageAccessControlListFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
-    public Acl getDefault(final EnumSet<Path.Type> type) {
-        return Acl.toAcl(new HostPreferences(session.getHost()).getProperty("googlestorage.acl.default"));
-    }
-
-    @Override
-    public Acl getDefault(final Path file, final Local local) {
+    public Acl getDefault(final Path file) throws BackgroundException {
+        final Path bucket = containerService.getContainer(file);
         try {
-            final Path bucket = containerService.getContainer(file);
-            final Bucket configuration = session.getClient().buckets().get(bucket.getName()).execute();
+            final Storage.Buckets.Get request = session.getClient().buckets().get(bucket.getName());
+            if(bucket.attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                request.setUserProject(session.getHost().getCredentials().getUsername());
+            }
+            final Bucket configuration = request.execute();
             if(null != configuration.getIamConfiguration()) {
                 if(configuration.getIamConfiguration().getUniformBucketLevelAccess().getEnabled()) {
                     return Acl.EMPTY;
                 }
             }
             else {
-                log.warn(String.format("Missing IAM configuration for bucket %s", bucket));
+                log.warn("Missing IAM configuration for bucket {}", bucket);
             }
+            return Acl.toAcl(new HostPreferences(session.getHost()).getProperty("googlestorage.acl.default"));
         }
         catch(IOException e) {
-            log.warn("Failure reading bucket IAM configuration");
+            try {
+                throw new GoogleStorageExceptionMappingService().map("Failure to read attributes of {0}", e, file);
+            }
+            catch(AccessDeniedException p) {
+                log.warn("Missing permission to read bucket IAM configuration for {} {}", bucket.getName(), e.getMessage());
+                return Acl.EMPTY;
+            }
         }
-        return Acl.toAcl(new HostPreferences(session.getHost()).getProperty("googlestorage.acl.default"));
     }
 
     @Override
@@ -97,7 +102,7 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
             final Acl acl = new Acl();
             if(containerService.isContainer(file)) {
                 final BucketAccessControls controls = session.getClient().bucketAccessControls().list(
-                    containerService.getContainer(file).getName()).execute();
+                        containerService.getContainer(file).getName()).execute();
                 for(BucketAccessControl control : controls.getItems()) {
                     final String entity = control.getEntity();
                     acl.addAll(this.toUser(entity, control.getEmail()), new Acl.Role(control.getRole()));
@@ -114,7 +119,7 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
         }
         catch(IOException e) {
             final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to read attributes of {0}", e, file);
-            if(file.isPlaceholder()) {
+            if(file.isDirectory()) {
                 if(failure instanceof NotfoundException) {
                     // No placeholder file may exist but we just have a common prefix
                     return Acl.EMPTY;
@@ -166,22 +171,31 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
     }
 
     @Override
-    public void setPermission(final Path file, final Acl acl) throws BackgroundException {
+    public void setPermission(final Path file, final TransferStatus status) throws BackgroundException {
         try {
+            final Path bucket = containerService.getContainer(file);
             if(containerService.isContainer(file)) {
-                final List<BucketAccessControl> bucketAccessControls = this.toBucketAccessControl(acl);
-                session.getClient().buckets().update(containerService.getContainer(file).getName(),
-                    new Bucket().setAcl(bucketAccessControls)).execute();
+                final List<BucketAccessControl> bucketAccessControls = this.toBucketAccessControl(status.getAcl());
+                status.setResponse(new GoogleStorageAttributesFinderFeature(session).toAttributes(
+                        session.getClient().buckets().update(bucket.getName(),
+                                new Bucket().setAcl(bucketAccessControls)).execute()
+                ));
             }
             else {
-                final List<ObjectAccessControl> objectAccessControls = this.toObjectAccessControl(acl);
-                session.getClient().objects().update(containerService.getContainer(file).getName(), containerService.getKey(file),
-                    new StorageObject().setAcl(objectAccessControls)).execute();
+                final List<ObjectAccessControl> objectAccessControls = this.toObjectAccessControl(status.getAcl());
+                final Storage.Objects.Update request = session.getClient().objects().update(bucket.getName(), containerService.getKey(file),
+                        new StorageObject().setAcl(objectAccessControls));
+                if(bucket.attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                    request.setUserProject(session.getHost().getCredentials().getUsername());
+                }
+                status.setResponse(new GoogleStorageAttributesFinderFeature(session).toAttributes(
+                        request.execute()
+                ));
             }
         }
         catch(IOException e) {
             final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Cannot change permissions of {0}", e, file);
-            if(file.isPlaceholder()) {
+            if(file.isDirectory()) {
                 if(failure instanceof NotfoundException) {
                     // No placeholder file may exist but we just have a common prefix
                     return;
@@ -240,7 +254,7 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
                 control.setEmail(userAndRole.getUser().getIdentifier());
             }
             else {
-                log.warn(String.format("Unsupported user %s", userAndRole.getUser()));
+                log.warn("Unsupported user {}", userAndRole.getUser());
             }
             list.add(control);
         }
@@ -296,7 +310,7 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
                 control.setEmail(userAndRole.getUser().getIdentifier());
             }
             else {
-                log.warn(String.format("Unsupported user %s", userAndRole.getUser()));
+                log.warn("Unsupported user {}", userAndRole.getUser());
             }
             list.add(control);
         }
@@ -306,14 +320,14 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
     @Override
     public List<Acl.User> getAvailableAclUsers() {
         final List<Acl.User> users = new ArrayList<Acl.User>(Arrays.asList(
-            new Acl.CanonicalUser(),
-            new Acl.GroupUser(Acl.GroupUser.AUTHENTICATED, false) {
-                @Override
-                public String getPlaceholder() {
-                    return LocaleFactory.localizedString("Google Account Holders", "S3");
-                }
-            },
-            new Acl.GroupUser(Acl.GroupUser.EVERYONE, false))
+                new Acl.CanonicalUser(),
+                new Acl.GroupUser(Acl.GroupUser.AUTHENTICATED, false) {
+                    @Override
+                    public String getPlaceholder() {
+                        return LocaleFactory.localizedString("Google Account Holders", "S3");
+                    }
+                },
+                new Acl.GroupUser(Acl.GroupUser.EVERYONE, false))
         );
         users.add(new Acl.EmailUser() {
             @Override
@@ -343,8 +357,8 @@ public class GoogleStorageAccessControlListFeature extends DefaultAclFeature imp
     public List<Acl.Role> getAvailableAclRoles(final List<Path> files) {
         // There are two roles that can be assigned to an entity:
         return new ArrayList<Acl.Role>(Arrays.asList(
-            new Acl.Role(Acl.Role.FULL),
-            new Acl.Role(Acl.Role.READ))
+                new Acl.Role(Acl.Role.FULL),
+                new Acl.Role(Acl.Role.READ))
         );
     }
 }

@@ -21,13 +21,15 @@ import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 public class DownloadShareWorker<Options> extends Worker<DescriptiveUrl> {
     private static final Logger log = LogManager.getLogger(DownloadShareWorker.class);
@@ -35,25 +37,26 @@ public class DownloadShareWorker<Options> extends Worker<DescriptiveUrl> {
     private final Path file;
     private final Options options;
     private final PasswordCallback callback;
+    private final Share.ShareeCallback prompt;
 
-    public DownloadShareWorker(final Path file, final Options options, final PasswordCallback callback) {
+    public DownloadShareWorker(final Path file, final Options options, final PasswordCallback callback, final Share.ShareeCallback prompt) {
         this.file = file;
         this.options = options;
         this.callback = callback;
+        this.prompt = prompt;
     }
 
     @Override
     public DescriptiveUrl run(final Session<?> session) throws BackgroundException {
-        final PromptUrlProvider<Options, Void> provider = session.getFeature(PromptUrlProvider.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", provider));
+        final Share<Options, Void> provider = session.getFeature(Share.class);
+        log.debug("Run with feature {}", provider);
+        final Set<Share.Sharee> sharees = provider.getSharees(Share.Type.download);
+        if(!sharees.stream().filter(s -> !s.equals(Share.Sharee.world)).collect(Collectors.toSet()).isEmpty()) {
+            return provider.toDownloadUrl(file, prompt.prompt(Share.Type.download, sharees), options, callback);
         }
-        return provider.toDownloadUrl(file, options, callback);
-    }
-
-    @Override
-    public DescriptiveUrl initialize() {
-        return DescriptiveUrl.EMPTY;
+        else {
+            return provider.toDownloadUrl(file, Share.Sharee.world, options, callback);
+        }
     }
 
     @Override

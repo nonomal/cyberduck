@@ -15,46 +15,25 @@ package ch.cyberduck.core.storegate;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledConnectionCallback;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.Touch;
-import ch.cyberduck.core.features.Write;
-import ch.cyberduck.core.io.StatusOutputStream;
-import ch.cyberduck.core.storegate.io.swagger.client.model.FileMetadata;
-import ch.cyberduck.core.transfer.TransferStatus;
+import ch.cyberduck.core.shared.DefaultTouchFeature;
+import ch.cyberduck.core.storegate.io.swagger.client.model.File;
 
-import java.io.IOException;
+import java.text.MessageFormat;
 
-public class StoregateTouchFeature implements Touch<FileMetadata> {
-
-    private Write<FileMetadata> writer;
+public class StoregateTouchFeature extends DefaultTouchFeature<File> {
 
     public StoregateTouchFeature(final StoregateSession session, final StoregateIdProvider fileid) {
-        this.writer = new StoregateWriteFeature(session, fileid);
+        super(new StoregateWriteFeature(session, fileid));
     }
 
     @Override
-    public Path touch(final Path file, final TransferStatus status) throws BackgroundException {
-        try {
-            final StatusOutputStream<FileMetadata> out = writer.write(file, status, new DisabledConnectionCallback());
-            out.close();
-            return file.withAttributes(status.getResponse());
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(workdir.isRoot()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), filename)).withFile(workdir);
         }
-        catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map("Cannot create {0}", e, file);
-        }
-    }
-
-    @Override
-    public Touch<FileMetadata> withWriter(final Write<FileMetadata> writer) {
-        this.writer = writer;
-        return this;
-    }
-
-    @Override
-    public boolean isSupported(final Path workdir, final String filename) {
-        return !workdir.isRoot();
     }
 }

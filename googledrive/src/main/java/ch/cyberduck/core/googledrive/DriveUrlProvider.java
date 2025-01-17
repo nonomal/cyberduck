@@ -20,14 +20,18 @@ import ch.cyberduck.core.DescriptiveUrlBag;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.UrlProvider;
 
+import java.util.Collections;
+import java.util.EnumSet;
+
 public class DriveUrlProvider implements UrlProvider {
 
     @Override
-    public DescriptiveUrlBag toUrl(final Path file) {
-        final DescriptiveUrlBag list = new DescriptiveUrlBag();
-        if(file.attributes().getLink() != DescriptiveUrl.EMPTY) {
-            list.add(file.attributes().getLink());
+    public DescriptiveUrlBag toUrl(final Path file, final EnumSet<DescriptiveUrl.Type> types) {
+        if(types.contains(DescriptiveUrl.Type.http)) {
+            if(file.attributes().getLink() != DescriptiveUrl.EMPTY) {
+                return new DescriptiveUrlBag(Collections.singleton(file.attributes().getLink()));
+            }
         }
-        return list;
+        return DescriptiveUrlBag.empty();
     }
 }

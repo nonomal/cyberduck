@@ -72,7 +72,7 @@ public abstract class Worker<T> {
     }
 
     public void cancel() {
-        log.warn(String.format("Cancel worker %s", this));
+        log.warn("Cancel worker {}", this);
         canceled.set(true);
     }
 
@@ -94,10 +94,6 @@ public abstract class Worker<T> {
                 return null;
             }
         };
-    }
-
-    public void reset() {
-        //
     }
 
     public interface RecursiveCallback<T> {

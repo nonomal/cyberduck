@@ -41,6 +41,7 @@ import java.util.UUID;
 
 import com.google.api.services.drive.model.File;
 
+import static ch.cyberduck.core.googledrive.DriveHomeFinderService.MYDRIVE_FOLDER;
 import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
@@ -105,19 +106,19 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
                 new Path(folder, name, EnumSet.of(Path.Type.file)), new TransferStatus());
         final DriveAttributesFinderFeature f = new DriveAttributesFinderFeature(session, fileid);
         assertEquals(version1.attributes(), f.find(version1));
-        final Path version2 = new DriveTouchFeature(session, fileid).touch(
-                new Path(folder, name, EnumSet.of(Path.Type.file)), new TransferStatus());
-        assertNotEquals(f.find(version1), f.find(version2));
         final AttributedList<Path> listBeforeDelete = new DriveListService(session, fileid).list(folder, new DisabledListProgressListener());
         assertTrue(listBeforeDelete.contains(version1));
         assertFalse(listBeforeDelete.find(new DefaultPathPredicate(version1)).attributes().isHidden());
-        assertTrue(listBeforeDelete.contains(version2));
         new DriveTrashFeature(session, fileid).delete(Collections.singletonList(new Path(version1)), new DisabledLoginCallback(), new Delete.DisabledCallback());
         final AttributedList<Path> listAfterDelete = new DriveListService(session, fileid).list(folder, new DisabledListProgressListener());
         assertTrue(listAfterDelete.contains(version1));
         assertTrue(listAfterDelete.find(new DefaultPathPredicate(version1)).attributes().isHidden());
-        assertTrue(listAfterDelete.contains(version2));
-        assertFalse(listAfterDelete.find(new DefaultPathPredicate(version2)).attributes().isHidden());
+        final Path version2 = new DriveTouchFeature(session, fileid).touch(
+                new Path(folder, name, EnumSet.of(Path.Type.file)), new TransferStatus());
+        assertNotEquals(f.find(version1), f.find(version2));
+        final AttributedList<Path> listAfterReupload = new DriveListService(session, fileid).list(folder, new DisabledListProgressListener());
+        assertTrue(listAfterReupload.contains(version2));
+        assertFalse(listAfterReupload.find(new DefaultPathPredicate(version2)).attributes().isHidden());
         new DriveDeleteFeature(session, fileid).delete(Arrays.asList(version1, version2, folder), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
@@ -147,11 +148,11 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
             .setMimeType("application/vnd.google-apps.shortcut")
             .setShortcutDetails(new File.ShortcutDetails()
                 .setTargetMimeType("text/plain")
-                .setTargetId(fileid.getFileId(test, new DisabledListProgressListener()))
+                .setTargetId(fileid.getFileId(test))
             )
         ).execute();
         assertEquals(attributes, f.find(new Path(DriveHomeFinderService.MYDRIVE_FOLDER, shortcut.getName(), EnumSet.of(Path.Type.file))));
-        session.getClient().files().delete(fileid.getFileId(test, new DisabledListProgressListener()))
+        session.getClient().files().delete(fileid.getFileId(test))
             .setSupportsAllDrives(PreferencesFactory.get().getBoolean("googledrive.teamdrive.enable")).execute();
         try {
             f.find(new Path(DriveHomeFinderService.MYDRIVE_FOLDER, shortcut.getName(), EnumSet.of(Path.Type.file)));
@@ -170,7 +171,7 @@ public class DriveAttributesFinderFeatureTest extends AbstractDriveTest {
     public void testChangedFileId() throws Exception {
         final DriveFileIdProvider fileid = new DriveFileIdProvider(session);
         final Path room = new DriveDirectoryFeature(session, fileid).mkdir(
-            new Path(new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory, Path.Type.volume)), new TransferStatus());
+                new Path(MYDRIVE_FOLDER, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), new TransferStatus());
         final Path test = new DriveTouchFeature(session, fileid).touch(new Path(room, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus());
         final String latestnodeid = test.attributes().getFileId();
         assertNotNull(latestnodeid);

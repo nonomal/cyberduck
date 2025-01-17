@@ -35,6 +35,7 @@ namespace Ch.Cyberduck.Ui.Controller
         bool AlwaysUseDefaultEditor { set; get; }
         bool ShowHiddenFiles { set; get; }
         bool DoubleClickEditor { set; get; }
+        bool EnableVersioning { get; set; }
         bool ReturnKeyRenames { set; get; }
         bool InfoWindowShowsCurrentSelection { set; get; }
         int BookmarkSize { set; get; }
@@ -112,6 +113,7 @@ namespace Ch.Cyberduck.Ui.Controller
         bool UseSystemProxy { set; get; }
         bool DebugLog { set; get; }
         bool AutoDetectVault { get; set; }
+        bool VaultUseKeychain { get; set; }
         void PopulateBookmarkSize(IList<KeyValuePair<int, string>> sizes);
         void MarkDownloadSkipRegex(int position);
         void MarkUploadSkipRegex(int position);
@@ -154,6 +156,7 @@ namespace Ch.Cyberduck.Ui.Controller
         event VoidHandler DefaultEditorChangedEvent;
         event VoidHandler RepopulateEditorsEvent;
         event VoidHandler AlwaysUseDefaultEditorChangedEvent;
+        event VoidHandler EnableVersioningChangedEvent;
         event VoidHandler ChmodDownloadChangedEvent;
         event VoidHandler ChmodDownloadUseDefaultChangedEvent;
         event VoidHandler ChmodDownloadTypeChangedEvent;
@@ -201,6 +204,7 @@ namespace Ch.Cyberduck.Ui.Controller
         event VoidHandler RetryDelayChangedEvent;
         event VoidHandler RetriesChangedEvent;
         event VoidHandler CryptomatorAutoDetectVaultChangedEvent;
+        event VoidHandler CryptomatorUseKeychainChangedEvent;
         //todo introduce Enums to handle the objects directly instead of using strings
         void PopulateBookmarks(List<KeyValueIconTriple<Host, string>> bookmarks);
         void PopulateEditors(List<KeyValueIconTriple<Application, string>> editors);

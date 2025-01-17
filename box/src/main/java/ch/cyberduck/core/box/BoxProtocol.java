@@ -16,8 +16,14 @@ package ch.cyberduck.core.box;
  */
 
 import ch.cyberduck.core.AbstractProtocol;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
+import ch.cyberduck.core.synchronization.ComparisonService;
+import ch.cyberduck.core.synchronization.DefaultComparisonService;
+import ch.cyberduck.core.synchronization.ETagComparisonService;
+import com.google.auto.service.AutoService;
 
+@AutoService(Protocol.class)
 public class BoxProtocol extends AbstractProtocol {
 
     @Override
@@ -57,6 +63,24 @@ public class BoxProtocol extends AbstractProtocol {
 
     @Override
     public DirectoryTimestamp getDirectoryTimestamp() {
-        return DirectoryTimestamp.implicit;
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
+    public Case getCaseSensitivity() {
+        return Case.insensitive;
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
+    }
+
+    @Override
+    public <T> T getFeature(final Class<T> type) {
+        if(type == ComparisonService.class) {
+            return (T) new DefaultComparisonService(new ETagComparisonService(), ComparisonService.disabled);
+        }
+        return super.getFeature(type);
     }
 }

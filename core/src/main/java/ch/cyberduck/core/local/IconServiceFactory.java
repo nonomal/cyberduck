@@ -19,14 +19,20 @@ package ch.cyberduck.core.local;
  */
 
 import ch.cyberduck.core.Factory;
+import ch.cyberduck.core.Local;
+import ch.cyberduck.core.transfer.Transfer;
 
 public class IconServiceFactory extends Factory<IconService> {
 
-    protected IconServiceFactory() {
+    private IconServiceFactory() {
         super("factory.iconservice.class");
     }
 
     public static IconService get() {
         return new IconServiceFactory().create();
+    }
+
+    public static IconService.Icon iconFor(final Transfer.Type type, final Local file) {
+        return get().get(type, file);
     }
 }

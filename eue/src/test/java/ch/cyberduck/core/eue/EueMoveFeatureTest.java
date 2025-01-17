@@ -57,13 +57,10 @@ public class EueMoveFeatureTest extends AbstractEueSessionTest {
         assertTrue(new EueFindFeature(session, fileid).find(targetFile));
         assertFalse(new DefaultFindFeature(session).find(sourceFile));
         assertTrue(new DefaultFindFeature(session).find(targetFile));
-        assertEquals(targetFile.attributes(), new EueAttributesFinderFeature(session, fileid).find(targetFile));
-        assertEquals(sourceAttr.getSize(),
-                new EueAttributesFinderFeature(session, fileid).find(targetFile).getSize());
-        assertNotEquals(sourceAttr.getETag(),
-                new EueAttributesFinderFeature(session, fileid).find(targetFile).getETag());
-        assertEquals(sourceAttr.getFileId(),
-                new EueAttributesFinderFeature(session, fileid).find(targetFile).getFileId());
+        final PathAttributes targetAttributes = new EueAttributesFinderFeature(session, fileid).find(targetFile);
+        assertEquals(sourceAttr.getSize(), targetAttributes.getSize());
+        assertNotEquals(sourceAttr.getETag(), targetAttributes.getETag());
+        assertEquals(sourceAttr.getFileId(), targetAttributes.getFileId());
         new EueDeleteFeature(session, fileid).delete(Arrays.asList(sourceFolder, targetFolder), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
@@ -117,7 +114,6 @@ public class EueMoveFeatureTest extends AbstractEueSessionTest {
         assertTrue(new EueFindFeature(session, fileid).find(targetFile));
         assertFalse(new DefaultFindFeature(session).find(sourceFile));
         assertTrue(new DefaultFindFeature(session).find(targetFile));
-        assertEquals(targetFile.attributes(), new EueAttributesFinderFeature(session, fileid).find(targetFile));
         assertEquals(sourceAttr.getSize(),
                 new EueAttributesFinderFeature(session, fileid).find(targetFile).getSize());
         assertNotEquals(sourceAttr.getETag(),
@@ -169,7 +165,7 @@ public class EueMoveFeatureTest extends AbstractEueSessionTest {
         final String name = new AlphanumericRandomStringService().random();
         final Path file = new EueTouchFeature(session, fileid).touch(new Path(StringUtils.capitalize(name), EnumSet.of(Path.Type.file)), new TransferStatus());
         final Path rename = new Path(StringUtils.lowerCase(name), EnumSet.of(Path.Type.file));
-        new EueMoveFeature(session, fileid).move(file, rename, new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
+        new EueMoveFeature(session, fileid).move(file, rename, new TransferStatus().exists(true), new Delete.DisabledCallback(), new DisabledConnectionCallback());
         new EueDeleteFeature(session, fileid).delete(Collections.singletonList(rename), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

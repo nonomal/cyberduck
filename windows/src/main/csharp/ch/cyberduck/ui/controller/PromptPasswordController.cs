@@ -23,14 +23,15 @@ using ch.cyberduck.core.exception;
 using Ch.Cyberduck.Core;
 using StructureMap;
 using static Ch.Cyberduck.ImageHelper;
+using ch.cyberduck.ui.core;
 
 namespace Ch.Cyberduck.Ui.Controller
 {
     public class PromptPasswordController : WindowController<IPasswordPromptView>, PasswordCallback
     {
-        private readonly WindowController _browser;
+        private readonly IWindowController _browser;
 
-        public PromptPasswordController(WindowController c)
+        public PromptPasswordController(IWindowController c)
         {
             _browser = c;
         }
@@ -43,26 +44,36 @@ namespace Ch.Cyberduck.Ui.Controller
 
         public Credentials prompt(Host bookmark, string title, string reason, LoginOptions options)
         {
-            Credentials credentials = new Credentials().withSaved(options.keychain());
+            Credentials credentials = new Credentials().withSaved(options.save());
             AsyncDelegate d = delegate
             {
                 View = ObjectFactory.GetInstance<IPasswordPromptView>();
                 View.Title = title;
                 View.Reason = new StringAppender().append(reason).toString();
                 View.OkButtonText = LocaleFactory.localizedString("Continue", "Credentials");
+                View.SkipButtonText = LocaleFactory.localizedString("Skip", "Transfer");
                 View.IconView = Images.Get(options.icon()).Size(64);
                 View.SavePasswordEnabled = options.keychain();
                 View.SavePasswordState = credentials.isSaved();
+                View.CanSkip = options.anonymous();
 
                 View.ValidateInput += ValidateInputEventHandler;
-                if (DialogResult.Cancel == View.ShowDialog(_browser.View))
+                switch (View.ShowDialog(_browser.Window))
                 {
-                    throw new LoginCanceledException();
+                    case DialogResult.Cancel:
+                        throw new LoginCanceledException();
+
+                    case DialogResult.Ignore:
+                        credentials.setPassword(string.Empty);
+                        break;
+
+                    default:
+                        credentials.setPassword(View.InputText.Trim());
+                        credentials.setSaved(View.SavePasswordState);
+                        break;
                 }
-                credentials.setPassword(View.InputText.Trim());
-                credentials.setSaved(View.SavePasswordState);
             };
-            _browser.Invoke(d);
+            _browser.Invoke(d, true);
             return credentials;
         }
 

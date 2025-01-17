@@ -16,12 +16,16 @@ package ch.cyberduck.core.features;
  */
 
 import ch.cyberduck.core.AttributedList;
+import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.VersioningConfiguration;
 import ch.cyberduck.core.exception.BackgroundException;
 
+import java.util.EnumSet;
+
+@Optional
 public interface Versioning {
 
     /**
@@ -44,6 +48,16 @@ public interface Versioning {
     void setConfiguration(Path container, PasswordCallback prompt, VersioningConfiguration configuration) throws BackgroundException;
 
     /**
+     * Save new version
+     *
+     * @param file File or folder
+     * @return True if version is saved
+     */
+    default boolean save(Path file) throws BackgroundException {
+        return false;
+    }
+
+    /**
      * Restore this version
      *
      * @param file File
@@ -57,7 +71,9 @@ public interface Versioning {
      * @param file File
      * @return True if this file version can be reverted
      */
-    boolean isRevertable(Path file);
+    default boolean isRevertable(final Path file) {
+        return this.features(file).contains(Flags.revert);
+    }
 
     /**
      * Find all versions for path. Should not include latest version but only previous.
@@ -68,4 +84,40 @@ public interface Versioning {
      * @throws BackgroundException Failure reading versions from server
      */
     AttributedList<Path> list(Path file, ListProgressListener listener) throws BackgroundException;
+
+    default void cleanup(Path file, ConnectionCallback callback) throws BackgroundException {
+        //
+    }
+
+    /**
+     * @return Supported features
+     */
+    default EnumSet<Flags> features(Path file) {
+        if(file.attributes().isDuplicate()) {
+            return EnumSet.of(Flags.revert);
+        }
+        return EnumSet.noneOf(Flags.class);
+    }
+
+    /**
+     * Feature flags
+     */
+    enum Flags {
+        /**
+         * Support reverting to previous version of file
+         */
+        revert,
+        /**
+         * Archive file version
+         */
+        save,
+        /**
+         * Toggle configuration
+         */
+        configuration,
+        /**
+         *
+         */
+        list
+    }
 }

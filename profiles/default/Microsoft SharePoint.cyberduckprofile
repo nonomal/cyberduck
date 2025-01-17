@@ -31,6 +31,8 @@
         <string>graph.microsoft.com</string>
         <key>Hostname Configurable</key>
         <false/>
+        <key>Default Nickname</key>
+        <string>SharePoint</string>
         <key>Port Configurable</key>
         <false/>
         <key>OAuth Authorization Url</key>
@@ -42,13 +44,14 @@
             <string>sites.readwrite.all</string>
             <string>files.readwrite.all</string>
             <string>user.read</string>
-            <string>groupmember.read.all</string>
             <string>offline_access</string>
         </array>
         <key>OAuth Client ID</key>
         <string>f40bc18f-cd02-4212-b7f1-15243e4e2ad3</string>
+        <key>OAuth Client Secret</key>
+        <string/>
         <key>OAuth Redirect Url</key>
-        <string>https://cyberduck.io/oauth</string>
+        <string>x-cyberduck-action://oauth</string>
         <key>Password Configurable</key>
         <false/>
         <key>Username Configurable</key>

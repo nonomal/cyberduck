@@ -16,34 +16,17 @@ package ch.cyberduck.core.diagnostics;
  */
 
 import ch.cyberduck.core.Host;
+import ch.cyberduck.core.exception.BackgroundException;
 
 public class DisabledReachability implements Reachability {
 
     @Override
-    public boolean isReachable(final Host bookmark) {
-        return true;
-    }
-
-    @Override
-    public void diagnose(final Host bookmark) {
-        // Not implemented
+    public void test(final Host bookmark) throws BackgroundException {
+        //
     }
 
     @Override
     public Monitor monitor(final Host host, final Callback callback) {
-        return new DisabledMonitor();
-    }
-
-    private static class DisabledMonitor implements Monitor {
-        @Override
-        public Monitor start() {
-            return this;
-        }
-
-        @Override
-        public Monitor stop() {
-            return this;
-
-        }
+        return Monitor.disabled;
     }
 }

@@ -63,17 +63,17 @@ public class BoxListService implements ListService {
             Items items;
             do {
                 items = new FoldersApi(new BoxApiClient(session.getClient())).getFoldersIdItems(directory.isRoot() ? "0" :
-                                fileid.getFileId(directory, listener),
+                                fileid.getFileId(directory),
                         BoxAttributesFinderFeature.DEFAULT_FIELDS, false, null, (long) offset, (long) chunksize,
                         StringUtils.EMPTY, StringUtils.EMPTY, StringUtils.EMPTY);
                 for(Object entry : items.getEntries()) {
                     if(!(entry instanceof Map)) {
-                        log.error(String.format("Unexpected entry %s", entry));
+                        log.error("Unexpected entry {}", entry);
                         continue;
                     }
                     final Object type = ((Map) entry).get("type");
                     if(!(type instanceof String)) {
-                        log.error(String.format("Missing type %s", type));
+                        log.error("Missing type {}", type);
                         continue;
                     }
                     switch(type.toString()) {
@@ -90,9 +90,9 @@ public class BoxListService implements ListService {
                                     attributes.toAttributes(folder)));
                             break;
                     }
-                    listener.chunk(directory, list);
                 }
                 offset += chunksize;
+                listener.chunk(directory, list);
             }
             while(items.getEntries().size() == chunksize);
             return list;

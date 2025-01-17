@@ -36,7 +36,6 @@ import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 
-import com.dracoon.sdk.crypto.CryptoUtils;
 import com.dracoon.sdk.crypto.FileEncryptionCipher;
 import com.dracoon.sdk.crypto.error.CryptoException;
 import com.dracoon.sdk.crypto.error.CryptoSystemException;
@@ -111,7 +110,7 @@ public class TripleCryptEncryptingOutputStream extends HttpResponseOutputStream<
             try {
                 final EncryptedDataContainer encrypted = cipher.doFinal();
                 super.write(encrypted.getContent());
-                final String tag = CryptoUtils.byteArrayToString(encrypted.getTag());
+                final String tag = TripleCryptConverter.byteArrayToBase64String(encrypted.getTag());
                 final ObjectReader reader = session.getClient().getJSON().getContext(null).readerFor(FileKey.class);
                 final FileKey fileKey = reader.readValue(status.getFilekey().array());
                 if(null == fileKey.getTag()) {
@@ -123,7 +122,7 @@ public class TripleCryptEncryptingOutputStream extends HttpResponseOutputStream<
                     status.setFilekey(ByteBuffer.wrap(out.toByteArray()));
                 }
                 else {
-                    log.warn(String.format("Skip setting tag in file key already found in %s", status));
+                    log.warn("Skip setting tag in file key already found in {}", status);
                 }
             }
             catch(CryptoSystemException e) {

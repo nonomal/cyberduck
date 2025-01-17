@@ -16,7 +16,7 @@ package ch.cyberduck.core.box;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.box.io.swagger.client.ApiException;
 import ch.cyberduck.core.box.io.swagger.client.api.FilesApi;
@@ -26,6 +26,7 @@ import ch.cyberduck.core.box.io.swagger.client.model.FilesfileIdcopyParent;
 import ch.cyberduck.core.box.io.swagger.client.model.FolderIdCopyBody;
 import ch.cyberduck.core.box.io.swagger.client.model.FoldersfolderIdcopyParent;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.io.StreamListener;
@@ -34,7 +35,12 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class BoxCopyFeature implements Copy {
     private static final Logger log = LogManager.getLogger(BoxCopyFeature.class);
@@ -51,25 +57,23 @@ public class BoxCopyFeature implements Copy {
     public Path copy(final Path file, final Path target, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
         try {
             if(status.isExists()) {
-                if(log.isWarnEnabled()) {
-                    log.warn(String.format("Delete file %s to be replaced with %s", target, file));
-                }
+                log.warn("Delete file {} to be replaced with {}", target, file);
                 new BoxDeleteFeature(session, fileid).delete(Collections.singletonList(target), callback, new Delete.DisabledCallback());
             }
             if(file.isDirectory()) {
                 return target.withAttributes(new BoxAttributesFinderFeature(session, fileid).toAttributes(
                         new FoldersApi(new BoxApiClient(session.getClient())).postFoldersIdCopy(
-                                fileid.getFileId(file, new DisabledListProgressListener()),
-                                new FolderIdCopyBody().name(target.getName()).parent(new FoldersfolderIdcopyParent().id(fileid.getFileId(target.getParent(), new DisabledListProgressListener()))),
+                                fileid.getFileId(file),
+                                new FolderIdCopyBody().name(target.getName()).parent(new FoldersfolderIdcopyParent().id(fileid.getFileId(target.getParent()))),
                                 BoxAttributesFinderFeature.DEFAULT_FIELDS)
                 ));
             }
             return target.withAttributes(new BoxAttributesFinderFeature(session, fileid).toAttributes(
                     new FilesApi(new BoxApiClient(session.getClient())).postFilesIdCopy(
-                            fileid.getFileId(file, new DisabledListProgressListener()),
+                            fileid.getFileId(file),
                             new FileIdCopyBody()
                                     .name(target.getName())
-                                    .parent(new FilesfileIdcopyParent().id(fileid.getFileId(target.getParent(), new DisabledListProgressListener()))),
+                                    .parent(new FilesfileIdcopyParent().id(fileid.getFileId(target.getParent()))),
                             null, BoxAttributesFinderFeature.DEFAULT_FIELDS)
             ));
         }
@@ -79,7 +83,18 @@ public class BoxCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
+    }
+
+    @Override
+    public void preflight(final Path source, final Optional<Path> optional) throws BackgroundException {
+        if(optional.isPresent()) {
+            final Path target = optional.get();
+            if(!BoxTouchFeature.validate(target.getName())) {
+                throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create {0}", "Error"), target.getName()));
+            }
+            validate(session.getCaseSensitivity(), source, target);
+        }
     }
 }

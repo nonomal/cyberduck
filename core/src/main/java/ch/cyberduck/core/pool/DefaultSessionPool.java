@@ -18,12 +18,9 @@ package ch.cyberduck.core.pool;
 import ch.cyberduck.core.ConnectionService;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Session;
-import ch.cyberduck.core.SessionFactory;
 import ch.cyberduck.core.TranscriptListener;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
-import ch.cyberduck.core.ssl.DefaultX509KeyManager;
-import ch.cyberduck.core.ssl.DisabledX509TrustManager;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.BackgroundActionState;
@@ -51,9 +48,8 @@ public class DefaultSessionPool implements SessionPool {
     private static final int POOL_WARNING_THRESHOLD = 5;
 
     private final FailureDiagnostics<BackgroundException> diagnostics
-        = new DefaultFailureDiagnostics();
+            = new DefaultFailureDiagnostics();
 
-    private final ConnectionService connect;
     private final TranscriptListener transcript;
     private final Host bookmark;
 
@@ -61,29 +57,29 @@ public class DefaultSessionPool implements SessionPool {
 
     private final GenericObjectPool<Session> pool;
 
-    private SessionPool features = SessionPool.DISCONNECTED;
+    private static final GenericObjectPoolConfig<Session> configuration = new GenericObjectPoolConfig<>();
 
-    public DefaultSessionPool(final ConnectionService connect, final X509TrustManager trust, final X509KeyManager key,
-                              final VaultRegistry registry, final TranscriptListener transcript,
-                              final Host bookmark) {
-        this.connect = connect;
-        this.registry = registry;
-        this.bookmark = bookmark;
-        this.transcript = transcript;
-        final GenericObjectPoolConfig<Session> configuration = new GenericObjectPoolConfig<>();
+    static {
         configuration.setJmxEnabled(false);
         configuration.setEvictionPolicyClassName(CustomPoolEvictionPolicy.class.getName());
         configuration.setBlockWhenExhausted(true);
         configuration.setMaxWait(Duration.ofMillis(BORROW_MAX_WAIT_INTERVAL));
-        this.pool = new GenericObjectPool<>(new PooledSessionFactory(connect, trust, key, bookmark, registry), configuration);
-        final AbandonedConfig abandon = new AbandonedConfig();
-        abandon.setUseUsageTracking(true);
-        this.pool.setAbandonedConfig(abandon);
     }
 
-    public DefaultSessionPool(final ConnectionService connect, final VaultRegistry registry,
-                              final TranscriptListener transcript, final Host bookmark, final GenericObjectPool<Session> pool) {
-        this.connect = connect;
+    private static final AbandonedConfig abandon = new AbandonedConfig();
+
+    {
+        abandon.setUseUsageTracking(true);
+    }
+
+    public DefaultSessionPool(final ConnectionService connect, final X509TrustManager trust, final X509KeyManager key,
+                              final VaultRegistry registry, final TranscriptListener transcript, final Host bookmark) {
+        this(connect, registry, transcript, bookmark,
+                new GenericObjectPool<>(new PooledSessionFactory(connect, trust, key, bookmark, registry), configuration, abandon));
+    }
+
+    public DefaultSessionPool(final ConnectionService connect, final VaultRegistry registry, final TranscriptListener transcript,
+                              final Host bookmark, final GenericObjectPool<Session> pool) {
         this.transcript = transcript;
         this.bookmark = bookmark;
         this.registry = registry;
@@ -97,31 +93,25 @@ public class DefaultSessionPool implements SessionPool {
 
         @Override
         public boolean evict(final EvictionConfig config, final PooledObject<Session<?>> underTest, final int idleCount) {
-            log.warn(String.format("Evict idle session %s from pool", underTest));
+            log.warn("Evict idle session {} from pool", underTest);
             return true;
         }
     }
 
     public DefaultSessionPool withMinIdle(final int count) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Configure with min idle %d", count));
-        }
+        log.debug("Configure with min idle {}", count);
         pool.setMinIdle(count);
         return this;
     }
 
     public DefaultSessionPool withMaxIdle(final int count) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Configure with max idle %d", count));
-        }
+        log.debug("Configure with max idle {}", count);
         pool.setMaxIdle(count);
         return this;
     }
 
     public DefaultSessionPool withMaxTotal(final int count) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Configure with max total %d", count));
-        }
+        log.debug("Configure with max total {}", count);
         pool.setMaxTotal(count);
         return this;
     }
@@ -130,21 +120,14 @@ public class DefaultSessionPool implements SessionPool {
     public Session<?> borrow(final BackgroundActionState callback) throws BackgroundException {
         final int numActive = pool.getNumActive();
         if(numActive > POOL_WARNING_THRESHOLD) {
-            log.warn(String.format("Possibly large number of open connections (%d) in pool %s", numActive, this));
+            log.warn("Possibly large number of open connections ({}) in pool {}", numActive, this);
         }
         try {
             while(!callback.isCanceled()) {
                 try {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Borrow session from pool %s", this));
-                    }
+                    log.info("Borrow session from pool {}", this);
                     final Session<?> session = pool.borrowObject();
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Borrowed session %s from pool %s", session, this));
-                    }
-                    if(DISCONNECTED == features) {
-                        features = new StatelessSessionPool(connect, session, transcript, registry);
-                    }
+                    log.info("Borrowed session {} from pool {}", session, this);
                     return session.withListener(transcript);
                 }
                 catch(IllegalStateException e) {
@@ -156,23 +139,23 @@ public class DefaultSessionPool implements SessionPool {
                     }
                     final Throwable cause = e.getCause();
                     if(null == cause) {
-                        log.warn(String.format("Timeout borrowing session from pool %s. Wait for another %dms", this, BORROW_MAX_WAIT_INTERVAL));
+                        log.warn("Timeout borrowing session from pool {}. Wait for another {}ms", this, BORROW_MAX_WAIT_INTERVAL);
                         // Timeout
                         continue;
                     }
                     if(cause instanceof BackgroundException) {
                         final BackgroundException failure = (BackgroundException) cause;
-                        log.warn(String.format("Failure %s obtaining connection for %s", failure, this));
+                        log.warn("Failure {} obtaining connection for {}", failure, this);
                         if(diagnostics.determine(failure) == FailureDiagnostics.Type.network) {
-                            final int max = Math.max(1, pool.getMaxIdle() - 1);
-                            log.warn(String.format("Lower maximum idle pool size to %d connections.", max));
-                            pool.setMaxIdle(max);
+                            final int max = Math.max(1, pool.getMaxTotal() - 1);
+                            log.warn("Lower maximum total pool size to {} connections.", max);
+                            pool.setMaxTotal(max);
                             // Clear pool from idle connections
                             pool.clear();
                         }
                         throw failure;
                     }
-                    log.error(String.format("Borrowing session from pool %s failed with %s", this, e));
+                    log.error("Borrowing session from pool {} failed with {}", this, e);
                     throw new DefaultExceptionMappingService().map(cause);
                 }
             }
@@ -191,18 +174,21 @@ public class DefaultSessionPool implements SessionPool {
 
     @Override
     public void release(final Session<?> session, final BackgroundException failure) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Release session %s to pool", session));
-        }
+        log.info("Release session {} to pool", session);
         try {
-            if(diagnostics.determine(failure) == FailureDiagnostics.Type.network) {
-                log.warn(String.format("Invalidate session %s in pool after failure %s", session, failure));
-                try {
-                    // Activation of this method decrements the active count and attempts to destroy the instance
-                    pool.invalidateObject(session.removeListener(transcript));
+            if(null != failure) {
+                if(diagnostics.determine(failure) == FailureDiagnostics.Type.network) {
+                    log.warn("Invalidate session {} in pool after failure {}", session, failure);
+                    try {
+                        // Activation of this method decrements the active count and attempts to destroy the instance
+                        pool.invalidateObject(session.removeListener(transcript));
+                    }
+                    catch(Exception e) {
+                        log.warn("Failure invalidating session {} in pool. {}", session, e.getMessage());
+                    }
                 }
-                catch(Exception e) {
-                    log.warn(String.format("Failure invalidating session %s in pool. %s", session, e.getMessage()));
+                else {
+                    pool.returnObject(session);
                 }
             }
             else {
@@ -210,29 +196,25 @@ public class DefaultSessionPool implements SessionPool {
             }
         }
         catch(IllegalStateException e) {
-            log.warn(String.format("Failed to release session %s. %s", session, e.getMessage()));
+            log.warn("Failed to release session {}. {}", session, e.getMessage());
         }
     }
 
     @Override
     public void evict() {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Clear idle connections in pool %s", this));
-        }
+        log.info("Clear idle connections in pool {}", this);
         pool.clear();
     }
 
     @Override
     public void shutdown() {
         try {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Close connection pool %s", this));
-            }
+            log.info("Close connection pool {}", this);
             this.evict();
             pool.close();
         }
         catch(Exception e) {
-            log.warn(String.format("Failure closing connection pool %s", e.getMessage()));
+            log.warn("Failure closing connection pool {}", e.getMessage());
         }
         finally {
             registry.clear();
@@ -245,7 +227,7 @@ public class DefaultSessionPool implements SessionPool {
     }
 
     @Override
-    public VaultRegistry getVault() {
+    public VaultRegistry getVaultRegistry() {
         return registry;
     }
 
@@ -270,10 +252,16 @@ public class DefaultSessionPool implements SessionPool {
 
     @Override
     public <T> T getFeature(final Class<T> type) {
-        if(DISCONNECTED == features) {
-            return SessionFactory.create(bookmark, new DisabledX509TrustManager(), new DefaultX509KeyManager()).getFeature(type);
+        try {
+            final Session<?> session = this.borrow(BackgroundActionState.running);
+            final T feature = session.getFeature(type);
+            this.release(session, null);
+            return feature;
         }
-        return features.getFeature(type);
+        catch(BackgroundException e) {
+            log.warn("Failure {} obtaining feature from {}", e.toString(), this);
+            return null;
+        }
     }
 
     @Override

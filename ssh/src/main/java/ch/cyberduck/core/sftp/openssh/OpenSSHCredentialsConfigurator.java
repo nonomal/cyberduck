@@ -21,6 +21,7 @@ import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.LocalFactory;
 import ch.cyberduck.core.LoginOptions;
+import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sftp.openssh.config.transport.OpenSshConfig;
 
@@ -43,24 +44,20 @@ public class OpenSSHCredentialsConfigurator implements CredentialsConfigurator {
 
     @Override
     public Credentials configure(final Host host) {
-        final Credentials credentials = new Credentials(host.getCredentials());
         if(StringUtils.isNotBlank(host.getHostname())) {
+            final Credentials credentials = new Credentials(host.getCredentials());
             configuration.refresh();
             // Update this host credentials from the OpenSSH configuration file in ~/.ssh/config
             final OpenSshConfig.Host entry = configuration.lookup(host.getHostname());
             if(StringUtils.isNotBlank(entry.getUser())) {
                 if(!credentials.validate(host.getProtocol(), new LoginOptions(host.getProtocol()).password(false))) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Using username %s from %s", entry, configuration));
-                    }
+                    log.info("Using username {} from {}", entry, configuration);
                     credentials.setUsername(entry.getUser());
                 }
             }
             if(!credentials.isPublicKeyAuthentication()) {
                 if(null != entry.getIdentityFile()) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Using identity %s from %s", entry, configuration));
-                    }
+                    log.info("Using identity {} from {}", entry, configuration);
                     credentials.setIdentity(entry.getIdentityFile());
                 }
                 else {
@@ -68,29 +65,26 @@ public class OpenSSHCredentialsConfigurator implements CredentialsConfigurator {
                     if(new HostPreferences(host).getBoolean("ssh.authentication.publickey.default.enable")) {
                         final Local rsa = LocalFactory.get(new HostPreferences(host).getProperty("ssh.authentication.publickey.default.rsa"));
                         if(rsa.exists()) {
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Using RSA default host key %s from %s", rsa, configuration));
-                            }
+                            log.info("Using RSA default host key {} from {}", rsa, configuration);
                             credentials.setIdentity(rsa);
                         }
                         else {
                             final Local dsa = LocalFactory.get(new HostPreferences(host).getProperty("ssh.authentication.publickey.default.dsa"));
                             if(dsa.exists()) {
-                                if(log.isInfoEnabled()) {
-                                    log.info(String.format("Using DSA default host key %s from %s", dsa, configuration));
-                                }
+                                log.info("Using DSA default host key {} from {}", dsa, configuration);
                                 credentials.setIdentity(dsa);
                             }
                         }
                     }
                 }
             }
+            return credentials;
         }
-        return credentials;
+        return CredentialsConfigurator.DISABLED.configure(host);
     }
 
     @Override
-    public CredentialsConfigurator reload() {
+    public CredentialsConfigurator reload() throws LoginCanceledException {
         configuration.refresh();
         return this;
     }

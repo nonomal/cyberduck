@@ -46,7 +46,8 @@ namespace Ch.Cyberduck.Ui.Controller
         private ConnectionController(Host bookmark,
             LoginInputValidator validator, LoginOptions options) : base(bookmark, validator, options)
         {
-            View.SavePasswordChecked = _options.keychain();
+            View.SavePasswordEnabled = _options.keychain();
+            View.SavePasswordChecked = bookmark.getCredentials().isSaved();
             View.ChangedSavePasswordCheckboxEvent += View_ChangedSavePasswordCheckboxEvent;
             View.ChangedPasswordEvent += delegate { _host.getCredentials().setPassword(View.Password); };
         }
@@ -58,7 +59,7 @@ namespace Ch.Cyberduck.Ui.Controller
             ConnectionController c;
             if (!Controllers.TryGetValue(parent, out c))
             {
-                c = new ConnectionController(new Host(ProtocolFactory.get().forName(PreferencesFactory.get().getProperty("connection.protocol.default"))));
+                c = new ConnectionController(new Host(ProtocolFactory.get().forNameOrDefault(PreferencesFactory.get().getProperty("connection.protocol.default"))));
                 Controllers.Add(parent, c);
                 parent.View.ViewClosedEvent += delegate
                 {

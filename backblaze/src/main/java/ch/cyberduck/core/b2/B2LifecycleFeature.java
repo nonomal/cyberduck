@@ -16,7 +16,6 @@ package ch.cyberduck.core.b2;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -58,10 +57,10 @@ public class B2LifecycleFeature implements Lifecycle {
             return LifecycleConfiguration.empty();
         }
         catch(B2ApiException e) {
-            throw new B2ExceptionMappingService(fileid).map("Failure to write attributes of {0}", e, container);
+            throw new B2ExceptionMappingService(fileid).map("Failure to read attributes of {0}", e, container);
         }
         catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map("Failure to write attributes of {0}", e, container);
+            throw new DefaultIOExceptionMappingService().map("Failure to read attributes of {0}", e, container);
         }
     }
 
@@ -70,13 +69,13 @@ public class B2LifecycleFeature implements Lifecycle {
         try {
             if(LifecycleConfiguration.empty().equals(configuration)) {
                 session.getClient().updateBucket(
-                    fileid.getVersionId(containerService.getContainer(container), new DisabledListProgressListener()),
+                    fileid.getVersionId(containerService.getContainer(container)),
                     new B2BucketTypeFeature(session, fileid).toBucketType(container.attributes().getAcl())
                 );
             }
             else {
                 session.getClient().updateBucket(
-                        fileid.getVersionId(containerService.getContainer(container), new DisabledListProgressListener()),
+                        fileid.getVersionId(containerService.getContainer(container)),
                         new B2BucketTypeFeature(session, fileid).toBucketType(container.attributes().getAcl()),
                         new LifecycleRule(
                                 null == configuration.getExpiration() ? null : configuration.getExpiration().longValue(),

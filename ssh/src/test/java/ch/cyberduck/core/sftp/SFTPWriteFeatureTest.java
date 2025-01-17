@@ -42,7 +42,7 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
         final int length = 1048576;
         final byte[] content = RandomUtils.nextBytes(length);
         status.setLength(content.length);
-        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
+        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final OutputStream out = new ThrottledOutputStream(new SFTPWriteFeature(session).write(test, status, new DisabledConnectionCallback()),
                 new BandwidthThrottle(102400f));
         assertNotNull(out);
@@ -50,7 +50,6 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
         out.close();
         assertTrue(new SFTPFindFeature(session).find(test));
         assertEquals(content.length, new SFTPListService(session).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes().getSize());
-        assertEquals(content.length, new SFTPWriteFeature(session).append(test, status.withRemote(new SFTPAttributesFinderFeature(session).find(test))).size, 0L);
         {
             final ByteArrayOutputStream buffer = new ByteArrayOutputStream(content.length);
             final InputStream in = new SFTPReadFeature(session).read(test, new TransferStatus().withLength(content.length), new DisabledConnectionCallback());
@@ -71,17 +70,21 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
 
     @Test
     public void testWrite() throws Exception {
-        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
-        new SFTPTouchFeature(session).touch(test, new TransferStatus());
+        final Path folder = new SFTPDirectoryFeature(session).mkdir(new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory)), new TransferStatus());
+        final long folderModification = new SFTPAttributesFinderFeature(session).find(folder).getModificationDate();
+        final Path test = new Path(folder, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
+        // Only seconds in modification date
+        Thread.sleep(1000L);
         final TransferStatus status = new TransferStatus();
         final int length = 1048576;
         final byte[] content = RandomUtils.nextBytes(length);
         status.setLength(content.length);
-        status.setExists(true);
+        status.setExists(false);
         final OutputStream out = new SFTPWriteFeature(session).write(test, status, new DisabledConnectionCallback());
         assertNotNull(out);
         out.write(content);
         out.close();
+        assertNotEquals(folderModification, new SFTPAttributesFinderFeature(session).find(folder).getModificationDate());
         assertTrue(new SFTPFindFeature(session).find(test));
         assertEquals(content.length, new SFTPListService(session).list(test.getParent(), new DisabledListProgressListener()).get(test).attributes().getSize());
         {
@@ -98,16 +101,16 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
             System.arraycopy(content, 1, reference, 0, content.length - 1);
             assertArrayEquals(reference, buffer.toByteArray());
         }
-        new SFTPDeleteFeature(session).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
+        new SFTPDeleteFeature(session).delete(Arrays.asList(test, folder), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
     @Test
     public void testWriteSymlink() throws Exception {
         final Path workdir = new SFTPHomeDirectoryService(session).find();
-        final Path target = new Path(workdir, UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
+        final Path target = new Path(workdir, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new SFTPTouchFeature(session).touch(target, new TransferStatus());
         assertTrue(new SFTPFindFeature(session).find(target));
-        final String name = UUID.randomUUID().toString();
+        final String name = new AlphanumericRandomStringService().random();
         final Path symlink = new Path(workdir, name, EnumSet.of(Path.Type.file, AbstractPath.Type.symboliclink));
         new SFTPSymlinkFeature(session).symlink(symlink, target.getName());
         assertTrue(new SFTPFindFeature(session).find(symlink));
@@ -145,18 +148,9 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
     }
 
     @Test
-    public void testAppend() throws Exception {
-        final Path workdir = new SFTPHomeDirectoryService(session).find();
-        final Path test = new Path(workdir, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
-        new SFTPTouchFeature(session).touch(test, new TransferStatus());
-        assertTrue(new SFTPWriteFeature(session).append(test, new TransferStatus().withLength(1L).withRemote(new SFTPAttributesFinderFeature(session).find(test))).append);
-        new SFTPDeleteFeature(session).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
-    }
-
-    @Test
     public void testWriteContentRange() throws Exception {
         final SFTPWriteFeature feature = new SFTPWriteFeature(session);
-        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
+        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final byte[] content = RandomUtils.nextBytes(64000);
         {
             final TransferStatus status = new TransferStatus();
@@ -190,7 +184,7 @@ public class SFTPWriteFeatureTest extends AbstractSFTPTest {
     @Test
     public void testWriteRangeEndFirst() throws Exception {
         final SFTPWriteFeature feature = new SFTPWriteFeature(session);
-        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
+        final Path test = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         final byte[] content = RandomUtils.nextBytes(2048);
         {
             // Write end of file first

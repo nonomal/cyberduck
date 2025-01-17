@@ -76,10 +76,10 @@ public class SyncTransfer extends Transfer {
     private TransferAction action;
 
     private Cache<Path> cache
-        = new PathCache(PreferencesFactory.get().getInteger("transfer.cache.size"));
+            = new PathCache(PreferencesFactory.get().getInteger("transfer.cache.size"));
 
     private final Map<TransferItem, Comparison> comparisons = Collections.synchronizedMap(new LRUMap<>(
-        PreferencesFactory.get().getInteger("transfer.cache.size")));
+            PreferencesFactory.get().getInteger("transfer.cache.size")));
 
     public SyncTransfer(final Host host, final TransferItem item) {
         this(host, item, TransferAction.callback);
@@ -87,7 +87,7 @@ public class SyncTransfer extends Transfer {
 
     public SyncTransfer(final Host host, final TransferItem item, final TransferAction action) {
         super(host, Collections.singletonList(item),
-            new BandwidthThrottle(PreferencesFactory.get().getFloat("queue.upload.bandwidth.bytes")));
+                new BandwidthThrottle(PreferencesFactory.get().getFloat("queue.upload.bandwidth.bytes")));
         this.upload = new UploadTransfer(host, roots).withCache(cache);
         this.download = new DownloadTransfer(host, roots).withCache(cache);
         this.item = item;
@@ -103,7 +103,7 @@ public class SyncTransfer extends Transfer {
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
+    public <T> T serialize(final Serializer<T> dict) {
         dict.setStringForKey(this.getType().name(), "Type");
         dict.setObjectForKey(host, "Host");
         dict.setListForKey(roots, "Items");
@@ -136,7 +136,7 @@ public class SyncTransfer extends Transfer {
     @Override
     public String getName() {
         return this.getRoot().remote.getName()
-            + " \u2194 " /*left-right arrow*/ + this.getRoot().local.getName();
+                + " \u2194 " /*left-right arrow*/ + this.getRoot().local.getName();
     }
 
     @Override
@@ -147,26 +147,17 @@ public class SyncTransfer extends Transfer {
 
     @Override
     public TransferPathFilter filter(final Session<?> source, final Session<?> destination, final TransferAction action, final ProgressListener listener) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Filter transfer with action %s", action));
-        }
-        final Find find = new CachingFindFeature(cache,
-            source.getFeature(Find.class, new DefaultFindFeature(source)));
-        final AttributesFinder attributes = new CachingAttributesFinderFeature(cache,
-            source.getFeature(AttributesFinder.class, new DefaultAttributesFinderFeature(source)));
+        log.debug("Filter transfer with action {}", action);
+        final Find find = new CachingFindFeature(source, cache,
+                source.getFeature(Find.class, new DefaultFindFeature(source)));
+        final AttributesFinder attributes = new CachingAttributesFinderFeature(source, cache,
+                source.getFeature(AttributesFinder.class, new DefaultAttributesFinderFeature(source)));
         // Set chosen action (upload, download, mirror) from prompt
-        comparison = new CachingComparePathFilter(new DefaultComparePathFilter(source, host.getTimezone()))
-            .withCache(comparisons)
-            .withAttributes(attributes)
-            .withFinder(find);
+        comparison = new CachingComparePathFilter(comparisons, new DefaultComparePathFilter(source, find, attributes));
         return new SynchronizationPathFilter(comparison,
-            download.filter(source, destination, TransferAction.overwrite, listener)
-                .withAttributes(attributes)
-                .withFinder(find),
-            upload.filter(source, destination, TransferAction.overwrite, listener)
-                .withAttributes(attributes)
-                .withFinder(find),
-            action
+                download.filter(source, destination, TransferAction.overwrite, listener),
+                upload.filter(source, destination, TransferAction.overwrite, listener),
+                action
         );
     }
 
@@ -191,11 +182,9 @@ public class SyncTransfer extends Transfer {
     @Override
     public List<TransferItem> list(final Session<?> session, final Path directory, final Local local,
                                    final ListProgressListener listener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Children for %s", directory));
-        }
+        log.debug("Children for {}", directory);
         final Set<TransferItem> children = new HashSet<>();
-        final Find finder = new CachingFindFeature(cache, session.getFeature(Find.class, new DefaultFindFeature(session)));
+        final Find finder = new CachingFindFeature(session, cache, session.getFeature(Find.class, new DefaultFindFeature(session)));
         if(finder.find(directory)) {
             children.addAll(download.list(session, directory, local, listener));
         }
@@ -208,9 +197,7 @@ public class SyncTransfer extends Transfer {
     @Override
     public TransferAction action(final Session<?> source, final Session<?> destination, final boolean resumeRequested, final boolean reloadRequested,
                                  final TransferPrompt prompt, final ListProgressListener listener) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Find transfer action for Resume=%s,Reload=%s", resumeRequested, reloadRequested));
-        }
+        log.debug("Find transfer action with prompt {}", prompt);
         if(resumeRequested) {
             if(action.equals(TransferAction.callback)) {
                 return action = prompt.prompt(item);
@@ -223,17 +210,15 @@ public class SyncTransfer extends Transfer {
 
     @Override
     public void transfer(final Session<?> source, final Session<?> destination, final Path file, final Local local,
-                         final TransferOptions options, final TransferStatus overall, final TransferStatus segment, final ConnectionCallback connectionCallback,
-                         final ProgressListener progressListener, final StreamListener streamListener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Transfer file %s with options %s", file, options));
-        }
-        switch(comparison.compare(file, local, progressListener)) {
+                         final TransferOptions options, final TransferStatus segment, final ConnectionCallback prompt,
+                         final ProgressListener progress, final StreamListener listener) throws BackgroundException {
+        log.debug("Transfer file {} with options {}", file, options);
+        switch(comparison.compare(file, local, progress)) {
             case remote:
-                download.transfer(source, destination, file, local, options, overall, segment, connectionCallback, progressListener, streamListener);
+                download.transfer(source, destination, file, local, options, segment, prompt, progress, listener);
                 break;
             case local:
-                upload.transfer(source, destination, file, local, options, overall, segment, connectionCallback, progressListener, streamListener);
+                upload.transfer(source, destination, file, local, options, segment, prompt, progress, listener);
                 break;
         }
     }

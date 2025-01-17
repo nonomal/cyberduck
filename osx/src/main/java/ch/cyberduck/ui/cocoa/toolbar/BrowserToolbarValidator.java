@@ -33,8 +33,8 @@ import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Directory;
 import ch.cyberduck.core.features.Move;
-import ch.cyberduck.core.features.PromptUrlProvider;
 import ch.cyberduck.core.features.Restore;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.features.Symlink;
 import ch.cyberduck.core.features.Touch;
 import ch.cyberduck.core.features.Versioning;
@@ -49,6 +49,8 @@ import org.apache.commons.lang3.StringUtils;
 import org.rococoa.Foundation;
 import org.rococoa.Rococoa;
 import org.rococoa.Selector;
+
+import java.util.Optional;
 
 import static ch.cyberduck.ui.cocoa.toolbar.BrowserToolbarFactory.BrowserToolbarItem.*;
 
@@ -98,11 +100,11 @@ public class BrowserToolbarValidator implements ToolbarValidator {
             case encoding: {
                 final NSPopUpButton popup = Rococoa.cast(item.view(), NSPopUpButton.class);
                 popup.selectItemAtIndex(popup.indexOfItemWithRepresentedObject(controller.isMounted() ?
-                    controller.getSession().getHost().getEncoding() : PreferencesFactory.get().getProperty("browser.charset.encoding")));
+                        controller.getSession().getHost().getEncoding() : PreferencesFactory.get().getProperty("browser.charset.encoding")));
             }
             case cryptomator: {
                 final Path selected = new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath());
-                final VaultRegistry registry = controller.getSession().getVault();
+                final VaultRegistry registry = controller.getSession().getVaultRegistry();
                 if(registry.contains(selected)) {
                     item.setImage(IconCacheFactory.<NSImage>get().iconNamed("NSLockUnlockedTemplate"));
                 }
@@ -160,21 +162,21 @@ public class BrowserToolbarValidator implements ToolbarValidator {
         else if(action.equals(Foundation.selector("deleteBookmarkButtonClicked:"))) {
             if(this.isBookmarks()) {
                 return controller.getBookmarkModel().getSource().allowsDelete()
-                    && controller.getBookmarkTable().selectedRow().intValue() != -1;
+                        && controller.getBookmarkTable().selectedRow().intValue() != -1;
             }
             return false;
         }
         else if(action.equals(Foundation.selector("duplicateBookmarkButtonClicked:"))) {
             if(this.isBookmarks()) {
                 return controller.getBookmarkModel().getSource().allowsEdit()
-                    && controller.getBookmarkTable().numberOfSelectedRows().intValue() == 1;
+                        && controller.getBookmarkTable().numberOfSelectedRows().intValue() == 1;
             }
             return false;
         }
         else if(action.equals(Foundation.selector("editBookmarkButtonClicked:"))) {
             if(this.isBookmarks()) {
                 return controller.getBookmarkModel().getSource().allowsEdit()
-                    && controller.getBookmarkTable().numberOfSelectedRows().intValue() == 1;
+                        && controller.getBookmarkTable().numberOfSelectedRows().intValue() == 1;
             }
             return false;
         }
@@ -233,34 +235,40 @@ public class BrowserToolbarValidator implements ToolbarValidator {
         }
         else if(action.equals(newfolder.action())) {
             return this.isBrowser() && controller.isMounted() &&
-                controller.getSession().getFeature(Directory.class).isSupported(
-                    new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
-                );
+                    controller.getSession().getFeature(Directory.class).isSupported(
+                            new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
+                    );
         }
         else if(action.equals(Foundation.selector("createEncryptedVaultButtonClicked:"))) {
-            return this.isBrowser() && controller.isMounted() && controller.getSession().getVault() != VaultRegistry.DISABLED &&
-                null == controller.workdir().attributes().getVault() &&
-                controller.getSession().getFeature(Directory.class).isSupported(
-                    new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
-                );
+            return this.isBrowser() && controller.isMounted() && controller.getSession().getVaultRegistry() != VaultRegistry.DISABLED &&
+                    null == controller.workdir().attributes().getVault() &&
+                    controller.getSession().getFeature(Directory.class).isSupported(
+                            new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
+                    );
         }
         else if(action.equals(Foundation.selector("createFileButtonClicked:"))) {
             return this.isBrowser() && controller.isMounted() && controller.getSession().getFeature(Touch.class).isSupported(
-                new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
+                    new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()), StringUtils.EMPTY
             );
         }
         else if(action.equals(upload.action())) {
             return this.isBrowser() && controller.isMounted() && controller.getSession().getFeature(Touch.class).isSupported(
-                new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()),
-                StringUtils.EMPTY);
+                    new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath()),
+                    StringUtils.EMPTY);
         }
         else if(action.equals(Foundation.selector("createSymlinkButtonClicked:"))) {
             return this.isBrowser() && controller.isMounted() && controller.getSession().getFeature(Symlink.class) != null
-                && controller.getSelectionCount() == 1;
+                    && controller.getSelectionCount() == 1;
         }
         else if(action.equals(Foundation.selector("duplicateFileButtonClicked:"))) {
-            return this.isBrowser() && controller.isMounted() && controller.getSession().getFeature(Copy.class) != null
-                && controller.getSelectionCount() == 1;
+            if(this.isBrowser() && controller.isMounted() && controller.getSelectionCount() == 1) {
+                final Path selected = controller.getSelectedPath();
+                if(null == selected) {
+                    return false;
+                }
+                return controller.getSession().getFeature(Copy.class).isSupported(selected, Optional.empty());
+            }
+            return false;
         }
         else if(action.equals(Foundation.selector("renameFileButtonClicked:"))) {
             if(this.isBrowser() && controller.isMounted() && controller.getSelectionCount() == 1) {
@@ -268,7 +276,7 @@ public class BrowserToolbarValidator implements ToolbarValidator {
                 if(null == selected) {
                     return false;
                 }
-                return controller.getSession().getFeature(Move.class).isSupported(selected, selected);
+                return controller.getSession().getFeature(Move.class).isSupported(selected, Optional.empty());
             }
             return false;
         }
@@ -286,26 +294,27 @@ public class BrowserToolbarValidator implements ToolbarValidator {
         else if(action.equals(share.action())) {
             if(this.isBrowser() && controller.isMounted()) {
                 final Path selected = null != controller.getSelectedPath() ? controller.getSelectedPath() : controller.workdir();
-                return controller.getSession().getFeature(PromptUrlProvider.class) != null &&
-                    controller.getSession().getFeature(PromptUrlProvider.class).isSupported(selected, PromptUrlProvider.Type.download);
+                return controller.getSession().getFeature(Share.class) != null &&
+                        controller.getSession().getFeature(Share.class).isSupported(selected, Share.Type.download);
             }
             return false;
         }
         else if(action.equals(requestfiles.action())) {
             if(this.isBrowser() && controller.isMounted()) {
                 final Path selected = null != controller.getSelectedPath() ? controller.getSelectedPath() : controller.workdir();
-                return controller.getSession().getFeature(PromptUrlProvider.class) != null &&
-                        controller.getSession().getFeature(PromptUrlProvider.class).isSupported(selected, PromptUrlProvider.Type.upload);
+                return controller.getSession().getFeature(Share.class) != null &&
+                        controller.getSession().getFeature(Share.class).isSupported(selected, Share.Type.upload);
             }
             return false;
         }
         else if(action.equals(Foundation.selector("revertFileButtonClicked:"))) {
             if(this.isBrowser() && controller.isMounted() && controller.getSelectionCount() > 0) {
                 for(Path selected : controller.getSelectedPaths()) {
-                    if(null == controller.getSession().getFeature(Versioning.class)) {
+                    final Versioning versioning = controller.getSession().getFeature(Versioning.class);
+                    if(null == versioning) {
                         return false;
                     }
-                    if(!controller.getSession().getFeature(Versioning.class).isRevertable(selected)) {
+                    if(!versioning.isRevertable(selected)) {
                         return false;
                     }
                 }
@@ -365,8 +374,8 @@ public class BrowserToolbarValidator implements ToolbarValidator {
         }
         else if(action.equals(terminal.action())) {
             return this.isBrowser() && controller.isMounted()
-                && controller.getSession().getHost().getProtocol().getType() == Protocol.Type.sftp
-                && TerminalServiceFactory.get() != null;
+                    && controller.getSession().getHost().getProtocol().getType() == Protocol.Type.sftp
+                    && TerminalServiceFactory.get() != null;
         }
         else if(action.equals(archive.action()) || action.equals(Foundation.selector("archiveMenuClicked:"))) {
             if(this.isBrowser() && controller.isMounted()) {
@@ -407,15 +416,15 @@ public class BrowserToolbarValidator implements ToolbarValidator {
         else if(action.equals(cryptomator.action())) {
             if(this.isBrowser() && controller.isMounted() && !PreferencesFactory.get().getBoolean("cryptomator.vault.autodetect")) {
                 final Path selected = new UploadTargetFinder(controller.workdir()).find(controller.getSelectedPath());
-                final VaultRegistry registry = controller.getSession().getVault();
+                final VaultRegistry registry = controller.getSession().getVaultRegistry();
                 if(registry.contains(selected)) {
                     // Allow to lock vault
                     return true;
                 }
                 final AttributedList<Path> cache = controller.getCache().get(controller.workdir());
                 return null != cache.find(new SimplePathPredicate(Path.Type.file,
-                    String.format("%s%s%s", controller.workdir().getAbsolute(), Path.DELIMITER,
-                            new HostPreferences(controller.getSession().getHost()).getProperty("cryptomator.vault.masterkey.filename"))));
+                        String.format("%s%s%s", controller.workdir().getAbsolute(), Path.DELIMITER,
+                                new HostPreferences(controller.getSession().getHost()).getProperty("cryptomator.vault.masterkey.filename"))));
             }
             return false;
         }

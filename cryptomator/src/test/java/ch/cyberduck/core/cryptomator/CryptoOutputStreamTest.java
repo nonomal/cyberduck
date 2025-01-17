@@ -15,14 +15,12 @@ package ch.cyberduck.core.cryptomator;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.NullSession;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.TestProtocol;
 import ch.cyberduck.core.cryptomator.random.RandomNonceGenerator;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.vault.VaultCredentials;
 
@@ -55,18 +53,13 @@ public class CryptoOutputStreamTest {
                             assertTrue(folder.equals(home) || folder.isChild(home));
                             return folder;
                         }
-
-                        @Override
-                        public Directory withWriter(final Write writer) {
-                            return this;
-                        }
                     };
                 }
                 return super._getFeature(type);
             }
         };
         final CryptoVault vault = new CryptoVault(home);
-        vault.create(session, null, new VaultCredentials("test"), new DisabledPasswordStore());
+        vault.create(session, null, new VaultCredentials("test"));
         return vault;
     }
 
@@ -75,7 +68,8 @@ public class CryptoOutputStreamTest {
         final CryptoVault vault = this.getVault();
         final ByteArrayOutputStream cipherText = new ByteArrayOutputStream();
         final FileHeader header = vault.getFileHeaderCryptor().create();
-        final CryptoOutputStream stream = new CryptoOutputStream(new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(), 0);
+        final CryptoOutputStream stream = new CryptoOutputStream(
+                new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(vault.getNonceSize()), 0);
 
         final byte[] part1 = RandomUtils.nextBytes(1024);
         final byte[] part2 = RandomUtils.nextBytes(1024);
@@ -97,7 +91,8 @@ public class CryptoOutputStreamTest {
         final CryptoVault vault = this.getVault();
         final ByteArrayOutputStream cipherText = new ByteArrayOutputStream();
         final FileHeader header = vault.getFileHeaderCryptor().create();
-        final CryptoOutputStream stream = new CryptoOutputStream(new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(), 0);
+        final CryptoOutputStream stream = new CryptoOutputStream(
+                new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(vault.getNonceSize()), 0);
 
         final byte[] cleartext = RandomUtils.nextBytes(vault.getFileContentCryptor().cleartextChunkSize());
         stream.write(cleartext, 0, cleartext.length);
@@ -116,7 +111,8 @@ public class CryptoOutputStreamTest {
         final CryptoVault vault = this.getVault();
         final ByteArrayOutputStream cipherText = new ByteArrayOutputStream();
         final FileHeader header = vault.getFileHeaderCryptor().create();
-        final CryptoOutputStream stream = new CryptoOutputStream(new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(), 0);
+        final CryptoOutputStream stream = new CryptoOutputStream(
+                new ProxyOutputStream(cipherText), vault.getFileContentCryptor(), header, new RandomNonceGenerator(vault.getNonceSize()), 0);
 
         final byte[] cleartext = RandomUtils.nextBytes(vault.getFileContentCryptor().cleartextChunkSize() + 1);
         stream.write(cleartext, 0, cleartext.length);

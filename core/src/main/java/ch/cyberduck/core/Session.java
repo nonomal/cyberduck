@@ -24,26 +24,19 @@ import ch.cyberduck.core.features.Bulk;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Download;
 import ch.cyberduck.core.features.Find;
+import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.features.Move;
-import ch.cyberduck.core.features.PromptUrlProvider;
 import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.features.Search;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.features.Upload;
+import ch.cyberduck.core.features.Versioning;
 import ch.cyberduck.core.features.Write;
-import ch.cyberduck.core.preferences.Preferences;
-import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.proxy.Proxy;
-import ch.cyberduck.core.shared.DefaultAttributesFinderFeature;
-import ch.cyberduck.core.shared.DefaultCopyFeature;
-import ch.cyberduck.core.shared.DefaultDownloadFeature;
-import ch.cyberduck.core.shared.DefaultFindFeature;
-import ch.cyberduck.core.shared.DefaultSearchFeature;
-import ch.cyberduck.core.shared.DefaultUploadFeature;
-import ch.cyberduck.core.shared.DefaultUrlProvider;
-import ch.cyberduck.core.shared.DisabledBulkFeature;
-import ch.cyberduck.core.shared.DisabledMoveFeature;
-import ch.cyberduck.core.shared.DisabledQuotaFeature;
+import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.preferences.PreferencesReader;
+import ch.cyberduck.core.proxy.ProxyFinder;
+import ch.cyberduck.core.shared.*;
 import ch.cyberduck.core.threading.CancelCallback;
 import ch.cyberduck.core.vault.VaultRegistry;
 
@@ -54,7 +47,7 @@ import java.util.Collections;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
-public abstract class Session<C> implements TranscriptListener {
+public abstract class Session<C> implements FeatureFactory, TranscriptListener {
     private static final Logger log = LogManager.getLogger(Session.class);
 
     /**
@@ -89,18 +82,16 @@ public abstract class Session<C> implements TranscriptListener {
         if(host.getCredentials().isAnonymousLogin()) {
             return false;
         }
-        final Preferences preferences = PreferencesFactory.get();
+        final PreferencesReader preferences = new HostPreferences(host);
         if(preferences.getBoolean(String.format("connection.unsecure.%s", host.getHostname()))) {
             return false;
         }
         return preferences.getBoolean(
-            String.format("connection.unsecure.warning.%s", host.getProtocol().getScheme()));
+                String.format("connection.unsecure.warning.%s", host.getProtocol().getScheme()));
     }
 
     public Session<?> withListener(final TranscriptListener listener) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Add listener %s", listener));
-        }
+        log.debug("Add listener {}", listener);
         listeners.add(listener);
         return this;
     }
@@ -149,22 +140,18 @@ public abstract class Session<C> implements TranscriptListener {
      * @param cancel
      * @return Client
      */
-    public C open(final Proxy proxy, final HostKeyCallback key, final LoginCallback login, final CancelCallback cancel) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Connection will open to %s", host));
-        }
+    public C open(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback login, final CancelCallback cancel) throws BackgroundException {
+        log.debug("Connection will open to {}", host);
         // Update status flag
         state = State.opening;
         client = this.connect(proxy, key, login, cancel);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Connection did open to %s", host));
-        }
+        log.debug("Connection did open to {}", host);
         // Update status flag
         state = State.open;
         return client;
     }
 
-    protected abstract C connect(Proxy proxy, HostKeyCallback key, LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
+    protected abstract C connect(ProxyFinder proxy, HostKeyCallback key, LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
 
     /**
      * Send the authentication credentials to the server. The connection must be opened first.
@@ -172,15 +159,13 @@ public abstract class Session<C> implements TranscriptListener {
      * @param prompt Prompt
      * @param cancel Cancel callback
      */
-    public abstract void login(Proxy proxy, LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
+    public abstract void login(LoginCallback prompt, CancelCallback cancel) throws BackgroundException;
 
     /**
      * Logout and close client connection
      */
     public void close() throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Connection will close to %s", host));
-        }
+        log.debug("Connection will close to {}", host);
         try {
             switch(state) {
                 case open:
@@ -191,9 +176,7 @@ public abstract class Session<C> implements TranscriptListener {
         }
         finally {
             state = State.closed;
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Connection did close to %s", host));
-            }
+            log.debug("Connection did close to {}", host);
         }
     }
 
@@ -207,9 +190,7 @@ public abstract class Session<C> implements TranscriptListener {
         }
         finally {
             state = State.closed;
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Connection did close to %s", host));
-            }
+            log.debug("Connection did close to {}", host);
         }
     }
 
@@ -274,8 +255,8 @@ public abstract class Session<C> implements TranscriptListener {
      * @return Feature implementation or null when not supported
      */
     @SuppressWarnings("unchecked")
+    @Override
     public <T> T getFeature(final Class<T> type) {
-        metrics.increment(type);
         return this.getFeature(type, this._getFeature(type));
     }
 
@@ -288,6 +269,7 @@ public abstract class Session<C> implements TranscriptListener {
      */
     @SuppressWarnings("unchecked")
     public <T> T getFeature(final Class<T> type, final T feature) {
+        metrics.increment(type);
         return registry.getFeature(this, type, feature);
     }
 
@@ -305,9 +287,6 @@ public abstract class Session<C> implements TranscriptListener {
         if(type == Download.class) {
             return (T) new DefaultDownloadFeature(this.getFeature(Read.class));
         }
-        if(type == Bulk.class) {
-            return (T) new DisabledBulkFeature();
-        }
         if(type == Move.class) {
             return (T) new DisabledMoveFeature();
         }
@@ -317,8 +296,8 @@ public abstract class Session<C> implements TranscriptListener {
         if(type == UrlProvider.class) {
             return (T) new DefaultUrlProvider(host);
         }
-        if(type == PromptUrlProvider.class) {
-            return (T) new DefaulPromptUrlProvider(this.getFeature(UrlProvider.class));
+        if(type == Share.class) {
+            return (T) new DefaultShareFeature(this.getFeature(UrlProvider.class));
         }
         if(type == Find.class) {
             return (T) new DefaultFindFeature(this);
@@ -331,6 +310,19 @@ public abstract class Session<C> implements TranscriptListener {
         }
         if(type == Quota.class) {
             return (T) new DisabledQuotaFeature();
+        }
+        if(type == Home.class) {
+            return (T) new DelegatingHomeFeature(new WorkdirHomeFeature(host), new DefaultPathHomeFeature(host));
+        }
+        if(type == Versioning.class) {
+            switch(host.getProtocol().getVersioningMode()) {
+                case custom:
+                    return (T) new DefaultVersioningFeature(this);
+            }
+            return null;
+        }
+        if(type == Bulk.class) {
+            return (T) new DisabledBulkFeature();
         }
         return host.getProtocol().getFeature(type);
     }

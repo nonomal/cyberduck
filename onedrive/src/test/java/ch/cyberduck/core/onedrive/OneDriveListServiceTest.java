@@ -40,4 +40,22 @@ public class OneDriveListServiceTest extends AbstractOneDriveTest {
         }
         assertTrue(list.contains(new OneDriveHomeFinderService().find()));
     }
+
+    @Test
+    public void testListMyFiles() throws Exception {
+        final AttributedList<Path> list = new OneDriveListService(session, fileid).list(OneDriveHomeFinderService.MYFILES_NAME, new DisabledListProgressListener());
+        assertFalse(list.isEmpty());
+        for(Path f : list) {
+            assertEquals(OneDriveHomeFinderService.MYFILES_NAME, f.getParent());
+        }
+    }
+
+    @Test
+    public void testListShared() throws Exception {
+        final AttributedList<Path> list = new OneDriveListService(session, fileid).list(OneDriveHomeFinderService.SHARED_NAME, new DisabledListProgressListener());
+        assertFalse(list.isEmpty());
+        for(Path f : list) {
+            assertEquals(OneDriveHomeFinderService.SHARED_NAME, f.getParent());
+        }
+    }
 }

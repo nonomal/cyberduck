@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public interface Protocol extends Comparable<Protocol>, Serializable {
+public interface Protocol extends FeatureFactory, Comparable<Protocol>, Serializable {
 
     /**
      * Check login credentials for validity for this protocol.
@@ -37,25 +37,13 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
     boolean validate(Credentials credentials, LoginOptions options);
 
     /**
-     * @return Configurator for resolving credentials for bookmark
-     */
-    CredentialsConfigurator getCredentialsFinder();
-
-    /**
-     * @return Configurator for resolving hostname from alias
-     */
-    HostnameConfigurator getHostnameFinder();
-
-    /**
-     * @return Configurator for resolving jump host configuration for bookmark
-     */
-    JumphostConfigurator getJumpHostFinder();
-
-    /**
      * @return Case sensitivity of system
      */
     Case getCaseSensitivity();
 
+    /**
+     * @return Server support for implicit timestamp update on parent directory when modifying contents
+     */
     DirectoryTimestamp getDirectoryTimestamp();
 
     /**
@@ -67,6 +55,8 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
      * @return Comparator that matches natural sorting of results returned by list service
      */
     Comparator<String> getListComparator();
+
+    VersioningMode getVersioningMode();
 
     /**
      * @return True if anonymous login is possible.
@@ -177,6 +167,11 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
     String[] getSchemes();
 
     /**
+     * @return Default STS Endpoint URL.
+     */
+    String getSTSEndpoint();
+
+    /**
      * @return Default hostname for server
      */
     String getDefaultHostname();
@@ -212,6 +207,12 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
     Set<Location.Name> getRegions();
 
     /**
+     * @param regions Available regions represented as strings from profile
+     * @return Localized region set
+     */
+    Set<Location.Name> getRegions(List<String> regions);
+
+    /**
      * @return Default region
      */
     String getRegion();
@@ -232,6 +233,8 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
      * @return Host label
      */
     String getHostnamePlaceholder();
+
+    String getPathPlaceholder();
 
     /**
      * @return Username label
@@ -276,6 +279,11 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
     String getOAuthClientSecret();
 
     /**
+     * @return Allow use of Proof Key for Code Exchange (PKCE) for the OAuth2 Athorization Code Flow
+     */
+    boolean isOAuthPKCE();
+
+    /**
      * @return Custom connection protocol properties
      */
     Map<String, String> getProperties();
@@ -294,6 +302,7 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
         googledrive,
         swift,
         dav,
+        smb,
         azure,
         onedrive,
         irods,
@@ -308,7 +317,9 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
         eue,
         freenet,
         ctera,
-        box
+        box,
+        deepbox,
+        none
     }
 
     enum Case {
@@ -332,6 +343,28 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
         stateless
     }
 
+    enum VersioningMode {
+        /**
+         * No versioning enabled when uploading files
+         */
+        none {
+
+        },
+        /**
+         * Versioning is handled by storage implementation
+         */
+        storage {
+
+        },
+        /**
+         * Custom implementation using directory to save previous versions
+         */
+        custom {
+
+        };
+    }
+
     @SuppressWarnings("unchecked")
+    @Override
     <T> T getFeature(final Class<T> type);
 }

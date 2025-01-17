@@ -41,8 +41,10 @@ public class OpenSSHPreferredAuthenticationsConfigurator {
     public String[] getPreferred(final String alias) {
         final String methods = configuration.lookup(alias).getPreferredAuthentications();
         if(StringUtils.isBlank(methods)) {
+            log.debug("No configuration for alias {}", alias);
             return null;
         }
+        log.debug("Found configuration {} for alias {}", methods, alias);
         return StringUtils.split(methods, ",");
     }
 

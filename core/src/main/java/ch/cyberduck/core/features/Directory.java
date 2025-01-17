@@ -15,13 +15,25 @@ package ch.cyberduck.core.features;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import java.text.MessageFormat;
+
+/**
+ * Create new folder on server
+ *
+ * @param <Reply> Metadata
+ */
+@Required
 public interface Directory<Reply> {
 
     /**
+     * Create new folder on server
+     *
      * @param folder Directory
      * @param status Transfer status
      */
@@ -29,12 +41,33 @@ public interface Directory<Reply> {
 
     /**
      * @param workdir Working directory in browser
-     * @param name    Folder name or null if unknown
-     * @return True if creating directory will succeed
+     * @param filename    Folder name or null if unknown
+     * @return True if creating directory is supported in the working directory
      */
-    default boolean isSupported(final Path workdir, final String name) {
-        return workdir.attributes().getPermission().isWritable();
+    default boolean isSupported(final Path workdir, final String filename) {
+        try {
+            this.preflight(workdir, filename);
+            return true;
+        }
+        catch(BackgroundException e) {
+            return false;
+        }
     }
 
-    Directory<Reply> withWriter(Write<Reply> writer);
+    /**
+     * Retrieve write implementation for implementations using placeholder files for folders
+     */
+    default Directory<Reply> withWriter(Write<Reply> writer) {
+        return this;
+    }
+
+    /**
+     * @throws AccessDeniedException Permission failure for target directory
+     */
+    default void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!workdir.attributes().getPermission().isWritable()) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString(
+                    "Cannot create folder {0}", "Error"), filename)).withFile(workdir);
+        }
+    }
 }

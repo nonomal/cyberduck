@@ -19,6 +19,7 @@ import ch.cyberduck.core.AbstractDropboxTest;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.BytecountStreamListener;
 import ch.cyberduck.core.DisabledLoginCallback;
+import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
@@ -55,15 +56,17 @@ public class DropboxUploadFeatureTest extends AbstractDropboxTest {
         final byte[] content = RandomUtils.nextBytes(length);
         IOUtils.write(content, local.getOutputStream(false));
         final TransferStatus status = new TransferStatus();
+        status.setModified(1700638960509L);
         status.setLength(content.length);
         status.setMime("text/plain");
         final BytecountStreamListener count = new BytecountStreamListener();
         final Metadata metadata = feature.upload(test, local, new BandwidthThrottle(BandwidthThrottle.UNLIMITED),
-                count, status, new DisabledLoginCallback());
+                new DisabledProgressListener(), count, status, new DisabledLoginCallback());
         assertEquals(content.length, count.getSent());
         assertTrue(status.isComplete());
         assertTrue(new DropboxFindFeature(session).find(test));
         final PathAttributes attributes = new DropboxAttributesFinderFeature(session).find(test);
+        assertEquals(1700638960000L, attributes.getModificationDate());
         assertEquals(content.length, attributes.getSize());
         assertEquals(((FileMetadata) metadata).getContentHash(), attributes.getChecksum().hash);
         new DropboxDeleteFeature(session).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());

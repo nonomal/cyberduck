@@ -18,7 +18,13 @@ package ch.cyberduck.core;
  * dkocher@cyberduck.ch
  */
 
+import ch.cyberduck.core.exception.LoginCanceledException;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
 public final class CredentialsConfiguratorFactory {
+    private static final Logger log = LogManager.getLogger(CredentialsConfiguratorFactory.class);
 
     private CredentialsConfiguratorFactory() {
         //
@@ -29,6 +35,13 @@ public final class CredentialsConfiguratorFactory {
      * @return Configurator for default settings
      */
     public static CredentialsConfigurator get(final Protocol protocol) {
-        return protocol.getCredentialsFinder().reload();
+        final CredentialsConfigurator finder = protocol.getFeature(CredentialsConfigurator.class);
+        try {
+            return finder.reload();
+        }
+        catch(LoginCanceledException e) {
+            log.warn("Failure {} reloading credentials from {}", e, finder);
+            return CredentialsConfigurator.DISABLED;
+        }
     }
 }

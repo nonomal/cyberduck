@@ -18,18 +18,25 @@ package ch.cyberduck.core.s3;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import java.text.MessageFormat;
+import java.util.Optional;
 
 public class S3ThresholdCopyFeature implements Copy {
 
     private final S3Session session;
     private final S3AccessControlListFeature accessControlListFeature;
     private final Long multipartThreshold;
+    private final PathContainerService containerService;
 
     public S3ThresholdCopyFeature(final S3Session session) {
         this(session, new S3AccessControlListFeature(session));
@@ -39,6 +46,7 @@ public class S3ThresholdCopyFeature implements Copy {
         this.session = session;
         this.accessControlListFeature = accessControlListFeature;
         this.multipartThreshold = new HostPreferences(session.getHost()).getLong("s3.upload.multipart.required.threshold");
+        this.containerService = session.getFeature(PathContainerService.class);
     }
 
     public Path copy(final Path source, final Path copy, final TransferStatus status, final ConnectionCallback callback, final StreamListener listener) throws BackgroundException {
@@ -47,6 +55,18 @@ public class S3ThresholdCopyFeature implements Copy {
         }
         else {
             return new S3CopyFeature(session, accessControlListFeature).copy(source, copy, status, callback, listener);
+        }
+    }
+
+    @Override
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(containerService.isContainer(source)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            if(containerService.isContainer(target.get())) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
         }
     }
 }

@@ -18,7 +18,6 @@ package ch.cyberduck.core.sds.triplecrypt;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DisabledConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.LoginOptions;
@@ -68,10 +67,8 @@ public class TripleCryptWriteFeatureTest extends AbstractSDSTest {
         final SDSNodeIdProvider nodeid = new SDSNodeIdProvider(session);
         final Path room = new SDSDirectoryFeature(session, nodeid).mkdir(new Path(
                 new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory, Path.Type.volume)), new TransferStatus());
-        final EncryptRoomRequest encrypt = new EncryptRoomRequest();
-        encrypt.setIsEncrypted(true);
-        new NodesApi(session.getClient()).encryptRoom(encrypt, Long.parseLong(new SDSNodeIdProvider(session).getVersionId(room,
-                new DisabledListProgressListener())), StringUtils.EMPTY, null);
+        final EncryptRoomRequest encrypt = new EncryptRoomRequest().isEncrypted(true);
+        new NodesApi(session.getClient()).encryptRoom(encrypt, Long.parseLong(new SDSNodeIdProvider(session).getVersionId(room)), StringUtils.EMPTY, null);
         room.attributes().withCustom(KEY_ENCRYPTED, String.valueOf(true));
         final TripleCryptWriteFeature writer = new TripleCryptWriteFeature(session, nodeid, new SDSDirectS3MultipartWriteFeature(session, nodeid));
         final byte[] content = RandomUtils.nextBytes(32769);
@@ -96,7 +93,7 @@ public class TripleCryptWriteFeatureTest extends AbstractSDSTest {
 
             @Override
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
-                return new VaultCredentials("eth[oh8uv4Eesij");
+                return new VaultCredentials(PROPERTIES.get("vault.passphrase"));
             }
         });
         IOUtils.readFully(stream, compare);
@@ -111,10 +108,8 @@ public class TripleCryptWriteFeatureTest extends AbstractSDSTest {
         final SDSNodeIdProvider nodeid = new SDSNodeIdProvider(session);
         final Path room = new SDSDirectoryFeature(session, nodeid).mkdir(new Path(
                 new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory, Path.Type.volume)), new TransferStatus());
-        final EncryptRoomRequest encrypt = new EncryptRoomRequest();
-        encrypt.setIsEncrypted(true);
-        new NodesApi(session.getClient()).encryptRoom(encrypt, Long.parseLong(new SDSNodeIdProvider(session).getVersionId(room,
-                new DisabledListProgressListener())), StringUtils.EMPTY, null);
+        final EncryptRoomRequest encrypt = new EncryptRoomRequest().isEncrypted(true);
+        new NodesApi(session.getClient()).encryptRoom(encrypt, Long.parseLong(new SDSNodeIdProvider(session).getVersionId(room)), StringUtils.EMPTY, null);
         room.attributes().withCustom(KEY_ENCRYPTED, String.valueOf(true));
         final byte[] content = RandomUtils.nextBytes(32769);
         final TransferStatus status = new TransferStatus();
@@ -138,7 +133,7 @@ public class TripleCryptWriteFeatureTest extends AbstractSDSTest {
 
             @Override
             public Credentials prompt(final Host bookmark, final String title, final String reason, final LoginOptions options) {
-                return new VaultCredentials("eth[oh8uv4Eesij");
+                return new VaultCredentials(PROPERTIES.get("vault.passphrase"));
             }
         });
         IOUtils.readFully(stream, compare);

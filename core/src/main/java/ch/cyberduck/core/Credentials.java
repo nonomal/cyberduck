@@ -38,7 +38,7 @@ public class Credentials implements Comparable<Credentials> {
      * The login password
      */
     private String password = StringUtils.EMPTY;
-    private String token = StringUtils.EMPTY;
+    private TemporaryAccessTokens tokens = TemporaryAccessTokens.EMPTY;
     private OAuthTokens oauth = OAuthTokens.EMPTY;
 
     /**
@@ -55,12 +55,7 @@ public class Credentials implements Comparable<Credentials> {
     /**
      * If the credentials should be stored in the Keychain upon successful login
      */
-    private boolean persist = PreferencesFactory.get().getBoolean("connection.login.keychain");
-
-    /**
-     * Passed authentication successfully
-     */
-    private boolean passed;
+    private boolean saved = new LoginOptions().save;
 
     /**
      * Default credentials
@@ -72,13 +67,12 @@ public class Credentials implements Comparable<Credentials> {
     public Credentials(final Credentials copy) {
         this.user = copy.user;
         this.password = copy.password;
-        this.token = copy.token;
+        this.tokens = copy.tokens;
         this.oauth = copy.oauth;
         this.identity = copy.identity;
         this.identityPassphrase = copy.identityPassphrase;
         this.certificate = copy.certificate;
-        this.persist = copy.persist;
-        this.passed = copy.passed;
+        this.saved = copy.saved;
     }
 
     public Credentials(final String user) {
@@ -97,7 +91,7 @@ public class Credentials implements Comparable<Credentials> {
     public Credentials(final String user, final String password, final String token) {
         this.user = user;
         this.password = password;
-        this.token = token;
+        this.tokens = new TemporaryAccessTokens(token);
     }
 
     /**
@@ -109,12 +103,10 @@ public class Credentials implements Comparable<Credentials> {
 
     public void setUsername(final String user) {
         this.user = user;
-        this.passed = false;
     }
 
     public Credentials withUsername(final String user) {
-        this.user = user;
-        this.passed = false;
+        this.setUsername((user));
         return this;
     }
 
@@ -132,27 +124,36 @@ public class Credentials implements Comparable<Credentials> {
 
     public void setPassword(final String password) {
         this.password = password;
-        this.passed = false;
     }
 
     public Credentials withPassword(final String password) {
-        this.password = password;
-        this.passed = false;
+        this.setPassword(password);
         return this;
     }
 
     public String getToken() {
-        return token;
+        return tokens.getSessionToken();
     }
 
     public void setToken(final String token) {
-        this.token = token;
-        this.passed = false;
+        this.tokens = new TemporaryAccessTokens(token);
     }
 
     public Credentials withToken(final String token) {
-        this.token = token;
-        this.passed = false;
+        this.setToken(token);
+        return this;
+    }
+
+    public TemporaryAccessTokens getTokens() {
+        return tokens;
+    }
+
+    public void setTokens(final TemporaryAccessTokens tokens) {
+        this.tokens = tokens;
+    }
+
+    public Credentials withTokens(final TemporaryAccessTokens tokens) {
+        this.setTokens(tokens);
         return this;
     }
 
@@ -165,7 +166,7 @@ public class Credentials implements Comparable<Credentials> {
     }
 
     public Credentials withOauth(final OAuthTokens oauth) {
-        this.oauth = oauth;
+        this.setOauth(oauth);
         return this;
     }
 
@@ -173,7 +174,7 @@ public class Credentials implements Comparable<Credentials> {
      * @return true if the password will be added to the system keychain when logged in successfully
      */
     public boolean isSaved() {
-        return persist;
+        return saved;
     }
 
     /**
@@ -182,30 +183,19 @@ public class Credentials implements Comparable<Credentials> {
      * @param saved If true, the password of the login is added to the keychain upon successful login
      */
     public void setSaved(final boolean saved) {
-        this.persist = saved;
+        this.saved = saved;
     }
 
     public Credentials withSaved(final boolean saved) {
-        this.persist = saved;
+        this.setSaved(saved);
         return this;
-    }
-
-    public boolean isPassed() {
-        return passed;
-    }
-
-    public void setPassed(final boolean passed) {
-        this.passed = passed;
     }
 
     /**
      * @return true if the username is anonymous.
      */
     public boolean isAnonymousLogin() {
-        if(StringUtils.isEmpty(user)) {
-            return false;
-        }
-        return PreferencesFactory.get().getProperty("connection.login.anon.name").equals(user);
+        return StringUtils.equals(user, PreferencesFactory.get().getProperty("connection.login.anon.name"));
     }
 
     public boolean isPasswordAuthentication() {
@@ -213,7 +203,7 @@ public class Credentials implements Comparable<Credentials> {
     }
 
     public boolean isTokenAuthentication() {
-        return StringUtils.isNotBlank(token);
+        return StringUtils.isNotBlank(tokens.getSessionToken());
     }
 
     public boolean isOAuthAuthentication() {
@@ -236,7 +226,6 @@ public class Credentials implements Comparable<Credentials> {
 
     public Credentials withIdentity(final Local file) {
         this.identity = file;
-        this.passed = false;
         return this;
     }
 
@@ -254,7 +243,6 @@ public class Credentials implements Comparable<Credentials> {
      */
     public void setIdentity(final Local file) {
         this.identity = file;
-        this.passed = false;
     }
 
     public String getIdentityPassphrase() {
@@ -300,6 +288,7 @@ public class Credentials implements Comparable<Credentials> {
     public void reset() {
         this.setPassword(StringUtils.EMPTY);
         this.setToken(StringUtils.EMPTY);
+        this.setTokens(TemporaryAccessTokens.EMPTY);
         this.setOauth(OAuthTokens.EMPTY);
         this.setIdentityPassphrase(StringUtils.EMPTY);
     }
@@ -328,23 +317,25 @@ public class Credentials implements Comparable<Credentials> {
         }
         final Credentials that = (Credentials) o;
         return Objects.equals(user, that.user) &&
-            Objects.equals(password, that.password) &&
-            Objects.equals(token, that.token) &&
-            Objects.equals(identity, that.identity) &&
-            Objects.equals(certificate, that.certificate);
+                Objects.equals(password, that.password) &&
+                Objects.equals(tokens, that.tokens) &&
+                Objects.equals(oauth, that.oauth) &&
+                Objects.equals(identity, that.identity) &&
+                Objects.equals(certificate, that.certificate);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(user, password, token, identity, certificate);
+        return Objects.hash(user, password, tokens, oauth, identity, certificate);
     }
 
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("Credentials{");
         sb.append("user='").append(user).append('\'');
+        sb.append(", password='").append(StringUtils.repeat("*", Integer.min(8, StringUtils.length(password)))).append('\'');
+        sb.append(", tokens='").append(tokens).append('\'');
         sb.append(", oauth='").append(oauth).append('\'');
-        sb.append(", token='").append(token).append('\'');
         sb.append(", identity=").append(identity);
         sb.append('}');
         return sb.toString();

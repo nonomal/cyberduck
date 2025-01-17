@@ -44,7 +44,7 @@ public class NSImageIconCache implements IconCache<NSImage> {
 
     private NSImage cache(final String name, final NSImage image, final Integer size) {
         if(null == image) {
-            log.warn(String.format("No icon named %s", name));
+            log.warn("No icon named {}", name);
             return image;
         }
         if(null == name) {
@@ -63,24 +63,18 @@ public class NSImageIconCache implements IconCache<NSImage> {
     private NSImage load(final String name, final Integer size) {
         NSImage cached = NSImage.imageNamed(toName(name, size));
         if(null == cached) {
-            if(!Factory.Platform.osversion.matches("10\\.(12|13|14|15).*")) {
+            if(!Factory.Platform.osversion.matches("(10)\\..*")) {
                 cached = NSImage.imageWithSymbol(name);
             }
             if(null == cached) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("No cached image for %s", name));
-                }
+                log.debug("No cached image for {}", name);
             }
             else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Loaded symbol image %s", cached));
-                }
+                log.trace("Loaded symbol image {}", cached);
             }
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Loaded image %s", cached));
-            }
+            log.trace("Loaded image {}", cached);
         }
         return cached;
     }
@@ -298,7 +292,7 @@ public class NSImageIconCache implements IconCache<NSImage> {
             // are automatically marked as template images
         }
         if(null == width || null == height) {
-            log.debug(String.format("Return default size for %s", image.name()));
+            log.debug("Return default size for {}", image.name());
             return image;
         }
         // Make a copy of original image. Otherwise might resize other references already displayed

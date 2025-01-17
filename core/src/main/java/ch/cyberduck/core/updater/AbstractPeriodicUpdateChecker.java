@@ -25,7 +25,9 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -36,6 +38,10 @@ public abstract class AbstractPeriodicUpdateChecker implements PeriodicUpdateChe
     private final Duration delay;
     private final Timer timer = new Timer("updater", true);
     private final Preferences preferences = PreferencesFactory.get();
+    /**
+     * Handlers receiving notification for updates
+     */
+    protected final Set<Handler> handlers = new HashSet<>();
 
     /**
      * Defaults to 24 hours
@@ -56,15 +62,13 @@ public abstract class AbstractPeriodicUpdateChecker implements PeriodicUpdateChe
 
     @Override
     public Duration register() {
-        log.info(String.format("Register update checker hook after %s", delay));
+        log.info("Register update checker hook after {}", delay);
         try {
             timer.scheduleAtFixedRate(new TimerTask() {
                 @Override
                 public void run() {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Check for new updates after %s", delay));
-                    }
-                    PreferencesFactory.get().setProperty("update.check.timestamp", System.currentTimeMillis());
+                    log.debug("Check for new updates after {}", delay);
+                    preferences.setProperty("update.check.timestamp", System.currentTimeMillis());
                     controller.invoke(new DefaultMainAction() {
                         @Override
                         public void run() {
@@ -76,9 +80,14 @@ public abstract class AbstractPeriodicUpdateChecker implements PeriodicUpdateChe
             return delay;
         }
         catch(IllegalStateException e) {
-            log.warn(String.format("Failure scheduling timer. %s", e.getMessage()));
+            log.warn("Failure scheduling timer. {}", e.getMessage());
             return Duration.ZERO;
         }
+    }
+
+    @Override
+    public void addHandler(final Handler handler) {
+        handlers.add(handler);
     }
 
     @Override
@@ -87,7 +96,7 @@ public abstract class AbstractPeriodicUpdateChecker implements PeriodicUpdateChe
     }
 
     @Override
-    public boolean isUpdateInProgress(final Object item) {
+    public boolean isUpdateInProgress() {
         return false;
     }
 
@@ -104,9 +113,7 @@ public abstract class AbstractPeriodicUpdateChecker implements PeriodicUpdateChe
             }
             url.append(URIEncoder.encode(arg.getKey())).append("=").append(URIEncoder.encode(arg.getValue()));
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Setting update feed to %s", url));
-        }
+        log.info("Setting update feed to {}", url);
         return url.toString();
     }
 }

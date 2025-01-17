@@ -18,7 +18,6 @@ package ch.cyberduck.core.nio;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
@@ -40,11 +39,6 @@ public class LocalDirectoryFeature implements Directory<Void> {
         catch(IOException e) {
             throw new LocalExceptionMappingService().map("Cannot create folder {0}", e, folder);
         }
-        return folder.withAttributes(new LocalAttributesFinderFeature(session).find(folder));
-    }
-
-    @Override
-    public Directory<Void> withWriter(final Write<Void> writer) {
-        return this;
+        return folder;
     }
 }

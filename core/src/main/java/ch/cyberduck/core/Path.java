@@ -23,7 +23,6 @@ import ch.cyberduck.core.serializer.Serializer;
 import org.apache.commons.lang3.StringUtils;
 
 import java.util.EnumSet;
-import java.util.Objects;
 
 public class Path extends AbstractPath implements Referenceable, Serializable {
 
@@ -40,7 +39,7 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
      */
     private String path;
     /**
-     * An absolute reference here the symbolic link is pointing to
+     * The target of the symbolic link if this path denotes a symbolic link or null
      */
     private Path symlink;
     /**
@@ -49,7 +48,7 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
     private EnumSet<Type> type;
 
     /**
-     * Attributes denoting this path
+     * File attributes
      */
     private PathAttributes attributes;
 
@@ -62,9 +61,9 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
     }
 
     /**
-     * @param parent the absolute directory
-     * @param name   the file relative to param path
-     * @param type   File type
+     * @param parent Parent path
+     * @param name   The filename relative to parent
+     * @param type   File types
      */
     public Path(final Path parent, final String name, final EnumSet<Type> type) {
         this.type = type;
@@ -75,7 +74,7 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
 
     /**
      * @param absolute The absolute path of the remote file
-     * @param type     File type
+     * @param type     File types
      */
     public Path(final String absolute, final EnumSet<Type> type) {
         this.type = type;
@@ -85,7 +84,8 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
 
     /**
      * @param absolute   The absolute path of the remote file
-     * @param attributes File type
+     * @param type       File types
+     * @param attributes File attributes
      */
     public Path(final String absolute, final EnumSet<Type> type, final PathAttributes attributes) {
         this.type = type;
@@ -94,8 +94,8 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
     }
 
     /**
-     * @param parent     Parent path reference
-     * @param name       Filename
+     * @param parent     Parent path
+     * @param name       The filename relative to parent
      * @param attributes Attributes
      */
     public Path(final Path parent, final String name, final EnumSet<Type> type, final PathAttributes attributes) {
@@ -105,7 +105,7 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
+    public <T> T serialize(final Serializer<T> dict) {
         dict.setStringForKey(String.valueOf(type), "Type");
         dict.setStringForKey(this.getAbsolute(), "Remote");
         if(symlink != null) {
@@ -261,7 +261,7 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
             return false;
         }
         if(other instanceof Path) {
-            return new DefaultPathPredicate(this).equals(new DefaultPathPredicate((Path) other));
+            return new DefaultPathPredicate(this).test((Path) other);
         }
         return false;
     }
@@ -271,7 +271,6 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
         final StringBuilder sb = new StringBuilder("Path{");
         sb.append("path='").append(path).append('\'');
         sb.append(", type=").append(type);
-        sb.append(", attributes=").append(attributes);
         sb.append('}');
         return sb.toString();
     }
@@ -285,23 +284,6 @@ public class Path extends AbstractPath implements Referenceable, Serializable {
             // If a file we don't have any children at all
             return false;
         }
-        if(this.isRoot()) {
-            // Root cannot be a child of any other path
-            return false;
-        }
-        if(directory.isRoot()) {
-            // Any other path is a child
-            return true;
-        }
-        if(Objects.equals(this.getParent(), directory.getParent())) {
-            // Cannot be a child if the same parent
-            return false;
-        }
-        for(Path parent = this.getParent(); !parent.isRoot(); parent = parent.getParent()) {
-            if(new SimplePathPredicate(parent).test(directory)) {
-                return true;
-            }
-        }
-        return false;
+        return new SimplePathPredicate(this).isChild(new SimplePathPredicate(directory));
     }
 }

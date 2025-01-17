@@ -25,7 +25,6 @@ import ch.cyberduck.binding.foundation.NSNumber;
 import ch.cyberduck.binding.foundation.NSObject;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.Cache;
-import ch.cyberduck.core.NSObjectPathReference;
 import ch.cyberduck.core.NSObjectTransferItemReference;
 import ch.cyberduck.core.formatter.SizeFormatterFactory;
 import ch.cyberduck.core.pool.SessionPool;
@@ -127,7 +126,7 @@ public abstract class TransferPromptDataSource extends OutlineDataSource {
     public TransferStatus getStatus(final TransferItem file) {
         if(!status.containsKey(file)) {
             // Transfer filter background task has not yet finished
-            log.warn(String.format("Unknown transfer status for %s", file));
+            log.warn("Unknown transfer status for {}", file);
             return new TransferStatus();
         }
         return status.get(file);
@@ -220,7 +219,7 @@ public abstract class TransferPromptDataSource extends OutlineDataSource {
     @Override
     public NSObject outlineView_child_ofItem(final NSOutlineView view, final NSInteger index, final NSObject item) {
         final AttributedList<TransferItem> children = this.get(null == item ? null : cache.lookup(new NSObjectTransferItemReference(item)));
-        return NSObjectPathReference.get(children.get(index.intValue()).remote);
+        return NSObjectTransferItemReference.get(children.get(index.intValue()).remote);
     }
 
     @Override

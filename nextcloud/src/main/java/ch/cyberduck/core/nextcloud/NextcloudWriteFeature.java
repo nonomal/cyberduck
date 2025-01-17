@@ -19,11 +19,15 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.dav.DAVSession;
 import ch.cyberduck.core.dav.DAVWriteFeature;
 import ch.cyberduck.core.exception.UnsupportedException;
+import ch.cyberduck.core.io.Checksum;
+import ch.cyberduck.core.io.ChecksumCompute;
+import ch.cyberduck.core.io.SHA1ChecksumCompute;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.http.Header;
 import org.apache.http.message.BasicHeader;
 
+import java.util.EnumSet;
 import java.util.List;
 
 public class NextcloudWriteFeature extends DAVWriteFeature {
@@ -33,11 +37,29 @@ public class NextcloudWriteFeature extends DAVWriteFeature {
     }
 
     @Override
-    protected List<Header> getHeaders(final Path file, final TransferStatus status) throws UnsupportedException {
-        final List<Header> headers = super.getHeaders(file, status);
-        if(null != status.getTimestamp()) {
-            headers.add(new BasicHeader("X-OC-Mtime", String.valueOf(status.getTimestamp() / 1000)));
+    protected List<Header> toHeaders(final Path file, final TransferStatus status, final boolean expectdirective) throws UnsupportedException {
+        final List<Header> headers = super.toHeaders(file, status, expectdirective);
+        if(null != status.getModified()) {
+            headers.add(new BasicHeader("X-OC-Mtime", String.valueOf(status.getModified() / 1000)));
+        }
+        if(null != status.getCreated()) {
+            headers.add(new BasicHeader("X-OC-CTime", String.valueOf(status.getCreated() / 1000)));
+        }
+        if(Checksum.NONE != status.getChecksum()) {
+            final Checksum checksum = status.getChecksum();
+            headers.add(new BasicHeader("OC-Checksum", String.format("%s:%s", checksum.algorithm.toString(), checksum.hash)));
         }
         return headers;
+    }
+
+
+    @Override
+    public ChecksumCompute checksum(final Path file, final TransferStatus status) {
+        return new SHA1ChecksumCompute();
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum);
     }
 }

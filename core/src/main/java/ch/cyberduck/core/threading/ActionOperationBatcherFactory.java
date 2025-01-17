@@ -30,31 +30,40 @@ import java.lang.reflect.InvocationTargetException;
 public class ActionOperationBatcherFactory extends Factory<ActionOperationBatcher> {
     private static final Logger log = LogManager.getLogger(ActionOperationBatcherFactory.class);
 
-    public ActionOperationBatcherFactory() {
+    private Constructor<? extends ActionOperationBatcher> constructor;
+
+    private ActionOperationBatcherFactory() {
         super("factory.autorelease.class");
     }
 
     public ActionOperationBatcher create(final Integer batchsize) {
         try {
-            final Constructor<? extends ActionOperationBatcher> constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, batchsize.getClass());
             if(null == constructor) {
-                log.warn(String.format("No matching constructor for parameter %s", batchsize.getClass()));
+                constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, batchsize.getClass());
+            }
+            if(null == constructor) {
+                log.warn("No matching constructor for parameter {}", batchsize.getClass());
                 // Call default constructor for disabled implementations
                 return clazz.getDeclaredConstructor().newInstance();
             }
             return constructor.newInstance(batchsize);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException | NoSuchMethodException e) {
-            log.error(String.format("Failure loading callback class %s. %s", clazz, e.getMessage()));
+            log.error("Failure loading callback class {}. {}", clazz, e.getMessage());
             return new DisabledActionOperationBatcher();
         }
     }
 
-    public static ActionOperationBatcher get() {
+    private static ActionOperationBatcherFactory singleton;
+
+    public static synchronized ActionOperationBatcher get() {
         return get(1);
     }
 
-    public static ActionOperationBatcher get(final Integer batchsize) {
-        return new ActionOperationBatcherFactory().create(batchsize);
+    public static synchronized ActionOperationBatcher get(final Integer batchsize) {
+        if(null == singleton) {
+            singleton = new ActionOperationBatcherFactory();
+        }
+        return singleton.create(batchsize);
     }
 }

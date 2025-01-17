@@ -17,7 +17,6 @@ package ch.cyberduck.core.preferences;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
-import ch.cyberduck.binding.foundation.ServiceManagementFunctions;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.local.Application;
 import ch.cyberduck.core.local.FinderLocal;
@@ -25,6 +24,12 @@ import ch.cyberduck.core.local.LaunchServicesApplicationFinder;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.rococoa.internal.RococoaTypeMapper;
+
+import java.util.Collections;
+
+import com.sun.jna.Library;
+import com.sun.jna.Native;
 
 public class ServiceManagementApplicationLoginRegistry implements ApplicationLoginRegistry {
     private static final Logger log = LogManager.getLogger(ServiceManagementApplicationLoginRegistry.class);
@@ -41,11 +46,10 @@ public class ServiceManagementApplicationLoginRegistry implements ApplicationLog
         final Local helper = new FinderLocal(new BundleApplicationResourcesFinder().find().getParent(),
                 String.format("Library/LoginItems/%s.app", application.getName()));
         if(!finder.register(helper)) {
-            log.warn(String.format("Failed to register %s (%s) with launch services", helper,
-                    finder.getDescription(application.getIdentifier())));
+            log.warn("Failed to register {} ({}) with launch services", helper, finder.getDescription(application.getIdentifier()));
         }
         if(!ServiceManagementFunctions.library.SMLoginItemSetEnabled(application.getIdentifier(), true)) {
-            log.warn(String.format("Failed to register %s as login item", application));
+            log.warn("Failed to register {} as login item", application);
             return false;
         }
         return true;
@@ -54,9 +58,25 @@ public class ServiceManagementApplicationLoginRegistry implements ApplicationLog
     @Override
     public boolean unregister(final Application application) {
         if(!ServiceManagementFunctions.library.SMLoginItemSetEnabled(application.getIdentifier(), false)) {
-            log.warn(String.format("Failed to remove %s as login item", application));
+            log.warn("Failed to remove {} as login item", application);
             return false;
         }
         return true;
+    }
+
+    public interface ServiceManagementFunctions extends Library {
+
+        ServiceManagementFunctions library = Native.load(
+            "ServiceManagement", ServiceManagementFunctions.class, Collections.singletonMap(Library.OPTION_TYPE_MAPPER, new RococoaTypeMapper()));
+
+        /**
+         * @param identifier The bundle identifier of the helper application bundle
+         * @param enabled    The Boolean enabled state of the helper application. This value is effective only
+         *                   for the currently logged in user. If true, the helper application will be started
+         *                   immediately (and upon subsequent logins) and kept running. If false, the helper
+         *                   application will no longer be kept running.
+         * @return Returns true if the requested change has taken effect.
+         */
+        boolean SMLoginItemSetEnabled(String identifier, boolean enabled);
     }
 }

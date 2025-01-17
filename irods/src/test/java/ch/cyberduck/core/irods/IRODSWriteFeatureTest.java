@@ -23,7 +23,6 @@ import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.Host;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Profile;
@@ -34,10 +33,12 @@ import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.StreamCopier;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.proxy.Proxy;
 import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
+import ch.cyberduck.test.VaultTest;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.RandomUtils;
@@ -57,24 +58,24 @@ import java.util.concurrent.CountDownLatch;
 import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
-public class IRODSWriteFeatureTest {
+public class IRODSWriteFeatureTest extends VaultTest {
 
     @Test
     public void testWriteConcurrent() throws Exception {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new IRODSProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
-                new Local("../profiles/iRODS (iPlant Collaborative).cyberduckprofile"));
+                this.getClass().getResourceAsStream("/iRODS (iPlant Collaborative).cyberduckprofile"));
         final Host host = new Host(profile, profile.getDefaultHostname(), new Credentials(
-                System.getProperties().getProperty("irods.key"), System.getProperties().getProperty("irods.secret")
+                PROPERTIES.get("irods.key"), PROPERTIES.get("irods.secret")
         ));
 
         final IRODSSession session1 = new IRODSSession(host);
-        session1.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session1.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session1.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session1.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final IRODSSession session2 = new IRODSSession(host);
-        session2.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session2.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session2.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session2.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final Path test1 = new Path(new IRODSHomeFinderService(session1).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
         final Path test2 = new Path(new IRODSHomeFinderService(session2).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
@@ -109,18 +110,18 @@ public class IRODSWriteFeatureTest {
     public void testWriteThreaded() throws Exception {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new IRODSProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
-                new Local("../profiles/iRODS (iPlant Collaborative).cyberduckprofile"));
+                this.getClass().getResourceAsStream("/iRODS (iPlant Collaborative).cyberduckprofile"));
         final Host host = new Host(profile, profile.getDefaultHostname(), new Credentials(
-                System.getProperties().getProperty("irods.key"), System.getProperties().getProperty("irods.secret")
+                PROPERTIES.get("irods.key"), PROPERTIES.get("irods.secret")
         ));
 
         final IRODSSession session1 = new IRODSSession(host);
-        session1.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session1.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session1.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session1.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final IRODSSession session2 = new IRODSSession(host);
-        session2.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session2.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session2.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session2.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final CountDownLatch cw1 = new CountDownLatch(1);
         final CountDownLatch cw2 = new CountDownLatch(1);
@@ -215,27 +216,28 @@ public class IRODSWriteFeatureTest {
     public void testWrite() throws Exception {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new IRODSProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
-                new Local("../profiles/iRODS (iPlant Collaborative).cyberduckprofile"));
+                this.getClass().getResourceAsStream("/iRODS (iPlant Collaborative).cyberduckprofile"));
         final Host host = new Host(profile, profile.getDefaultHostname(), new Credentials(
-                System.getProperties().getProperty("irods.key"), System.getProperties().getProperty("irods.secret")
+                PROPERTIES.get("irods.key"), PROPERTIES.get("irods.secret")
         ));
 
         final IRODSSession session = new IRODSSession(host);
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final Path test = new Path(new IRODSHomeFinderService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
         assertFalse(session.getFeature(Find.class).find(test));
 
         final byte[] content = RandomUtils.nextBytes(100);
+        final IRODSWriteFeature feature = new IRODSWriteFeature(session);
         {
             final TransferStatus status = new TransferStatus();
             status.setAppend(false);
             status.setLength(content.length);
 
-            assertEquals(0L, new IRODSWriteFeature(session).append(test, status).size, 0L);
+            assertEquals(0L, new IRODSUploadFeature(session).append(test, status).offset, 0L);
 
-            final StatusOutputStream<ObjStat> out = new IRODSWriteFeature(session).write(test, status, new DisabledConnectionCallback());
+            final StatusOutputStream<ObjStat> out = feature.write(test, status, new DisabledConnectionCallback());
             assertNotNull(out);
 
             new StreamCopier(new TransferStatus(), new TransferStatus()).transfer(new ByteArrayInputStream(content), out);
@@ -256,11 +258,12 @@ public class IRODSWriteFeatureTest {
             final TransferStatus status = new TransferStatus();
             status.setAppend(false);
             status.setLength(newcontent.length);
+            status.setRemote(new IRODSAttributesFinderFeature(session).find(test));
 
-            assertTrue(new IRODSWriteFeature(session).append(test, status).append);
-            assertEquals(content.length, new IRODSWriteFeature(session).append(test, status).size, 0L);
+            assertTrue(new IRODSUploadFeature(session).append(test, status).append);
+            assertEquals(content.length, new IRODSUploadFeature(session).append(test, status).offset, 0L);
 
-            final StatusOutputStream<ObjStat> out = new IRODSWriteFeature(session).write(test, status, new DisabledConnectionCallback());
+            final StatusOutputStream<ObjStat> out = feature.write(test, status, new DisabledConnectionCallback());
             assertNotNull(out);
 
             new StreamCopier(new TransferStatus(), new TransferStatus()).transfer(new ByteArrayInputStream(newcontent), out);
@@ -268,6 +271,7 @@ public class IRODSWriteFeatureTest {
 
             final PathAttributes attributes = new IRODSAttributesFinderFeature(session).find(test);
             assertEquals(newcontent.length, attributes.getSize());
+            assertEquals(new IRODSAttributesFinderFeature(session).toAttributes(out.getStatus()), attributes);
 
             final InputStream in = session.getFeature(Read.class).read(test, new TransferStatus(), new DisabledConnectionCallback());
             final byte[] buffer = new byte[newcontent.length];
@@ -285,14 +289,14 @@ public class IRODSWriteFeatureTest {
     public void testWriteAppend() throws Exception {
         final ProtocolFactory factory = new ProtocolFactory(new HashSet<>(Collections.singleton(new IRODSProtocol())));
         final Profile profile = new ProfilePlistReader(factory).read(
-                new Local("../profiles/iRODS (iPlant Collaborative).cyberduckprofile"));
+                this.getClass().getResourceAsStream("/iRODS (iPlant Collaborative).cyberduckprofile"));
         final Host host = new Host(profile, profile.getDefaultHostname(), new Credentials(
-                System.getProperties().getProperty("irods.key"), System.getProperties().getProperty("irods.secret")
+                PROPERTIES.get("irods.key"), PROPERTIES.get("irods.secret")
         ));
 
         final IRODSSession session = new IRODSSession(host);
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.login(new DisabledLoginCallback(), new DisabledCancelCallback());
 
         final Path test = new Path(new IRODSHomeFinderService(session).find(), UUID.randomUUID().toString(), EnumSet.of(Path.Type.file));
         assertFalse(session.getFeature(Find.class).find(test));
@@ -303,9 +307,10 @@ public class IRODSWriteFeatureTest {
         status.setAppend(true);
         status.setLength(content.length);
 
-        assertEquals(0L, new IRODSWriteFeature(session).append(test, status).size, 0L);
+        final IRODSWriteFeature feature = new IRODSWriteFeature(session);
+        assertEquals(0L, new IRODSUploadFeature(session).append(test, status).offset, 0L);
 
-        final OutputStream out = new IRODSWriteFeature(session).write(test, status, new DisabledConnectionCallback());
+        final OutputStream out = feature.write(test, status, new DisabledConnectionCallback());
         assertNotNull(out);
 
         new StreamCopier(new TransferStatus(), new TransferStatus()).transfer(new ByteArrayInputStream(content), out);
@@ -327,11 +332,12 @@ public class IRODSWriteFeatureTest {
         final TransferStatus status_append = new TransferStatus();
         status_append.setAppend(true);
         status_append.setLength(content_append.length);
+        status_append.setRemote(new IRODSAttributesFinderFeature(session).find(test));
 
-        assertTrue(new IRODSWriteFeature(session).append(test, status_append).append);
-        assertEquals(status.getLength(), new IRODSWriteFeature(session).append(test, status_append).size, 0L);
+        assertTrue(new IRODSUploadFeature(session).append(test, status_append).append);
+        assertEquals(status.getLength(), new IRODSUploadFeature(session).append(test, status_append).offset, 0L);
 
-        final OutputStream out_append = new IRODSWriteFeature(session).write(test, status_append, new DisabledConnectionCallback());
+        final OutputStream out_append = feature.write(test, status_append, new DisabledConnectionCallback());
         assertNotNull(out_append);
 
         new StreamCopier(new TransferStatus(), new TransferStatus()).transfer(new ByteArrayInputStream(content_append), out_append);

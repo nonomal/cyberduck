@@ -17,9 +17,9 @@ package ch.cyberduck.core.storegate;
 
 import ch.cyberduck.core.CachingFileIdProvider;
 import ch.cyberduck.core.DefaultPathContainerService;
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.PathNormalizer;
 import ch.cyberduck.core.PathRelativizer;
 import ch.cyberduck.core.URIEncoder;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -43,19 +43,17 @@ public class StoregateIdProvider extends CachingFileIdProvider implements FileId
     }
 
     @Override
-    public String getFileId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getFileId(final Path file) throws BackgroundException {
         try {
             if(StringUtils.isNotBlank(file.attributes().getFileId())) {
                 return file.attributes().getFileId();
             }
-            final String cached = super.getFileId(file, listener);
+            final String cached = super.getFileId(file);
             if(cached != null) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Return cached fileid %s for file %s", cached, file));
-                }
+                log.debug("Return cached fileid {} for file {}", cached, file);
                 return cached;
             }
-            final String id = new FilesApi(session.getClient()).filesGet_1(URIEncoder.encode(this.getPrefixedPath(file))).getId();
+            final String id = new FilesApi(session.getClient()).filesGet_0(URIEncoder.encode(this.getPrefixedPath(file))).getId();
             this.cache(file, id);
             return id;
         }
@@ -65,17 +63,19 @@ public class StoregateIdProvider extends CachingFileIdProvider implements FileId
     }
 
     /**
-     * Mapping of path "/Home/mduck" to "My files" Mapping of path "/Common" to "Common files"
+     * Mapping of path "/Home/mduck" to "My files"
+     * Mapping of path "/Common" to "Common files"
      */
     protected String getPrefixedPath(final Path file) {
         final PathContainerService service = new DefaultPathContainerService();
-        final String root = service.getContainer(file).getAbsolute();
+        final String name = new DefaultPathContainerService().getContainer(file).getName();
         for(RootFolder r : session.roots()) {
-            if(root.endsWith(r.getName())) {
+            if(StringUtils.equalsIgnoreCase(name, PathNormalizer.name(r.getPath()))
+                    || StringUtils.equalsIgnoreCase(name, PathNormalizer.name(r.getName()))) {
                 if(service.isContainer(file)) {
                     return r.getPath();
                 }
-                return String.format("%s/%s", r.getPath(), PathRelativizer.relativize(root, file.getAbsolute()));
+                return String.format("%s/%s", r.getPath(), PathRelativizer.relativize(name, file.getAbsolute()));
             }
         }
         return file.getAbsolute();

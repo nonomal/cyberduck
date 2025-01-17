@@ -24,22 +24,25 @@ import ch.cyberduck.core.LoginCallback;
 import ch.cyberduck.core.box.io.swagger.client.ApiException;
 import ch.cyberduck.core.box.io.swagger.client.api.UsersApi;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Directory;
+import ch.cyberduck.core.features.FileIdProvider;
 import ch.cyberduck.core.features.Move;
 import ch.cyberduck.core.features.MultipartWrite;
-import ch.cyberduck.core.features.PromptUrlProvider;
 import ch.cyberduck.core.features.Read;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.features.Touch;
 import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.features.Write;
+import ch.cyberduck.core.http.CustomServiceUnavailableRetryStrategy;
+import ch.cyberduck.core.http.ExecutionCountServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.HttpSession;
-import ch.cyberduck.core.oauth.OAuth2AuthorizationService;
 import ch.cyberduck.core.oauth.OAuth2ErrorResponseInterceptor;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.shared.BufferWriteFeature;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
@@ -47,40 +50,36 @@ import ch.cyberduck.core.threading.CancelCallback;
 
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.Collections;
 
 public class BoxSession extends HttpSession<CloseableHttpClient> {
-    private static final Logger log = LogManager.getLogger(BoxSession.class);
 
     private final BoxFileidProvider fileid = new BoxFileidProvider(this);
 
-    protected OAuth2RequestInterceptor authorizationService;
+    private OAuth2RequestInterceptor authorizationService;
 
     public BoxSession(final Host host, final X509TrustManager trust, final X509KeyManager key) {
         super(host, trust, key);
     }
 
     @Override
-    public CloseableHttpClient connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) {
+    public CloseableHttpClient connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws ConnectionCanceledException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
-        authorizationService = new OAuth2RequestInterceptor(configuration.build(), host.getProtocol())
+        authorizationService = new OAuth2RequestInterceptor(configuration.build(), host, prompt)
                 .withRedirectUri(host.getProtocol().getOAuthRedirectUrl());
         configuration.addInterceptorLast(authorizationService);
-        configuration.setServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService, prompt));
+        configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                new ExecutionCountServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService))));
         return configuration.build();
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
-        authorizationService.setTokens(authorizationService.authorize(host, prompt, cancel, OAuth2AuthorizationService.FlowType.AuthorizationCode));
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         try {
-            final Credentials credentials = host.getCredentials();
+            final Credentials credentials = authorizationService.validate();
             credentials.setUsername(new UsersApi(new BoxApiClient(client)).getUsersMe(Collections.emptyList()).getLogin());
-            credentials.setSaved(true);
         }
         catch(ApiException e) {
             throw new BoxExceptionMappingService(fileid).map(e);
@@ -103,11 +102,14 @@ public class BoxSession extends HttpSession<CloseableHttpClient> {
     @Override
     @SuppressWarnings("unchecked")
     public <T> T _getFeature(final Class<T> type) {
+        if(type == FileIdProvider.class) {
+            return (T) fileid;
+        }
         if(type == Upload.class) {
             return (T) new BoxThresholdUploadService(this, fileid, registry);
         }
         if(type == Write.class) {
-            return (T) new BoxThresholdWriteFeature(this, fileid);
+            return (T) new BoxWriteFeature(this, fileid);
         }
         if(type == Touch.class) {
             return (T) new BoxTouchFeature(this, fileid);
@@ -136,7 +138,7 @@ public class BoxSession extends HttpSession<CloseableHttpClient> {
         if(type == AttributesFinder.class) {
             return (T) new BoxAttributesFinderFeature(this, fileid);
         }
-        if(type == PromptUrlProvider.class) {
+        if(type == Share.class) {
             return (T) new BoxShareFeature(this, fileid);
         }
         return super._getFeature(type);

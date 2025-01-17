@@ -1,4 +1,6 @@
-package ch.cyberduck.core.brick;/*
+package ch.cyberduck.core.brick;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -53,7 +55,7 @@ public class BrickFileMigrationFeature {
                 failure.set(new BackgroundException(e));
                 signal.countDown();
             }
-        });
+        }, "filemigration");
         final long timeout = preferences.getLong("brick.migration.interrupt.ms");
         final long start = System.currentTimeMillis();
         try {
@@ -72,12 +74,12 @@ public class BrickFileMigrationFeature {
                             signal.countDown();
                             return;
                         default:
-                            log.warn(String.format("Wait for copy to complete with current status %s", migration));
+                            log.warn("Wait for copy to complete with current status {}", migration);
                             break;
                     }
                 }
                 catch(ApiException e) {
-                    log.warn(String.format("Failure processing scheduled task. %s", e.getMessage()), e);
+                    log.warn(String.format("Failure processing scheduled task. %s", e.getMessage()));
                     failure.set(new BrickExceptionMappingService().map(e));
                     signal.countDown();
                 }
@@ -98,7 +100,7 @@ public class BrickFileMigrationFeature {
             }
         }
         finally {
-            scheduler.shutdown();
+            scheduler.shutdown(true);
         }
     }
 

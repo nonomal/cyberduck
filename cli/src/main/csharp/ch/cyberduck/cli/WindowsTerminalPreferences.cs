@@ -18,7 +18,7 @@
 
 using ch.cyberduck.cli;
 using ch.cyberduck.core.cryptomator;
-using ch.cyberduck.core.preferences;
+using ch.cyberduck.core.serviceloader;
 using Ch.Cyberduck.Core;
 using Ch.Cyberduck.Core.Diagnostics;
 using Ch.Cyberduck.Core.Editor;
@@ -31,24 +31,24 @@ using sun.security.mscapi;
 
 namespace Ch.Cyberduck.Cli
 {
-    internal class WindowsTerminalPreferences : TerminalPreferences
+    internal class WindowsTerminalPreferences() : TerminalPreferences(
+        new ApplicationPreferences<WindowsTerminalPreferences>(
+            new WindowsTerminalLocales(),
+            new TerminalPropertyStoreFactory()))
     {
-        public WindowsTerminalPreferences() : base(new AppConfigPreferences(new WindowsTerminalLocales()))
-        {
-        }
-
         public override void setProperty(string property, string v)
         {
             base.setProperty(property, v);
             save();
         }
 
+        public override string locale() => "en";
+
         protected override void setDefaults()
         {
             base.setDefaults();
 
             this.setDefault("application.language", "en");
-            this.setDefault("application.datafolder.name", "Cyberduck");
 
             Security.addProvider(new SunMSCAPI());
             this.setDefault("connection.ssl.keystore.type", "Windows-MY");
@@ -61,12 +61,16 @@ namespace Ch.Cyberduck.Cli
             Security.setProperty("securerandom.strongAlgorithms", "Windows-PRNG:SunMSCAPI,SHA1PRNG:SUN");
 
             this.setDefault("keychain.secure", true.ToString());
+
+            this.setDefault("local.normalize.unicode", false.ToString());
         }
 
         protected override void setFactories()
         {
             base.setFactories();
 
+            this.setDefault("factory.autoserviceloader.class",
+                typeof(AppContextServiceLoader).AssemblyQualifiedName);
             this.setDefault("factory.locale.class", typeof(DictionaryLocale).AssemblyQualifiedName);
             this.setDefault("factory.supportdirectoryfinder.class",
                 typeof(RoamingSupportDirectoryFinder).AssemblyQualifiedName);
@@ -93,6 +97,15 @@ namespace Ch.Cyberduck.Cli
             // which isn't used in duck. Thus crazy stuff happens, and we have to force-load Cyberduck.Cryptomator here.
             // ref https://github.com/iterate-ch/cyberduck/issues/12812
             this.setDefault("factory.vault.class", typeof(CryptoVault).AssemblyQualifiedName);
+        }
+
+        private class TerminalPropertyStoreFactory : IPropertyStoreFactory
+        {
+            public IPropertyStore New()
+            {
+                EnvironmentInfo.DataFolderName = "Cyberduck";
+                return new ApplicationSettingsPropertyStore();
+            }
         }
     }
 }

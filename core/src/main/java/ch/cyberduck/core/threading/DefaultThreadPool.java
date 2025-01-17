@@ -104,6 +104,16 @@ public class DefaultThreadPool extends ExecutorServiceThreadPool {
                     handler.uncaughtException(Thread.currentThread(), t);
                 }
             }
+
+            @Override
+            public String toString() {
+                final StringBuilder sb = new StringBuilder("ThreadPoolExecutor{");
+                sb.append("prefix='").append(prefix).append('\'');
+                sb.append(", size=").append(size);
+                sb.append(", priority=").append(priority);
+                sb.append('}');
+                return sb.toString();
+            }
         };
     }
 
@@ -113,15 +123,14 @@ public class DefaultThreadPool extends ExecutorServiceThreadPool {
         @Override
         public void rejectedExecution(final Runnable r, final ThreadPoolExecutor e) {
             if(!e.isShutdown()) {
-                log.warn(String.format("Run %s on caller thread", r));
+                log.warn("Run {} on caller thread", r);
                 r.run();
             }
             else {
-                log.error(String.format("Rejected execution of %s", r));
+                log.error("Rejected execution of {}", r);
                 // Reject
                 super.rejectedExecution(r, e);
             }
         }
     }
-
 }

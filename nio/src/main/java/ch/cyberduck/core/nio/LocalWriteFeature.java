@@ -18,9 +18,9 @@ package ch.cyberduck.core.nio;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.VoidStatusOutputStream;
-import ch.cyberduck.core.shared.AppendWriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
@@ -29,10 +29,11 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.OpenOption;
 import java.nio.file.StandardOpenOption;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
-public class LocalWriteFeature extends AppendWriteFeature<Void> {
+public class LocalWriteFeature implements Write<Void> {
 
     private final LocalSession session;
 
@@ -75,7 +76,7 @@ public class LocalWriteFeature extends AppendWriteFeature<Void> {
     }
 
     @Override
-    public boolean random() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.random);
     }
 }

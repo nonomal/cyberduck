@@ -16,6 +16,7 @@ package ch.cyberduck.ui.cocoa.controller;
  */
 
 import ch.cyberduck.binding.Action;
+import ch.cyberduck.binding.Delegate;
 import ch.cyberduck.binding.HyperlinkAttributedStringFactory;
 import ch.cyberduck.binding.Outlet;
 import ch.cyberduck.binding.SheetController;
@@ -36,9 +37,10 @@ import ch.cyberduck.binding.foundation.NSNotificationCenter;
 import ch.cyberduck.binding.foundation.NSObject;
 import ch.cyberduck.binding.foundation.NSURL;
 import ch.cyberduck.core.*;
+import ch.cyberduck.core.diagnostics.Reachability;
+import ch.cyberduck.core.diagnostics.ReachabilityDiagnosticsFactory;
 import ch.cyberduck.core.diagnostics.ReachabilityFactory;
 import ch.cyberduck.core.exception.HostParserException;
-import ch.cyberduck.core.exception.LocalAccessDeniedException;
 import ch.cyberduck.core.local.BrowserLauncherFactory;
 import ch.cyberduck.core.preferences.Preferences;
 import ch.cyberduck.core.preferences.PreferencesFactory;
@@ -69,10 +71,10 @@ public class BookmarkController extends SheetController implements CollectionLis
     private static NSPoint cascade = new NSPoint(0, 0);
 
     protected final Preferences preferences
-        = PreferencesFactory.get();
+            = PreferencesFactory.get();
 
     protected final NSNotificationCenter notificationCenter
-        = NSNotificationCenter.defaultCenter();
+            = NSNotificationCenter.defaultCenter();
 
     private final ProtocolFactory protocols = ProtocolFactory.get();
 
@@ -83,8 +85,8 @@ public class BookmarkController extends SheetController implements CollectionLis
     protected final LoginInputValidator validator;
     protected final LoginOptions options;
 
-    private final HostPasswordStore keychain
-        = PasswordStoreFactory.get();
+    protected final HostPasswordStore keychain
+            = PasswordStoreFactory.get();
 
     @Outlet
     protected NSPopUpButton protocolPopup;
@@ -141,19 +143,8 @@ public class BookmarkController extends SheetController implements CollectionLis
         this.protocolPopup.setAutoenablesItems(false);
         this.protocolPopup.setTarget(this.id());
         this.protocolPopup.setAction(Foundation.selector("protocolSelectionChanged:"));
-        this.addObserver(new BookmarkObserver() {
-            @Override
-            public void change(final Host bookmark) {
-                // Reload protocols which may have changed due to profile selection in Preferences
-                loadProtocols();
-                protocolPopup.selectItemAtIndex(protocolPopup.indexOfItemWithRepresentedObject(String.valueOf(bookmark.getProtocol().hashCode())));
-            }
-        });
-    }
-
-    private void loadProtocols() {
         this.protocolPopup.removeAllItems();
-        for(Protocol protocol : protocols.find(new DefaultProtocolPredicate(EnumSet.of(Protocol.Type.ftp, Protocol.Type.sftp, Protocol.Type.dav)))) {
+        for(Protocol protocol : protocols.find(new DefaultProtocolPredicate(EnumSet.of(Protocol.Type.ftp, Protocol.Type.sftp, Protocol.Type.dav, Protocol.Type.smb)))) {
             this.addProtocol(protocol);
         }
         this.protocolPopup.menu().addItem(NSMenuItem.separatorItem());
@@ -172,6 +163,12 @@ public class BookmarkController extends SheetController implements CollectionLis
         for(Protocol protocol : protocols.find(new ProfileProtocolPredicate())) {
             this.addProtocol(protocol);
         }
+        this.addObserver(new BookmarkObserver() {
+            @Override
+            public void change(final Host bookmark) {
+                protocolPopup.selectItemAtIndex(protocolPopup.indexOfItemWithRepresentedObject(String.valueOf(bookmark.getProtocol().hashCode())));
+            }
+        });
         if(preferences.getBoolean("preferences.profiles.enable")) {
             this.protocolPopup.menu().addItem(NSMenuItem.separatorItem());
             this.protocolPopup.addItemWithTitle(String.format("%s%s", LocaleFactory.localizedString("More Options", "Bookmark"), "…"));
@@ -196,46 +193,31 @@ public class BookmarkController extends SheetController implements CollectionLis
             controller.setSelectedPanel(PreferencesController.PreferencesToolbarItem.profiles.name());
         }
         else {
-            final Protocol selected = ProtocolFactory.get().forName(sender.selectedItem().representedObject());
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Protocol selection changed to %s", selected));
-            }
-            bookmark.setPort(selected.getDefaultPort());
-            if(!bookmark.getProtocol().isHostnameConfigurable()) {
-                // Previously selected protocol had a default hostname. Change to default
-                // of newly selected protocol.
-                bookmark.setHostname(selected.getDefaultHostname());
-            }
-            if(!selected.isHostnameConfigurable()) {
-                // Hostname of newly selected protocol is not configurable. Change to default.
-                bookmark.setHostname(selected.getDefaultHostname());
-            }
-            if(StringUtils.isNotBlank(selected.getDefaultHostname())) {
+            final Protocol selected = protocols.forName(sender.selectedItem().representedObject());
+            final String hostname = HostnameConfiguratorFactory.get(selected).getHostname(selected.getDefaultHostname());
+            if(StringUtils.isNotBlank(hostname)) {
                 // Prefill with default hostname
-                bookmark.setHostname(selected.getDefaultHostname());
+                bookmark.setHostname(hostname);
             }
-            if(Objects.equals(bookmark.getDefaultPath(), bookmark.getProtocol().getDefaultPath()) ||
-                !selected.isPathConfigurable()) {
+            if(Objects.equals(bookmark.getDefaultPath(), bookmark.getProtocol().getDefaultPath()) || !selected.isPathConfigurable()) {
                 bookmark.setDefaultPath(selected.getDefaultPath());
             }
+            log.debug("Protocol selection changed to {}", selected);
             bookmark.setProtocol(selected);
-            final int port = HostnameConfiguratorFactory.get(selected).getPort(bookmark.getHostname());
-            if(port != -1) {
-                // External configuration found
-                bookmark.setPort(port);
-            }
+            bookmark.setPort(HostnameConfiguratorFactory.get(selected).getPort(bookmark.getHostname()));
+            bookmark.setCredentials(CredentialsConfiguratorFactory.get(selected).configure(bookmark));
             options.configure(selected);
             validator.configure(selected);
-            this.update();
         }
+        this.update();
     }
 
     public void setHostField(final NSTextField field) {
         this.hostField = field;
         this.notificationCenter.addObserver(this.id(),
-            Foundation.selector("hostFieldDidChange:"),
-            NSControl.NSControlTextDidChangeNotification,
-            field.id());
+                Foundation.selector("hostFieldDidChange:"),
+                NSControl.NSControlTextDidChangeNotification,
+                field.id());
         this.addObserver(new BookmarkObserver() {
             @Override
             public void change(final Host bookmark) {
@@ -252,8 +234,10 @@ public class BookmarkController extends SheetController implements CollectionLis
         if(Scheme.isURL(input)) {
             try {
                 final Host parsed = HostParser.parse(input);
+                if(!bookmark.getProtocol().getScheme().equals(parsed.getProtocol().getScheme())) {
+                    bookmark.setProtocol(parsed.getProtocol());
+                }
                 bookmark.setHostname(parsed.getHostname());
-                bookmark.setProtocol(parsed.getProtocol());
                 bookmark.setPort(parsed.getPort());
                 bookmark.setDefaultPath(parsed.getDefaultPath());
             }
@@ -277,8 +261,12 @@ public class BookmarkController extends SheetController implements CollectionLis
         this.alertIcon.setEnabled(false);
         this.alertIcon.setImage(null);
         this.alertIcon.setTarget(this.id());
-        this.alertIcon.setAction(Foundation.selector("launchNetworkAssistant:"));
+        if(new ReachabilityDiagnosticsFactory().isAvailable()) {
+            this.alertIcon.setAction(Foundation.selector("launchNetworkAssistant:"));
+        }
         this.addObserver(new BookmarkObserver() {
+            private final Reachability reachability = ReachabilityFactory.get();
+
             @Override
             public void change(final Host bookmark) {
                 if(StringUtils.isNotBlank(bookmark.getHostname())) {
@@ -287,7 +275,7 @@ public class BookmarkController extends SheetController implements CollectionLis
 
                         @Override
                         public Boolean run() {
-                            return reachable = ReachabilityFactory.get().isReachable(bookmark);
+                            return reachable = reachability.isReachable(bookmark);
                         }
 
                         @Override
@@ -307,15 +295,15 @@ public class BookmarkController extends SheetController implements CollectionLis
 
     @Action
     public void launchNetworkAssistant(final NSButton sender) {
-        ReachabilityFactory.get().diagnose(bookmark);
+        ReachabilityDiagnosticsFactory.get().diagnose(bookmark);
     }
 
     public void setPortField(final NSTextField field) {
         this.portField = field;
         this.notificationCenter.addObserver(this.id(),
-            Foundation.selector("portInputDidChange:"),
-            NSControl.NSControlTextDidChangeNotification,
-            field.id());
+                Foundation.selector("portInputDidChange:"),
+                NSControl.NSControlTextDidChangeNotification,
+                field.id());
         this.addObserver(new BookmarkObserver() {
             @Override
             public void change(final Host bookmark) {
@@ -328,7 +316,7 @@ public class BookmarkController extends SheetController implements CollectionLis
     @Action
     public void portInputDidChange(final NSNotification sender) {
         try {
-            bookmark.setPort(Integer.parseInt(portField.stringValue()));
+            bookmark.setPort(Integer.valueOf(portField.stringValue()));
         }
         catch(NumberFormatException e) {
             bookmark.setPort(-1);
@@ -339,14 +327,15 @@ public class BookmarkController extends SheetController implements CollectionLis
     public void setPathField(NSTextField field) {
         this.pathField = field;
         this.notificationCenter.addObserver(this.id(),
-            Foundation.selector("pathInputDidChange:"),
-            NSControl.NSControlTextDidChangeNotification,
-            field.id());
+                Foundation.selector("pathInputDidChange:"),
+                NSControl.NSControlTextDidChangeNotification,
+                field.id());
         this.addObserver(new BookmarkObserver() {
             @Override
             public void change(final Host bookmark) {
                 updateField(pathField, bookmark.getDefaultPath());
                 pathField.setEnabled(bookmark.getProtocol().isPathConfigurable());
+                pathField.cell().setPlaceholderString(bookmark.getProtocol().getPathPlaceholder());
             }
         });
     }
@@ -372,9 +361,9 @@ public class BookmarkController extends SheetController implements CollectionLis
     public void setUsernameField(final NSTextField field) {
         this.usernameField = field;
         this.notificationCenter.addObserver(this.id(),
-            Foundation.selector("usernameInputDidChange:"),
-            NSControl.NSControlTextDidChangeNotification,
-            field.id());
+                Foundation.selector("usernameInputDidChange:"),
+                NSControl.NSControlTextDidChangeNotification,
+                field.id());
         this.addObserver(new BookmarkObserver() {
             @Override
             public void change(final Host bookmark) {
@@ -397,8 +386,8 @@ public class BookmarkController extends SheetController implements CollectionLis
             @Override
             public void change(final Host bookmark) {
                 usernameLabel.setAttributedStringValue(NSAttributedString.attributedStringWithAttributes(
-                    String.format("%s:", bookmark.getProtocol().getUsernamePlaceholder()),
-                    TRUNCATE_TAIL_ATTRIBUTES
+                        String.format("%s:", bookmark.getProtocol().getUsernamePlaceholder()),
+                        TRUNCATE_TAIL_ATTRIBUTES
                 ));
             }
         });
@@ -425,7 +414,7 @@ public class BookmarkController extends SheetController implements CollectionLis
         }
         if(sender.state() == NSCell.NSOffState) {
             if(preferences.getProperty("connection.login.name").equals(
-                preferences.getProperty("connection.login.anon.name"))) {
+                    preferences.getProperty("connection.login.anon.name"))) {
                 bookmark.getCredentials().setUsername(StringUtils.EMPTY);
             }
             else {
@@ -443,27 +432,21 @@ public class BookmarkController extends SheetController implements CollectionLis
             public void change(final Host bookmark) {
                 passwordField.cell().setPlaceholderString(options.getPasswordPlaceholder());
                 passwordField.setEnabled(options.password && !bookmark.getCredentials().isAnonymousLogin());
-                if(options.keychain && options.password) {
-                    if(StringUtils.isBlank(bookmark.getHostname())) {
-                        return;
-                    }
-                    if(StringUtils.isBlank(bookmark.getCredentials().getUsername())) {
-                        return;
-                    }
-                    try {
-                        final String password = keychain.getPassword(bookmark.getProtocol().getScheme(),
-                            bookmark.getPort(),
-                            bookmark.getHostname(),
-                            bookmark.getCredentials().getUsername());
+                if(options.password) {
+                    if(options.keychain) {
+                        if(StringUtils.isBlank(bookmark.getHostname())) {
+                            return;
+                        }
+                        if(StringUtils.isBlank(bookmark.getCredentials().getUsername())) {
+                            return;
+                        }
+                        final String password = keychain.findLoginPassword(bookmark);
                         if(StringUtils.isNotBlank(password)) {
-                            updateField(passwordField, password);
                             // Make sure password fetched from keychain and set in field is set in model
                             bookmark.getCredentials().setPassword(password);
                         }
                     }
-                    catch(LocalAccessDeniedException e) {
-                        // Ignore
-                    }
+                    updateField(passwordField, bookmark.getCredentials().getPassword());
                 }
             }
         });
@@ -475,7 +458,7 @@ public class BookmarkController extends SheetController implements CollectionLis
             @Override
             public void change(final Host bookmark) {
                 passwordLabel.setAttributedStringValue(NSAttributedString.attributedStringWithAttributes(
-                    String.format("%s:", options.getPasswordPlaceholder()), TRUNCATE_TAIL_ATTRIBUTES
+                        String.format("%s:", options.getPasswordPlaceholder()), TRUNCATE_TAIL_ATTRIBUTES
                 ));
             }
         });
@@ -508,8 +491,6 @@ public class BookmarkController extends SheetController implements CollectionLis
 
     @Override
     public void setWindow(final NSWindow window) {
-        window.setContentMinSize(window.frame().size);
-        window.setContentMaxSize(new NSSize(600, window.frame().size.height.doubleValue()));
         this.addObserver(new BookmarkObserver() {
             @Override
             public void change(final Host bookmark) {
@@ -520,10 +501,16 @@ public class BookmarkController extends SheetController implements CollectionLis
         cascade = this.cascade(cascade);
     }
 
+    @Delegate
+    public NSSize windowWillResize_toSize(final NSWindow window, final NSSize newSize) {
+        // Only allow horizontal sizing
+        return new NSSize(newSize.width.doubleValue(), window.frame().size.height.doubleValue());
+    }
+
     @Override
     public void windowWillClose(final NSNotification notification) {
         cascade = new NSPoint(this.window().frame().origin.x.doubleValue(),
-            this.window().frame().origin.y.doubleValue() + this.window().frame().size.height.doubleValue());
+                this.window().frame().origin.y.doubleValue() + this.window().frame().size.height.doubleValue());
         super.windowWillClose(notification);
     }
 
@@ -573,10 +560,10 @@ public class BookmarkController extends SheetController implements CollectionLis
             privateKeyOpenPanel.setCanChooseDirectories(false);
             privateKeyOpenPanel.setCanChooseFiles(true);
             privateKeyOpenPanel.setAllowsMultipleSelection(false);
-            privateKeyOpenPanel.setMessage(LocaleFactory.localizedString("Select the private key in PEM or PuTTY format", "bookmark.getCredentials()"));
+            privateKeyOpenPanel.setMessage(LocaleFactory.localizedString("Select the private key in PEM or PuTTY format", "Credentials"));
             privateKeyOpenPanel.setPrompt(LocaleFactory.localizedString("Choose"));
-            privateKeyOpenPanel.beginSheetForDirectory(LocalFactory.get(LocalFactory.get(), ".ssh").getAbsolute(), null, this.window(), this.id(),
-                Foundation.selector("privateKeyPanelDidEnd:returnCode:contextInfo:"), null);
+            privateKeyOpenPanel.beginSheetForDirectory(LocalFactory.get("~/.ssh").getAbsolute(), null, this.window(), this.id(),
+                    Foundation.selector("privateKeyPanelDidEnd:returnCode:contextInfo:"), null);
         }
         else {
             bookmark.getCredentials().setIdentity(StringUtils.isBlank(selected) ? null : LocalFactory.get(selected));

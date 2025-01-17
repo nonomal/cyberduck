@@ -18,7 +18,6 @@ package ch.cyberduck.core.worker;
  */
 
 import ch.cyberduck.core.AbstractHostCollection;
-import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.BookmarkCollection;
 import ch.cyberduck.core.Cache;
 import ch.cyberduck.core.HistoryCollection;
@@ -30,6 +29,7 @@ import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Home;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.shared.DefaultHomeFinderService;
 
 import org.apache.logging.log4j.LogManager;
@@ -61,31 +61,34 @@ public class MountWorker extends Worker<Path> {
     }
 
     protected Path list(final Session<?> session, final Home feature) throws BackgroundException {
-        Path home;
-        AttributedList<Path> list;
         try {
-            home = feature.find();
+            final Path home = feature.find();
+            log.info("Mount path {}", home);
             // Remove cached home to force error if repeated attempt to mount fails
             cache.invalidate(home);
             // Retrieve directory listing of default path
-            final SessionListWorker worker = new SessionListWorker(cache, home, listener);
+            final ListWorker worker = new ListWorker(cache, home, listener);
             listener.message(worker.getActivity());
-            list = worker.run(session);
+            cache.put(home, worker.run(session));
+            return home;
         }
         catch(NotfoundException e) {
-            log.warn(String.format("Mount failed with %s", e.getMessage()));
+            log.warn("Mount failed with {}", e.getMessage());
+            if(new HostPreferences(session.getHost()).getBoolean("mount.notfound.skipfallback")) {
+                throw e;
+            }
             // The default path does not exist or is not readable due to possible permission issues. Fallback
             // to default working directory
-            home = new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory));
+            final Path home = new Path(String.valueOf(Path.DELIMITER), EnumSet.of(Path.Type.volume, Path.Type.directory));
+            log.info("Fallback to mount path {}", home);
             // Remove cached home to force error if repeated attempt to mount fails
             cache.invalidate(home);
             // Retrieve directory listing of working directory
-            final SessionListWorker worker = new SessionListWorker(cache, home, listener);
+            final ListWorker worker = new ListWorker(cache, home, listener);
             listener.message(worker.getActivity());
-            list = worker.run(session);
+            cache.put(home, worker.run(session));
+            return home;
         }
-        cache.put(home, list);
-        return home;
     }
 
     @Override
@@ -108,7 +111,7 @@ public class MountWorker extends Worker<Path> {
     @Override
     public String getActivity() {
         return MessageFormat.format(LocaleFactory.localizedString("Mounting {0}", "Status"),
-            bookmark.getHostname());
+                bookmark.getHostname());
     }
 
     @Override

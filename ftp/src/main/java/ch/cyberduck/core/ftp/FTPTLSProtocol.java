@@ -20,10 +20,14 @@ package ch.cyberduck.core.ftp;
 
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.LocaleFactory;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 
 import org.apache.commons.lang3.StringUtils;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class FTPTLSProtocol extends AbstractProtocol {
     @Override
     public String getIdentifier() {
@@ -38,6 +42,11 @@ public class FTPTLSProtocol extends AbstractProtocol {
     @Override
     public String getPrefix() {
         return String.format("%s.%s", FTPTLSProtocol.class.getPackage().getName(), StringUtils.upperCase(this.getType().name()));
+    }
+
+    @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.implicit;
     }
 
     @Override
@@ -84,4 +93,10 @@ public class FTPTLSProtocol extends AbstractProtocol {
     public boolean isAnonymousConfigurable() {
         return true;
     }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.custom;
+    }
+
 }

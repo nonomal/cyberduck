@@ -20,13 +20,19 @@ using ch.cyberduck.core;
 using ch.cyberduck.core.i18n;
 using ch.cyberduck.core.preferences;
 using ch.cyberduck.core.profiles;
-using Ch.Cyberduck.Core;
+using ch.cyberduck.ui.Model;
+using ch.cyberduck.ui.ViewModels;
+using ch.cyberduck.ui.Views;
+using Ch.Cyberduck.Core.Preferences;
 using Ch.Cyberduck.Core.Refresh;
 using Ch.Cyberduck.Core.Refresh.Services;
+using Ch.Cyberduck.Core.Refresh.Splat;
 using Ch.Cyberduck.Core.Refresh.UserControls;
+using Ch.Cyberduck.Core.Refresh.ViewModels.Dialogs;
 using Ch.Cyberduck.Core.Refresh.ViewModels.Preferences.Pages;
+using Ch.Cyberduck.Core.Refresh.Views;
 using Ch.Cyberduck.Ui.Controller;
-using Ch.Cyberduck.Ui.Core.Contracts;
+using Ch.Cyberduck.Ui.Core;
 using Ch.Cyberduck.Ui.Winforms;
 using Ch.Cyberduck.Ui.Winforms.Controls;
 using ReactiveUI;
@@ -40,6 +46,8 @@ using System.Linq;
 
 namespace Ch.Cyberduck.Ui
 {
+    using ApplicationPreferences = Core.Preferences.ApplicationPreferences;
+
     public static class StructureMapBootstrapper
     {
         public static void Bootstrap()
@@ -49,7 +57,6 @@ namespace Ch.Cyberduck.Ui
                 x.ForConcreteType<BaseController>();
                 x.Forward<BaseController, ch.cyberduck.core.Controller>();
 
-                x.For<Preferences>().Use(PreferencesFactory.get);
                 x.For<ProtocolFactory>().Use(ProtocolFactory.get);
                 x.For<Locale>().Use(LocaleFactory.get);
 
@@ -68,29 +75,38 @@ namespace Ch.Cyberduck.Ui
                 x.For<ICreateSymlinkPromptView>().Use<CreateSymlinkPromptForm>();
                 x.For<IGotoPromptView>().Use<GotoPromptForm>();
                 x.For<IDuplicateFilePromptView>().Use<DuplicateFilePromptForm>();
-                x.For<ITransferView>().Use<TransferForm>();
-                x.For<IProgressView>().Use<TransferControl>();
                 x.For<ICommandView>().Use<CommandForm>();
                 x.For<IDonationController>().Use<DonationController>();
+                x.For<IPropertyStoreFactory>().Use<PropertyStoreFactory<ApplicationSettingsPropertyStore>>();
                 x.For<PeriodicProfilesUpdater>().Use(ctx => new PeriodicProfilesUpdater(ctx.GetInstance<ch.cyberduck.core.Controller>()));
 
                 x.ForSingletonOf<IIconProviderImageSource>().Use<CyberduckImageSource>();
 
+                x.ForConcreteSingleton<BandwidthProvider>();
+                x.ForConcreteSingleton<ConnectionProvider>();
                 x.ForConcreteSingleton<IconCache>();
-                x.ForConcreteSingleton<IconIconProvider>();
                 x.ForConcreteSingleton<Images>();
+                x.ForConcreteSingleton<MetadataTemplateProvider>();
                 x.ForConcreteSingleton<ProfileListObserver>();
+                x.ForConcreteSingleton<PromptShareeWindow.Factory>();
+                x.ForConcreteSingleton<TransferController>();
+                x.ForConcreteSingleton<TransfersStore>();
+                x.ForConcreteSingleton<Win32IconProvider>();
                 x.ForConcreteSingleton<WinFormsIconProvider>();
                 x.ForConcreteSingleton<WpfIconProvider>();
 
                 x.For<IViewFor<ProfileViewModel>>().Use<ProfileElement>();
+                x.Forward<PromptShareeWindow.Factory, IWindowFactory<PromptShareeViewModel>>();
 
                 // Singletons
-                x.For<IPreferencesView>().Singleton().Use<PreferencesForm>();
+                x.ForSingletonOf<IPreferencesView>().Use<PreferencesForm>();
+                x.ForConcreteSingleton<ApplicationPreferences>();
+
+                x.Forward<ApplicationPreferences, Preferences>();
             });
         }
 
-        public static SmartInstance<T> ForConcreteSingleton<T>(this IRegistry registry) => registry.For<T>().Singleton().Add<T>();
+        public static SmartInstance<T> ForConcreteSingleton<T>(this IRegistry registry) => registry.For<T>().Singleton().Use<T>();
 
         public class SplatDependencyResolver : IDependencyResolver
         {

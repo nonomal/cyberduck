@@ -15,14 +15,15 @@ package ch.cyberduck.core.googledrive;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.UUIDRandomStringService;
 import ch.cyberduck.core.VersionId;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConflictException;
+import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
@@ -46,18 +47,26 @@ public class DriveDirectoryFeature implements Directory<VersionId> {
     @Override
     public Path mkdir(final Path folder, final TransferStatus status) throws BackgroundException {
         try {
-            if(DriveHomeFinderService.SHARED_DRIVES_NAME.equals(folder.getParent())) {
+            if(new SimplePathPredicate(DriveHomeFinderService.SHARED_DRIVES_NAME).test(folder.getParent())) {
                 final TeamDrive execute = session.getClient().teamdrives().create(
                         new UUIDRandomStringService().random(), new TeamDrive().setName(folder.getName())
                 ).execute();
                 return folder.withAttributes(new PathAttributes(folder.attributes()).withFileId(execute.getId()));
             }
             else {
+                try {
+                    if(!new DriveAttributesFinderFeature(session, fileid).find(folder).isHidden()) {
+                        throw new ConflictException(folder.getAbsolute());
+                    }
+                }
+                catch(NotfoundException e) {
+                    // Ignore
+                }
                 // Identified by the special folder MIME type application/vnd.google-apps.folder
                 final Drive.Files.Create insert = session.getClient().files().create(new File()
                         .setName(folder.getName())
                         .setMimeType("application/vnd.google-apps.folder")
-                        .setParents(Collections.singletonList(fileid.getFileId(folder.getParent(), new DisabledListProgressListener()))));
+                        .setParents(Collections.singletonList(fileid.getFileId(folder.getParent()))));
                 final File execute = insert
                         .setFields(DriveAttributesFinderFeature.DEFAULT_FIELDS)
                         .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
@@ -71,12 +80,7 @@ public class DriveDirectoryFeature implements Directory<VersionId> {
     }
 
     @Override
-    public DriveDirectoryFeature withWriter(final Write<VersionId> writer) {
-        return this;
-    }
-
-    @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return new DriveTouchFeature(session, fileid).isSupported(workdir, name);
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        new DriveTouchFeature(session, fileid).preflight(workdir, filename);
     }
 }

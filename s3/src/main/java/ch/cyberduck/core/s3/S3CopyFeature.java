@@ -19,15 +19,18 @@ package ch.cyberduck.core.s3;
 
 import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.ConnectionCallback;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.features.Encryption;
 import ch.cyberduck.core.io.StreamListener;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
@@ -37,8 +40,10 @@ import org.jets3t.service.Constants;
 import org.jets3t.service.ServiceException;
 import org.jets3t.service.model.S3Object;
 
+import java.text.MessageFormat;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 public class S3CopyFeature implements Copy {
     private static final Logger log = LogManager.getLogger(S3CopyFeature.class);
@@ -64,15 +69,15 @@ public class S3CopyFeature implements Copy {
             status.setEncryption(new S3EncryptionFeature(session, acl).getEncryption(source));
         }
         if(Acl.EMPTY == status.getAcl()) {
-            // Apply non standard ACL
+            // Apply non-standard ACL
             try {
-                final Acl list = acl.getPermission(source);
-                if(list.isEditable()) {
-                    status.setAcl(list);
+                // Verify target bucket allows ACLs
+                if(acl.getPermission(containerService.getContainer(target)).isEditable()) {
+                    status.setAcl(acl.getPermission(source));
                 }
             }
             catch(AccessDeniedException | InteroperabilityException e) {
-                log.warn(String.format("Ignore failure %s", e));
+                log.warn("Ignore failure {}", e.getMessage());
             }
         }
         final S3Object destination = new S3WriteFeature(session, acl).getDetails(target, status);
@@ -81,7 +86,8 @@ public class S3CopyFeature implements Copy {
         destination.setBucketName(bucket.isRoot() ? StringUtils.EMPTY : bucket.getName());
         destination.replaceAllMetadata(new HashMap<>(new S3MetadataFeature(session, acl).getMetadata(source)));
         final String versionId = this.copy(source, destination, status, listener);
-        return target.withAttributes(new PathAttributes(source.attributes()).withVersionId(versionId));
+        return target.withAttributes(new PathAttributes(source.attributes()).withVersionId(
+                new HostPreferences(session.getHost()).getBoolean("s3.listing.versioning.enable") ? versionId : null));
     }
 
     protected String copy(final Path source, final S3Object destination, final TransferStatus status, final StreamListener listener) throws BackgroundException {
@@ -102,7 +108,14 @@ public class S3CopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return !containerService.isContainer(source) && !containerService.isContainer(target);
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(containerService.isContainer(source)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            if(containerService.isContainer(target.get())) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+        }
     }
 }

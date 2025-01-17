@@ -22,7 +22,6 @@ import ch.cyberduck.core.Host;
 import ch.cyberduck.core.TestProtocol;
 import ch.cyberduck.core.http.HttpConnectionPoolBuilder;
 import ch.cyberduck.core.proxy.DisabledProxyFinder;
-import ch.cyberduck.core.proxy.Proxy;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DisabledX509TrustManager;
 import ch.cyberduck.core.ssl.ThreadLocalHostnameDelegatingTrustManager;
@@ -51,7 +50,7 @@ public class RequestEntityRestStorageServiceTest extends AbstractS3Test {
     public void testSetupConnection() throws Exception {
         final RequestEntityRestStorageService service = new RequestEntityRestStorageService(session, new HttpConnectionPoolBuilder(session.getHost(),
                 new ThreadLocalHostnameDelegatingTrustManager(new DisabledX509TrustManager(), session.getHost().getHostname()),
-                new DefaultX509KeyManager(), new DisabledProxyFinder()).build(Proxy.DIRECT, new DisabledTranscriptListener(), new DisabledLoginCallback()));
+                new DefaultX509KeyManager(), new DisabledProxyFinder()).build(new DisabledProxyFinder(), new DisabledTranscriptListener(), new DisabledLoginCallback()));
         final RegionEndpointCache cache = service.getRegionEndpointCache();
         cache.clear();
         final String key = new AlphanumericRandomStringService().random();
@@ -69,14 +68,14 @@ public class RequestEntityRestStorageServiceTest extends AbstractS3Test {
     @Test
     public void testSetupConnectionVirtualHost() throws Exception {
         final RequestEntityRestStorageService service = new RequestEntityRestStorageService(virtualhost, new HttpConnectionPoolBuilder(virtualhost.getHost(),
-                new ThreadLocalHostnameDelegatingTrustManager(new DisabledX509TrustManager(), session.getHost().getHostname()),
-                new DefaultX509KeyManager(), new DisabledProxyFinder()).build(Proxy.DIRECT, new DisabledTranscriptListener(), new DisabledLoginCallback()));
+                new ThreadLocalHostnameDelegatingTrustManager(new DisabledX509TrustManager(), virtualhost.getHost().getHostname()),
+                new DefaultX509KeyManager(), new DisabledProxyFinder()).build(new DisabledProxyFinder(), new DisabledTranscriptListener(), new DisabledLoginCallback()));
         final RegionEndpointCache cache = service.getRegionEndpointCache();
         cache.clear();
         final String key = new AlphanumericRandomStringService().random();
         {
             final HttpUriRequest request = service.setupConnection("GET", "", key, Collections.emptyMap());
-            assertEquals(String.format("https://test-eu-west-3-cyberduck.s3.amazonaws.com:443/%s", key), request.getURI().toString());
+            assertEquals(String.format("https://test-eu-central-1-cyberduck.s3.amazonaws.com:443/%s", key), request.getURI().toString());
         }
     }
 }

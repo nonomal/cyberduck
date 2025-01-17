@@ -13,7 +13,7 @@ namespace Ch.Cyberduck.Core.Refresh.Services
 
     public class WpfIconProvider : IconProvider<BitmapSource>
     {
-        public WpfIconProvider(IconCache cache, IIconProviderImageSource imageSource) : base(cache, imageSource)
+        public WpfIconProvider(IconCache cache, IIconProviderImageSource BitmapSource) : base(cache, BitmapSource)
         {
         }
 
@@ -35,7 +35,20 @@ namespace Ch.Cyberduck.Core.Refresh.Services
 
         public IEnumerable<BitmapSource> GetResources(string name) => Get(name, name, default, false, out var _);
 
-        private BitmapSource FindNearestFit(IEnumerable<BitmapSource> sources, int size, CacheIconCallback cacheCallback)
+        protected override BitmapSource Get(IntPtr nativeIcon, CacheIconCallback cacheIcon)
+        {
+            var source = Imaging.CreateBitmapSourceFromHIcon(nativeIcon, default, default);
+            cacheIcon(IconCache, source.PixelWidth, source);
+            return source;
+        }
+
+        protected override BitmapSource Get(string name, int size)
+            => Get(name, name, size, default);
+
+        protected override BitmapSource Get(string name)
+            => Get(name, name, default);
+
+        protected override BitmapSource NearestFit(IEnumerable<BitmapSource> sources, int size, CacheIconCallback cacheCallback)
         {
             var nearest = int.MaxValue;
             BitmapSource nearestFit = null;
@@ -54,33 +67,27 @@ namespace Ch.Cyberduck.Core.Refresh.Services
                     nearestFit = item;
                 }
             }
+
             nearestFit = ResizeImage(nearestFit, size);
             cacheCallback(IconCache, size, nearestFit);
             return nearestFit;
         }
 
-        private IEnumerable<BitmapSource> GetImages(Stream stream, GetCacheIconCallback getCache, CacheIconCallback cacheIcon)
+        protected override BitmapSource Overlay(BitmapSource baseImage, BitmapSource overlay, int size)
         {
-            var list = new List<BitmapSource>();
-
-            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.None, BitmapCacheOption.None);
-            foreach (var item in decoder.Frames)
+            DrawingVisual visual = new();
+            using (var context = visual.RenderOpen())
             {
-                if (getCache(IconCache, item.PixelWidth)) continue;
-
-                var fixedImage = FixDPI(item);
-                list.Add(fixedImage);
-                cacheIcon(IconCache, item.PixelWidth, fixedImage);
+                Rect r = new(0, 0, size, size);
+                context.DrawImage(baseImage, r);
+                context.DrawImage(overlay, r);
             }
 
-            return list;
-        }
-
-        protected override BitmapSource Get(IntPtr nativeIcon, CacheIconCallback cacheIcon)
-        {
-            var source = Imaging.CreateBitmapSourceFromHIcon(nativeIcon, default, default);
-            cacheIcon(IconCache, source.PixelWidth, source);
-            return source;
+            RenderTargetBitmap bmp = new(size, size, 96, 96, baseImage.Format);
+            RenderOptions.SetBitmapScalingMode(bmp, BitmapScalingMode.Fant);
+            bmp.Render(visual);
+            bmp.Freeze();
+            return bmp;
         }
 
         private BitmapSource FixDPI(BitmapSource source)
@@ -97,31 +104,6 @@ namespace Ch.Cyberduck.Core.Refresh.Services
             return writeableBitmap;
         }
 
-        private BitmapSource ResizeImage(BitmapSource source, int size)
-        {
-            Rect rect = new(new(size, size));
-            DrawingGroup group = new();
-            RenderOptions.SetBitmapScalingMode(group, BitmapScalingMode.Fant);
-            group.Children.Add(new ImageDrawing(source, rect));
-
-            DrawingVisual targetVisual = new();
-            using (var context = targetVisual.RenderOpen())
-            {
-                context.DrawDrawing(group);
-            }
-
-            RenderTargetBitmap resized = new(size, size, 96, 96, PixelFormats.Default);
-            resized.Render(targetVisual);
-            resized.Freeze();
-            return resized;
-        }
-
-        protected override BitmapSource Get(string name, int size)
-            => Get(name, name, size, default);
-
-        protected override BitmapSource Get(string name)
-            => Get(name, name, default);
-
         private BitmapSource Get(object key, string path, string classifier)
             => IconCache.TryGetIcon(key, out BitmapSource image, classifier)
             ? image
@@ -134,8 +116,15 @@ namespace Ch.Cyberduck.Core.Refresh.Services
 
         private BitmapSource Get(object key, string path, int size, string classifier, bool returnDefault)
         {
-            var images = Get(key, path, classifier, returnDefault, out var image);
-            return image ?? FindNearestFit(images, size, (c, s, i) => c.CacheIcon(key, s, i, classifier));
+            using (IconCache.UpgradeableReadLock())
+            {
+                var images = Get(key, path, classifier, returnDefault, out var image);
+                return image ?? NearestFit(images, size, (c, s, i) =>
+                {
+                    c.CacheIcon(key, s, i, classifier);
+                    c.MarkResized(key, s, classifier);
+                });
+            }
         }
 
         private IEnumerable<BitmapSource> Get(object key, string path, string classifier, bool returnDefault, out BitmapSource @default)
@@ -144,25 +133,75 @@ namespace Ch.Cyberduck.Core.Refresh.Services
             var images = IconCache.Filter<BitmapSource>(((object key, string classifier, int) f) => Equals(key, f.key) && Equals(classifier, f.classifier));
             if (!images.Any())
             {
-                bool isDefault = !IconCache.TryGetIcon<BitmapSource>(key, out _, classifier);
-                using Stream stream = GetStream(path);
-                images = GetImages(stream, (c, s) => c.TryGetIcon<BitmapSource>(key, s, out _, classifier), (c, s, i) =>
+                using (IconCache.WriteLock())
                 {
-                    if (isDefault)
+                    bool isDefault = !IconCache.TryGetIcon<BitmapSource>(key, out _, classifier);
+                    using Stream stream = GetStream(path);
+                    images = GetImages(stream, (c, s) => c.TryGetIcon<BitmapSource>(key, s, out _, classifier), (c, s, i) =>
                     {
-                        isDefault = false;
-                        if (returnDefault)
+                        if (isDefault)
                         {
-                            image = i;
+                            isDefault = false;
+                            if (returnDefault)
+                            {
+                                image = i;
+                            }
+                            IconCache.CacheIcon<BitmapSource>(key, s, classifier);
                         }
-                        IconCache.CacheIcon<BitmapSource>(key, s, classifier);
-                    }
-                    IconCache.CacheIcon(key, s, i, classifier);
-                });
+                        IconCache.CacheIcon(key, s, i, classifier);
+                    });
+                }
             }
             @default = image;
 
             return images;
+        }
+
+        private IEnumerable<BitmapSource> GetImages(Stream stream, GetCacheIconCallback getCache, CacheIconCallback cacheIcon)
+        {
+            var list = new List<BitmapSource>();
+
+            var decoder = BitmapDecoder.Create(stream, BitmapCreateOptions.IgnoreColorProfile, BitmapCacheOption.OnLoad);
+            if (decoder is GifBitmapDecoder)
+            {
+                var frame = decoder.Frames[0];
+                if (!getCache(IconCache, frame.PixelWidth))
+                {
+                    cacheIcon(IconCache, frame.PixelWidth, frame);
+                }
+            }
+            else
+            {
+                foreach (var item in decoder.Frames)
+                {
+                    if (getCache(IconCache, item.PixelWidth))
+                    {
+                        continue;
+                    }
+
+                    var resized = FixDPI(item);
+                    list.Add(resized);
+                    cacheIcon(IconCache, resized.PixelWidth, resized);
+                }
+            }
+
+            return list;
+        }
+
+        private BitmapSource ResizeImage(BitmapSource source, int size)
+        {
+            Rect rect = new(new(size, size));
+            DrawingVisual targetVisual = new();
+            using (var context = targetVisual.RenderOpen())
+            {
+                context.DrawImage(source, rect);
+            }
+
+            RenderTargetBitmap resized = new(size, size, 96, 96, PixelFormats.Default);
+            RenderOptions.SetBitmapScalingMode(targetVisual, BitmapScalingMode.Fant);
+            resized.Render(targetVisual);
+            resized.Freeze();
+            return resized;
         }
     }
 }

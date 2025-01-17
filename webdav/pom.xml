@@ -18,14 +18,14 @@
     <parent>
         <groupId>ch.cyberduck</groupId>
         <artifactId>parent</artifactId>
-        <version>8.4.2-SNAPSHOT</version>
+        <version>9.1.3-SNAPSHOT</version>
     </parent>
     <artifactId>webdav</artifactId>
     <packaging>jar</packaging>
 
     <properties>
-        <sardine-version>5.13</sardine-version>
-        <milton-api.version>3.1.1.488</milton-api.version>
+        <sardine-version>5.14.1</sardine-version>
+        <milton-api.version>4.0.5.2400</milton-api.version>
     </properties>
 
     <dependencies>
@@ -49,7 +49,6 @@
         <dependency>
             <groupId>org.glassfish.jaxb</groupId>
             <artifactId>jaxb-runtime</artifactId>
-            <version>2.3.3</version>
         </dependency>
         <dependency>
             <groupId>ch.cyberduck</groupId>
@@ -75,9 +74,9 @@
             <scope>test</scope>
         </dependency>
         <dependency>
-            <groupId>javax.servlet</groupId>
-            <artifactId>servlet-api</artifactId>
-            <version>2.5</version>
+            <groupId>jakarta.servlet</groupId>
+            <artifactId>jakarta.servlet-api</artifactId>
+            <version>6.1.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>

@@ -18,24 +18,17 @@ package ch.cyberduck.core.worker;
  * feedback@cyberduck.ch
  */
 
-import ch.cyberduck.core.AttributedList;
-import ch.cyberduck.core.BookmarkNameProvider;
-import ch.cyberduck.core.BytecountStreamListener;
-import ch.cyberduck.core.Cache;
-import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledListProgressListener;
-import ch.cyberduck.core.Local;
-import ch.cyberduck.core.LocaleFactory;
-import ch.cyberduck.core.Path;
-import ch.cyberduck.core.ProgressListener;
-import ch.cyberduck.core.Session;
-import ch.cyberduck.core.SleepPreventer;
-import ch.cyberduck.core.SleepPreventerFactory;
-import ch.cyberduck.core.TransferItemCache;
+import ch.cyberduck.core.*;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.TransferCanceledException;
+import ch.cyberduck.core.exception.TransferStatusCanceledException;
 import ch.cyberduck.core.io.StreamListener;
+import ch.cyberduck.core.local.IconService;
+import ch.cyberduck.core.local.IconServiceFactory;
 import ch.cyberduck.core.notification.NotificationService;
+import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.threading.TransferBackgroundActionState;
 import ch.cyberduck.core.transfer.SynchronizingTransferErrorCallback;
 import ch.cyberduck.core.transfer.Transfer;
@@ -47,6 +40,8 @@ import ch.cyberduck.core.transfer.TransferPathFilter;
 import ch.cyberduck.core.transfer.TransferPrompt;
 import ch.cyberduck.core.transfer.TransferSpeedometer;
 import ch.cyberduck.core.transfer.TransferStatus;
+import ch.cyberduck.core.transfer.TransferStreamListener;
+import ch.cyberduck.core.transfer.download.IconServiceStreamListener;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.concurrent.ConcurrentUtils;
@@ -160,17 +155,15 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
     }
 
     @Override
-    public void reset() {
-        for(TransferStatus status : table.values()) {
+    public void cancel() {
+        for(Map.Entry<TransferItem, TransferStatus> entry : table.entrySet()) {
+            final TransferItem item = entry.getKey();
+            final TransferStatus status = entry.getValue();
             for(TransferStatus segment : status.getSegments()) {
+                log.warn("Cancel segment {} of item {}", segment, item);
                 segment.setCanceled();
             }
         }
-    }
-
-    @Override
-    public void cancel() {
-        this.reset();
         super.cancel();
     }
 
@@ -183,9 +176,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
         final String lock = sleep.lock();
         final Session<?> destination = this.borrow(Connection.destination);
         try {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Start transfer with prompt %s and options %s", prompt, options));
-            }
+            log.debug("Start transfer with prompt {} and options {}", prompt, options);
             // Determine the filter to match files against
             final TransferAction action = transfer.action(source, destination, options.resumeRequested, options.reloadRequested, prompt,
                     new DisabledListProgressListener() {
@@ -194,13 +185,9 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                             progress.message(message);
                         }
                     });
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Selected transfer action %s", action));
-            }
+            log.debug("Selected transfer action {}", action);
             if(action.equals(TransferAction.cancel)) {
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Transfer %s canceled by user", this));
-                }
+                log.info("Transfer {} canceled by user", this);
                 throw new TransferCanceledException();
             }
             // Reset the cached size of the transfer and progress value
@@ -224,6 +211,8 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
             }
             this.await();
             transfer.post(source, destination, table, error, progress, connect);
+            // Close transfer thread pool
+            this.shutdown();
         }
         finally {
             this.release(source, Connection.source, null);
@@ -233,7 +222,6 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                         String.format("%s complete", StringUtils.capitalize(transfer.getType().name())) :
                         "Transfer incomplete", transfer.getName());
             }
-            this.shutdown();
             sleep.release(lock);
             table.clear();
             cache.clear();
@@ -248,11 +236,9 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
      * @param action Transfer action for existing files
      */
     public Future<TransferStatus> prepare(final Path file, final Local local, final TransferStatus parent, final TransferAction action) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Find transfer status of %s for transfer %s", file, this));
-        }
+        log.debug("Find transfer status of {} for transfer {}", file, this);
         if(this.isCanceled()) {
-            throw new TransferCanceledException();
+            throw new TransferStatusCanceledException();
         }
         if(prompt.isSelected(new TransferItem(file, local))) {
             return this.submit(new RetryTransferCallable(transfer.getSource()) {
@@ -267,16 +253,14 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                         // Determine transfer filter implementation from selected overwrite action
                         final TransferPathFilter filter = transfer.filter(source, destination, action, progress);
                         // Only prepare the path it will be actually transferred
-                        if(!filter.accept(file, local, parent)) {
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Skip file %s by filter %s for transfer %s", file, filter, this));
-                            }
+                        if(!filter.accept(file, local, parent, progress)) {
+                            log.info("Skip file {} by filter {} for transfer {}", file, filter, this);
+                            transfer.addSize(0L);
+                            transfer.addTransferred(0L);
                             return null;
                         }
                         else {
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Accepted file %s in transfer %s", file, this));
-                            }
+                            log.info("Accepted file {} in transfer {}", file, this);
                             // Transfer
                             // Determine transfer status
                             final TransferStatus status = filter.prepare(file, local, parent, progress);
@@ -303,9 +287,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                                     prepare(f.remote, f.local, status, action);
                                 }
                             }
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Determined transfer status %s of %s for transfer %s", status, file, this));
-                            }
+                            log.info("Determined transfer status {} of {} for transfer {}", status, file, this);
                             return status;
                         }
                     }
@@ -317,7 +299,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                         // Prompt to continue or abort for application errors
                         else if(error.prompt(new TransferItem(file, local), parent, e, table.size())) {
                             // Continue
-                            log.warn(String.format("Ignore transfer failure %s", e));
+                            log.warn("Ignore transfer failure {}", e.getMessage());
                             return null;
                         }
                         else {
@@ -341,7 +323,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
             });
         }
         else {
-            log.info(String.format("Skip unchecked file %s for transfer %s", file, this));
+            log.info("Skip unchecked file {} for transfer {}", file, this);
         }
         return null;
     }
@@ -352,7 +334,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
      */
     public Future<TransferStatus> transfer(final TransferItem item, final TransferAction action) throws BackgroundException {
         if(this.isCanceled()) {
-            throw new TransferCanceledException();
+            throw new TransferStatusCanceledException();
         }
         // Only transfer if accepted by filter and stored in table with transfer status
         if(table.containsKey(item)) {
@@ -366,33 +348,31 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                     public TransferStatus call() throws BackgroundException {
                         status.validate();
                         if(segment.isComplete()) {
-                            if(log.isWarnEnabled()) {
-                                log.warn(String.format("Skip transferring already completed item %s", item));
-                            }
+                            log.warn("Skip transferring already completed item {}", item);
                         }
                         else {
                             // Do transfer with retry
                             this.transferSegment(segment);
-                        }
-                        final Session<?> source = borrow(Connection.source);
-                        final Session<?> destination = borrow(Connection.destination);
-                        try {
-                            // Determine transfer filter implementation from selected overwrite action
-                            final TransferPathFilter filter = transfer.filter(source, destination, action, progress);
-                            // Post process of file.
-                            filter.complete(
-                                    segment.getRename().remote != null ? segment.getRename().remote : item.remote,
-                                    segment.getRename().local != null ? segment.getRename().local : item.local,
-                                    segment, progress);
-                        }
-                        finally {
-                            release(source, Connection.source, null);
-                            release(destination, Connection.destination, null);
+                            final Session<?> source = borrow(Connection.source);
+                            final Session<?> destination = borrow(Connection.destination);
+                            try {
+                                // Determine transfer filter implementation from selected overwrite action
+                                final TransferPathFilter filter = transfer.filter(source, destination, action, progress);
+                                // Post process of file.
+                                filter.complete(
+                                        segment.getRename().remote != null ? segment.getRename().remote : item.remote,
+                                        segment.getRename().local != null ? segment.getRename().local : item.local,
+                                        segment, progress);
+                            }
+                            finally {
+                                release(source, Connection.source, null);
+                                release(destination, Connection.destination, null);
+                            }
                         }
                         // Recursive
                         if(item.remote.isDirectory()) {
                             if(!cache.isCached(item)) {
-                                log.warn(String.format("Missing entry for %s in cache", item));
+                                log.warn("Missing entry for {} in cache", item);
                             }
                             for(TransferItem f : cache.get(item)) {
                                 // Recursive
@@ -404,40 +384,69 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                     }
 
                     private void transferSegment(final TransferStatus segment) throws BackgroundException {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Transfer item %s with status %s", item, segment));
-                        }
+                        log.debug("Transfer item {} with status {}", item, segment);
                         final Session<?> s = borrow(Connection.source);
                         final Session<?> d = borrow(Connection.destination);
-                        final BytecountStreamListener counter = new BytecountStreamListener(stream);
+                        final IconService.Icon icon;
+                        if(new HostPreferences(s.getHost()).getBoolean(String.format("queue.%s.icon.update", transfer.getType().name()))) {
+                            icon = IconServiceFactory.iconFor(transfer.getType(),
+                                    segment.getRename().local != null ? segment.isSegment() ? segment.getRename().local.getParent() : segment.getRename().local : item.local);
+                        }
+                        else {
+                            icon = IconService.disabled;
+                        }
+                        final BytecountStreamListener counter = new TransferStreamListener(transfer,
+                                new IconServiceStreamListener(segment, icon, stream));
                         try {
                             transfer.transfer(s, d,
                                     segment.getRename().remote != null ? segment.getRename().remote : item.remote,
                                     segment.getRename().local != null ? segment.getRename().local : item.local,
-                                    options, status, segment, connect, progress, counter);
+                                    options, segment, connect, progress, counter);
+                            if(transfer.isComplete()) {
+                                // Remove custom icon if complete
+                                icon.remove();
+                            }
                         }
                         catch(BackgroundException e) {
                             release(s, Connection.source, e);
                             release(d, Connection.destination, e);
-                            log.warn(String.format("Failure %s transferring %s", item, e));
+                            log.warn("Failure {} transferring segment {} of {}", e, segment, item);
                             // Determine if we should retry depending on failure type
                             if(this.retry(e, progress, new TransferBackgroundActionState(status))) {
                                 final Session<?> source = borrow(Connection.source);
                                 final Session<?> destination = borrow(Connection.destination);
                                 try {
-                                    final TransferPathFilter resume = transfer.filter(source, destination, TransferAction.resume, progress);
-                                    if(resume.accept(item.remote, item.local, new TransferStatus().exists(true))) {
-                                        if(log.isDebugEnabled()) {
-                                            log.debug(String.format("Retry transfer of %s", item));
+                                    // Reset cache
+                                    final TransferPathFilter resume = transfer
+                                            .withCache(new PathCache(PreferencesFactory.get().getInteger("transfer.cache.size")))
+                                            .filter(source, destination, TransferAction.resume, progress);
+                                    log.debug("Ask filter {} to accept retry for segment {} of {}", resume, segment, item);
+                                    if(resume.accept(
+                                            segment.getRename().remote != null ? segment.getRename().remote : item.remote,
+                                            segment.getRename().local != null ? segment.getRename().local : item.local, new TransferStatus().exists(true), progress)) {
+                                        log.debug("Determine status for retry of {}", segment);
+                                        final TransferStatus retry;
+                                        if(segment.isSegment()) {
+                                            // Repeat full length of single segment
+                                            retry = segment;
+                                            // Subtract already counted bytes
+                                            counter.recv(-counter.getRecv());
+                                            counter.sent(-counter.getSent());
                                         }
-                                        final TransferStatus retry = resume.prepare(item.remote, item.local, new TransferStatus().exists(true), progress);
-                                        // Add bytes retrieved but not yet counted
-                                        stream.recv(retry.getOffset() - counter.getRecv());
-                                        stream.sent(retry.getOffset() - counter.getSent());
-                                        transfer.addTransferred(retry.getOffset() - counter.getSent());
+                                        else {
+                                            // Append to existing file when possible
+                                            retry = resume.prepare(
+                                                    segment.getRename().remote != null ? segment.getRename().remote : item.remote,
+                                                    segment.getRename().local != null ? segment.getRename().local : item.local, new TransferStatus().exists(true), progress);
+                                            // Subtract already counted bytes
+                                            counter.recv(retry.getOffset() - counter.getRecv());
+                                            counter.sent(retry.getOffset() - counter.getSent());
+                                        }
                                         // Retry immediately
-                                        log.info(String.format("Retry %s with transfer status %s", item, retry));
+                                        log.info("Retry segment {} of {} with status {}", segment, item, retry);
                                         this.transferSegment(segment
+                                                .withNonces(retry.getNonces())
+                                                .withChecksum(retry.getChecksum())
                                                 .withLength(retry.getLength())
                                                 .withOffset(retry.getOffset())
                                                 .append(retry.isAppend()));
@@ -449,14 +458,12 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                                     release(destination, Connection.destination, null);
                                 }
                             }
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Cancel retry for %s", item));
-                            }
-                            segment.setFailure();
+                            log.debug("Cancel retry for segment {} of {}", segment, item);
+                            segment.setFailure(e);
                             // Prompt to continue or abort for application errors
                             if(error.prompt(item, segment, e, table.size())) {
                                 // Continue
-                                log.warn(String.format("Ignore transfer failure %s", e));
+                                log.warn("Ignore transfer failure {}", e.getMessage());
                             }
                             else {
                                 throw new TransferCanceledException(e);
@@ -487,7 +494,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                         boolean complete = true;
                         for(TransferStatus segment : segments) {
                             if(!segment.await()) {
-                                log.warn(String.format("Failure to complete segment %s.", segment));
+                                log.warn("Failure to complete segment {}.", segment);
                                 complete = false;
                             }
                         }
@@ -509,8 +516,8 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
                             }
                         }
                         else {
-                            log.warn(String.format("Skip concatenating segments for failed transfer %s", status));
-                            status.setFailure();
+                            log.warn("Skip concatenating segments for failed transfer {}", status);
+                            status.setFailure(new ConnectionCanceledException());
                         }
                     }
                     return status;
@@ -527,7 +534,7 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
             });
         }
         else {
-            log.warn(String.format("Skip file %s with unknown transfer status", item));
+            log.warn("Skip file {} with unknown transfer status", item);
         }
         return ConcurrentUtils.constantFuture(null);
     }
@@ -538,6 +545,18 @@ public abstract class AbstractTransferWorker extends TransferWorker<Boolean> {
 
     @Override
     public String getActivity() {
+        switch(transfer.getType()) {
+            case download:
+                return LocaleFactory.localizedString("Download", "Transfer");
+            case upload:
+                return LocaleFactory.localizedString("Upload", "Transfer");
+            case sync:
+                return LocaleFactory.localizedString("Download and Upload", "Transfer");
+            case move:
+                return LocaleFactory.localizedString("Rename", "Transfer");
+            case copy:
+                return LocaleFactory.localizedString("Copy", "Transfer");
+        }
         return BookmarkNameProvider.toString(transfer.getSource());
     }
 

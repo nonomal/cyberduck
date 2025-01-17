@@ -25,17 +25,22 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.features.AttributesFinder;
-import ch.cyberduck.core.preferences.PreferencesFactory;
+import ch.cyberduck.core.preferences.HostPreferences;
 
 import org.apache.commons.lang3.StringUtils;
 
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import net.schmizz.sshj.sftp.FileAttributes;
 
 public class SFTPAttributesFinderFeature implements AttributesFinder, AttributesAdapter<FileAttributes> {
 
     private final SFTPSession session;
+    /**
+     * Server is missing support for permission bitmask
+     */
+    private final AtomicReference<Boolean> blacklisted = new AtomicReference<>();
 
     public SFTPAttributesFinderFeature(final SFTPSession session) {
         this.session = session;
@@ -62,12 +67,14 @@ public class SFTPAttributesFinderFeature implements AttributesFinder, Attributes
                 case REGULAR:
                 case SYMLINK:
                     if(!file.getType().contains(Path.Type.file)) {
-                        throw new NotfoundException(String.format("Path %s is file", file.getAbsolute()));
+                        throw new NotfoundException(String.format("File %s is of type %s but expected %s",
+                                file.getAbsolute(), stat.getType(), file.getType()));
                     }
                     break;
                 case DIRECTORY:
                     if(!file.getType().contains(Path.Type.directory)) {
-                        throw new NotfoundException(String.format("Path %s is directory", file.getAbsolute()));
+                        throw new NotfoundException(String.format("File %s is of type %s but expected %s",
+                                file.getAbsolute(), stat.getType(), file.getType()));
                     }
                     break;
             }
@@ -87,18 +94,11 @@ public class SFTPAttributesFinderFeature implements AttributesFinder, Attributes
                 attributes.setSize(stat.getSize());
         }
         if(0 != stat.getMode().getPermissionsMask()) {
-            if(this.isServerBlacklisted()) {
-                attributes.setPermission(Permission.EMPTY);
-            }
-            else {
+            if(!this.isServerBlacklisted()) {
                 attributes.setPermission(new Permission(Integer.toString(stat.getMode().getPermissionsMask(), 8)));
+                attributes.setOwner(String.valueOf(stat.getUID()));
+                attributes.setGroup(String.valueOf(stat.getGID()));
             }
-        }
-        if(0 != stat.getUID()) {
-            attributes.setOwner(String.valueOf(stat.getUID()));
-        }
-        if(0 != stat.getGID()) {
-            attributes.setGroup(String.valueOf(stat.getGID()));
         }
         if(0 != stat.getMtime()) {
             attributes.setModificationDate(stat.getMtime() * 1000L);
@@ -110,12 +110,19 @@ public class SFTPAttributesFinderFeature implements AttributesFinder, Attributes
     }
 
     private boolean isServerBlacklisted() {
-        for(String server : PreferencesFactory.get().getList("sftp.permissions.server.blacklist")) {
-            if(StringUtils.contains(server, session.getClient().getTransport().getServerVersion())) {
-                // Known erroneous bitmask
-                return true;
+        if(null == blacklisted.get()) {
+            final String serverVersion = session.getClient().getTransport().getServerVersion();
+            for(String server : new HostPreferences(session.getHost()).getList("sftp.permissions.server.blacklist")) {
+                if(StringUtils.contains(
+                        /* seq */ serverVersion,
+                        /* search seq */ server)) {
+                    // Known erroneous bitmask
+                    blacklisted.set(true);
+                    return true;
+                }
             }
+            blacklisted.set(false);
         }
-        return false;
+        return blacklisted.get();
     }
 }

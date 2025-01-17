@@ -20,12 +20,14 @@ import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 import ch.cyberduck.core.shared.DefaultUrlProvider;
 
 import org.jets3t.service.acl.Permission;
 
-public class S3PublicUrlProvider implements PromptUrlProvider<Void, Void> {
+import java.util.EnumSet;
+
+public class S3PublicUrlProvider implements Share<Void, Void> {
 
     private final S3Session session;
     private final S3AccessControlListFeature acl;
@@ -45,7 +47,7 @@ public class S3PublicUrlProvider implements PromptUrlProvider<Void, Void> {
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final Void options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final Void options, final PasswordCallback callback) throws BackgroundException {
         final Acl permission = acl.getPermission(file);
         final Acl.GroupUser everyone = new Acl.GroupUser(Acl.GroupUser.EVERYONE);
         final Acl.Role read = new Acl.Role(Permission.PERMISSION_READ.toString());
@@ -53,11 +55,11 @@ public class S3PublicUrlProvider implements PromptUrlProvider<Void, Void> {
             permission.addAll(everyone, read);
             acl.setPermission(file, permission);
         }
-        return new DefaultUrlProvider(session.getHost()).toUrl(file).find(DescriptiveUrl.Type.provider);
+        return new DefaultUrlProvider(session.getHost()).toUrl(file, EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider);
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final Void options, final PasswordCallback callback) {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final Void options, final PasswordCallback callback) {
         return DescriptiveUrl.EMPTY;
     }
 }

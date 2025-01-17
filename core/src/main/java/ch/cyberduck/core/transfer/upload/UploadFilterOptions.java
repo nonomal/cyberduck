@@ -33,6 +33,10 @@ public final class UploadFilterOptions {
      */
     public boolean temporary;
     /**
+     * Move existing file to versioning directory
+     */
+    public boolean versioning;
+    /**
      * Enable server side encryption if available
      */
     public boolean encryption;
@@ -52,6 +56,7 @@ public final class UploadFilterOptions {
         acl = preferences.getBoolean("queue.upload.acl.change");
         timestamp = preferences.getBoolean("queue.upload.timestamp.change");
         temporary = preferences.getBoolean("queue.upload.file.temporary");
+        versioning = preferences.getBoolean("versioning.enable");
         metadata = preferences.getBoolean("queue.upload.file.metadata.change");
         encryption = preferences.getBoolean("queue.upload.file.encryption.change");
         redundancy = preferences.getBoolean("queue.upload.file.redundancy.change");
@@ -105,6 +110,11 @@ public final class UploadFilterOptions {
         return this;
     }
 
+    public UploadFilterOptions withVersioning(final boolean versioning) {
+        this.versioning = versioning;
+        return this;
+    }
+
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("UploadFilterOptions{");
@@ -113,6 +123,7 @@ public final class UploadFilterOptions {
         sb.append(", timestamp=").append(timestamp);
         sb.append(", metadata=").append(metadata);
         sb.append(", temporary=").append(temporary);
+        sb.append(", versioning=").append(versioning);
         sb.append(", encryption=").append(encryption);
         sb.append(", redundancy=").append(redundancy);
         sb.append(", checksum=").append(checksum);

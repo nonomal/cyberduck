@@ -19,6 +19,7 @@ import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.HostUrlProvider;
+import ch.cyberduck.core.LoginOptions;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
@@ -45,6 +46,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.concurrent.TimeUnit;
 
 import com.google.gson.JsonObject;
@@ -79,12 +81,12 @@ public class BrickPairingSchedulerFeature {
                 this.operate(callback);
             }
             catch(ConnectionCanceledException e) {
-                log.warn(String.format("Cancel processing scheduled task. %s", e.getMessage()), e);
+                log.warn(String.format("Cancel processing scheduled task. %s", e.getMessage()));
                 callback.close(null);
                 this.shutdown();
             }
             catch(BackgroundException e) {
-                log.warn(String.format("Failure processing scheduled task. %s", e.getMessage()), e);
+                log.warn(String.format("Failure processing scheduled task. %s", e.getMessage()));
                 callback.close(null);
                 this.shutdown();
             }
@@ -102,9 +104,7 @@ public class BrickPairingSchedulerFeature {
                 new HostUrlProvider().withUsername(false).withPath(false).get(session.getHost()), token));
             resource.setHeader(HttpHeaders.ACCEPT, "application/json");
             resource.setHeader(HttpHeaders.CONTENT_TYPE, "application/json");
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Fetch credentials for paring key %s from %s", token, resource));
-            }
+            log.info("Fetch credentials for paring key {} from {}", token, resource);
             final JsonObject json = session.getClient().execute(resource, new AbstractResponseHandler<JsonObject>() {
                 @Override
                 public JsonObject handleEntity(final HttpEntity entity) throws IOException {
@@ -118,8 +118,7 @@ public class BrickPairingSchedulerFeature {
                     final JsonPrimitive nickname = json.getAsJsonPrimitive("nickname");
                     if(StringUtils.isNotBlank(host.getNickname())) {
                         if(!StringUtils.equals(host.getNickname(), nickname.getAsString())) {
-                            log.warn(String.format("Mismatch of nickname. Previously authorized as %s and now paired as %s",
-                                host.getNickname(), nickname.getAsString()));
+                            log.warn("Mismatch of nickname. Previously authorized as {} and now paired as {}", host.getNickname(), nickname.getAsString());
                             callback.close(null);
                             throw new LoginCanceledException();
                         }
@@ -136,13 +135,20 @@ public class BrickPairingSchedulerFeature {
             }
             if(json.has("password")) {
                 credentials.setPassword(json.getAsJsonPrimitive("password").getAsString());
+                credentials.setSaved(new LoginOptions().save);
             }
             else {
                 throw new LoginFailureException(String.format("Invalid response for pairing key %s", token));
             }
             if(json.has("server")) {
                 if(new HostPreferences(session.getHost()).getBoolean("brick.pairing.hostname.configure")) {
-                    host.setHostname(URI.create(json.getAsJsonPrimitive("server").getAsString()).getHost());
+                    final String server = json.getAsJsonPrimitive("server").getAsString();
+                    try {
+                        host.setHostname(new URI(server).getHost());
+                    }
+                    catch(URISyntaxException e) {
+                        log.warn("Failure{} to parse server value {} as URI", e, server);
+                    }
                 }
             }
             callback.close(credentials.getUsername());
@@ -153,7 +159,7 @@ public class BrickPairingSchedulerFeature {
         catch(HttpResponseException e) {
             switch(e.getStatusCode()) {
                 case HttpStatus.SC_NOT_FOUND:
-                    log.warn(String.format("Missing login for pairing key %s", token));
+                    log.warn("Missing login for pairing key {}", token);
                     cancel.verify();
                     break;
                 default:
@@ -166,6 +172,6 @@ public class BrickPairingSchedulerFeature {
     }
 
     public void shutdown() {
-        scheduler.shutdown();
+        scheduler.shutdown(true);
     }
 }

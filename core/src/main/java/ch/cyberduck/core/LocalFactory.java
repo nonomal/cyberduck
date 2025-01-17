@@ -21,16 +21,19 @@ package ch.cyberduck.core;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 
 import org.apache.commons.lang3.reflect.ConstructorUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 
 public final class LocalFactory extends Factory<Local> {
+    private static final Logger log = LogManager.getLogger(LocalFactory.class);
 
-    private final Constructor<? extends Local> constructor
-            = ConstructorUtils.getMatchingAccessibleConstructor(clazz, String.class);
+    private Constructor<? extends Local> constructorCreateFromString;
+    private Constructor<? extends Local> constructorCreateFromParentString;
 
-    protected LocalFactory() {
+    private LocalFactory() {
         super("factory.local.class");
     }
 
@@ -39,38 +42,64 @@ public final class LocalFactory extends Factory<Local> {
         return this.create(PreferencesFactory.get().getProperty("local.user.home"));
     }
 
-    protected Local create(final String path) {
+    private Local create(final String path) {
         try {
-            return constructor.newInstance(path);
+            if(null == constructorCreateFromString) {
+                constructorCreateFromString = ConstructorUtils.getMatchingAccessibleConstructor(clazz, String.class);
+                log.warn("Caching constructor {} for class {}", constructorCreateFromString, clazz);
+            }
+            return constructorCreateFromString.newInstance(path);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException e) {
             throw new FactoryException(e.getMessage(), e);
         }
     }
 
-    protected Local create(final Local parent, final String path) {
+    private Local create(final Local parent, final String path) {
         try {
-            final Constructor<? extends Local> constructor = ConstructorUtils.getMatchingAccessibleConstructor(clazz, parent.getClass(), path.getClass());
-            return constructor.newInstance(parent, path);
+            if(null == constructorCreateFromParentString) {
+                constructorCreateFromParentString = ConstructorUtils.getMatchingAccessibleConstructor(clazz, parent.getClass(), path.getClass());
+                log.warn("Caching constructor {} for class {}", constructorCreateFromParentString, clazz);
+            }
+            return constructorCreateFromParentString.newInstance(parent, path);
         }
         catch(InstantiationException | InvocationTargetException | IllegalAccessException e) {
             throw new FactoryException(e.getMessage(), e);
         }
     }
 
-    public static Local get(final Local parent, final String name) {
-        return new LocalFactory().create(parent, name);
+    private static LocalFactory singleton;
+
+    public static synchronized Local get(final Local parent, final String name) {
+        if(null == singleton) {
+            singleton = new LocalFactory();
+            log.debug("Using implementation {}", singleton.getClass());
+
+        }
+        return singleton.create(parent, name);
     }
 
-    public static Local get(final String parent, final String name) {
-        return new LocalFactory().create(new LocalFactory().create(parent), name);
+    public static synchronized Local get(final String parent, final String name) {
+        if(null == singleton) {
+            singleton = new LocalFactory();
+            log.debug("Using implementation {}", singleton.getClass());
+        }
+        return singleton.create(singleton.create(parent), name);
     }
 
-    public static Local get(final String path) {
-        return new LocalFactory().create(path);
+    public static synchronized Local get(final String path) {
+        if(null == singleton) {
+            singleton = new LocalFactory();
+            log.debug("Using implementation {}", singleton.getClass());
+        }
+        return singleton.create(path);
     }
 
-    public static Local get() {
-        return new LocalFactory().create();
+    public static synchronized Local get() {
+        if(null == singleton) {
+            singleton = new LocalFactory();
+            log.debug("Using implementation {}", singleton.getClass());
+        }
+        return singleton.create();
     }
 }

@@ -1,4 +1,6 @@
-package ch.cyberduck.core.eue;/*
+package ch.cyberduck.core.eue;
+
+/*
  * Copyright (c) 2002-2021 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -20,7 +22,6 @@ import ch.cyberduck.core.Host;
 import ch.cyberduck.core.HostKeyCallback;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.LoginCallback;
-import ch.cyberduck.core.OAuthTokens;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathNormalizer;
 import ch.cyberduck.core.UrlProvider;
@@ -29,19 +30,19 @@ import ch.cyberduck.core.eue.io.swagger.client.api.GetUserSharesApi;
 import ch.cyberduck.core.eue.io.swagger.client.api.UserInfoApi;
 import ch.cyberduck.core.eue.io.swagger.client.model.UserSharesModel;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.*;
+import ch.cyberduck.core.http.CustomServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.DefaultHttpRateLimiter;
 import ch.cyberduck.core.http.DefaultHttpResponseExceptionMappingService;
+import ch.cyberduck.core.http.ExecutionCountServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.HttpSession;
 import ch.cyberduck.core.http.RateLimitingHttpRequestInterceptor;
-import ch.cyberduck.core.oauth.OAuth2AuthorizationService;
 import ch.cyberduck.core.oauth.OAuth2ErrorResponseInterceptor;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.BackgroundActionPauser;
@@ -72,13 +73,13 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.EnumSet;
 import java.util.Optional;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import com.migcomponents.migbase64.Base64;
 
 public class EueSession extends HttpSession<CloseableHttpClient> {
     private static final Logger log = LogManager.getLogger(EueSession.class);
@@ -98,18 +99,19 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
     }
 
     @Override
-    protected CloseableHttpClient connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    protected CloseableHttpClient connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
         authorizationService = new OAuth2RequestInterceptor(builder.build(proxy, this, prompt).addInterceptorLast(new HttpRequestInterceptor() {
             @Override
             public void process(final HttpRequest request, final HttpContext context) {
                 request.addHeader(HttpHeaders.AUTHORIZATION,
-                        String.format("Basic %s", Base64.encodeToString(String.format("%s:%s", host.getProtocol().getOAuthClientId(), host.getProtocol().getOAuthClientSecret()).getBytes(StandardCharsets.UTF_8), false)));
+                        String.format("Basic %s", Base64.getEncoder().encodeToString(String.format("%s:%s", host.getProtocol().getOAuthClientId(), host.getProtocol().getOAuthClientSecret()).getBytes(StandardCharsets.UTF_8))));
             }
-        }).build(), host)
+        }).build(), host, prompt)
                 .withRedirectUri(host.getProtocol().getOAuthRedirectUrl()
                 );
-        configuration.setServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService, prompt));
+        configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                new ExecutionCountServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService))));
         configuration.addInterceptorLast(authorizationService);
         configuration.addInterceptorLast(new HttpRequestInterceptor() {
             @Override
@@ -147,7 +149,7 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
                 if(hint.isPresent()) {
                     // Any response can contain this header. If this happens, a client should take measures to
                     // reduce its request rate. We advise to wait two seconds before sending the next request.
-                    log.warn(String.format("Retrieved throttle warning %s", hint.get()));
+                    log.warn("Retrieved throttle warning {}", hint.get());
                     final BackgroundActionPauser pause = new BackgroundActionPauser(new BackgroundActionPauser.Callback() {
                         @Override
                         public void validate() {
@@ -155,35 +157,24 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
 
                         @Override
                         public void progress(final Integer seconds) {
-                            log.warn(String.format("Pause for %d seconds because of traffic hint", seconds));
+                            log.warn("Pause for {} seconds because of traffic hint", seconds);
                         }
                     }, new HostPreferences(host).getInteger("eue.limit.hint.second"));
                     pause.await();
                 }
             }
         });
-        configuration.addInterceptorLast(new RateLimitingHttpRequestInterceptor(new DefaultHttpRateLimiter(
-                new HostPreferences(host).getInteger("eue.limit.requests.second")
-        )));
+        if(new HostPreferences(host).getBoolean("eue.limit.requests.enable")) {
+            configuration.addInterceptorLast(new RateLimitingHttpRequestInterceptor(new DefaultHttpRateLimiter(
+                    new HostPreferences(host).getInteger("eue.limit.requests.second")
+            )));
+        }
         return configuration.build();
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
-        try {
-            authorizationService.setTokens(
-                    authorizationService.refresh(authorizationService.authorize(host, prompt, cancel,
-                            OAuth2AuthorizationService.FlowType.AuthorizationCode))
-            );
-        }
-        catch(InteroperabilityException e) {
-            // Perm.INVALID_GRANT
-            log.warn(String.format("Failure %s refreshing OAuth tokens", e));
-            // Reset OAuth Tokens
-            host.getCredentials().setOauth(OAuthTokens.EMPTY);
-            authorizationService.setTokens(authorizationService.authorize(host, prompt, cancel,
-                    OAuth2AuthorizationService.FlowType.AuthorizationCode));
-        }
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+        final Credentials credentials = authorizationService.validate();
         try {
             final StringBuilder url = new StringBuilder();
             url.append(host.getProtocol().getScheme().toString()).append("://");
@@ -203,9 +194,7 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
                     if(element.isJsonObject()) {
                         final JsonObject json = element.getAsJsonObject();
                         final URI uri = URI.create(json.getAsJsonObject("serviceTarget").getAsJsonPrimitive("uri").getAsString());
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("Set base path to %s", url));
-                        }
+                        log.info("Set base path to {}", url);
                         this.setBasePath(uri.toString());
                     }
                     break;
@@ -213,16 +202,14 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
                     throw new DefaultHttpResponseExceptionMappingService().map(new HttpResponseException(
                             response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()));
             }
-            final Credentials credentials = host.getCredentials();
             credentials.setUsername(new UserInfoApi(new EueApiClient(this))
                     .userinfoGet(null, null).getAccount().getOsServiceId());
-            credentials.setSaved(true);
             if(StringUtils.isNotBlank(host.getProperty("pacs.url"))) {
                 try {
                     client.execute(new HttpPost(host.getProperty("pacs.url")));
                 }
                 catch(IOException e) {
-                    log.warn(String.format("Ignore failure %s running Personal Agent Context Service (PACS) request", e));
+                    log.warn("Ignore failure {} running Personal Agent Context Service (PACS) request", e.getMessage());
                 }
             }
             if(StringUtils.isNotBlank(new HostPreferences(host).getProperty("cryptomator.vault.name.default"))) {
@@ -232,7 +219,7 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
                     host.setProperty("cryptomator.enable", String.valueOf(true));
                 }
                 catch(NotfoundException e) {
-                    log.warn(String.format("Disable vault features with no existing vault found at %s", vault));
+                    log.warn("Disable vault features with no existing vault found at {}", vault);
                     // Disable vault features
                     host.setProperty("cryptomator.enable", String.valueOf(false));
                 }
@@ -263,11 +250,6 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
         }
     }
 
-    @Override
-    public <T> T getFeature(final Class<T> type) {
-        return super.getFeature(type);
-    }
-
     public String getBasePath() {
         return basePath;
     }
@@ -277,7 +259,7 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
     }
 
     public UserSharesModel userShares() throws BackgroundException {
-        if(this.userShares.get() == null) {
+        if(userShares.get() == null) {
             try {
                 userShares.set(new GetUserSharesApi(new EueApiClient(this)).shareGet(null, null));
             }
@@ -339,7 +321,7 @@ public class EueSession extends HttpSession<CloseableHttpClient> {
         if(type == UrlProvider.class) {
             return (T) new EueShareUrlProvider(host, userShares.get());
         }
-        if(type == PromptUrlProvider.class) {
+        if(type == Share.class) {
             return (T) new EueShareFeature(this, resourceid);
         }
         if(type == Quota.class) {

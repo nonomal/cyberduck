@@ -15,11 +15,14 @@ package ch.cyberduck.core.googlestorage;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
+import ch.cyberduck.core.features.Timestamp;
+import ch.cyberduck.core.io.DisabledStreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.logging.log4j.LogManager;
@@ -28,9 +31,10 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 
 import com.google.api.client.util.DateTime;
+import com.google.api.services.storage.Storage;
 import com.google.api.services.storage.model.StorageObject;
 
-public class GoogleStorageTimestampFeature extends DefaultTimestampFeature {
+public class GoogleStorageTimestampFeature implements Timestamp {
     private static final Logger log = LogManager.getLogger(GoogleStorageTimestampFeature.class);
 
     private final GoogleStorageSession session;
@@ -38,28 +42,45 @@ public class GoogleStorageTimestampFeature extends DefaultTimestampFeature {
 
     public GoogleStorageTimestampFeature(final GoogleStorageSession session) {
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
-        if(file.isFile() || file.isPlaceholder()) {
-            try {
+        if(file.isVolume()) {
+            log.warn("Skip setting timestamp for {}", file);
+            return;
+        }
+        try {
+            if(null != status.getModified()) {
                 // The Custom-Time metadata is a user-specified date and time represented in the RFC 3339
                 // format YYYY-MM-DD'T'HH:MM:SS.SS'Z' or YYYY-MM-DD'T'HH:MM:SS'Z' when milliseconds are zero.
-                session.getClient().objects().patch(containerService.getContainer(file).getName(), containerService.getKey(file),
-                    new StorageObject().setCustomTime(new DateTime(status.getTimestamp()))).execute();
-            }
-            catch(IOException e) {
-                final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, file);
-                if(file.isPlaceholder()) {
-                    if(failure instanceof NotfoundException) {
-                        // No placeholder file may exist but we just have a common prefix
-                        return;
-                    }
+                final Storage.Objects.Patch request = session.getClient().objects().patch(containerService.getContainer(file).getName(), containerService.getKey(file),
+                        new StorageObject().setCustomTime(new DateTime(status.getModified())));
+                if(containerService.getContainer(file).attributes().getCustom().containsKey(GoogleStorageAttributesFinderFeature.KEY_REQUESTER_PAYS)) {
+                    request.setUserProject(session.getHost().getCredentials().getUsername());
                 }
-                throw failure;
+                final StorageObject latest = request.execute();
+                status.setResponse(new GoogleStorageAttributesFinderFeature(session).toAttributes(latest));
             }
+        }
+        catch(IOException e) {
+            final BackgroundException failure = new GoogleStorageExceptionMappingService().map("Failure to write attributes of {0}", e, file);
+            if(file.isDirectory()) {
+                if(failure instanceof NotfoundException) {
+                    // No placeholder file may exist but we just have a common prefix
+                    return;
+                }
+            }
+            if(failure instanceof InteroperabilityException) {
+                log.warn("Retry rewriting file {} with failure {} writing custom time", file, failure);
+                // You cannot remove Custom-Time once it's been set on an object. Additionally, the value for Custom-Time cannot
+                // decrease. That is, you cannot set Custom-Time to be an earlier date/time than the existing Custom-Time.
+                // You can, however, effectively remove or reset the Custom-Time by rewriting the object.
+                status.setResponse(new GoogleStorageCopyFeature(session).copy(file, file, status, new DisabledConnectionCallback(), new DisabledStreamListener()).attributes());
+                return;
+            }
+            throw failure;
         }
     }
 }

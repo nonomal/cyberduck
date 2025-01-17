@@ -22,7 +22,6 @@ import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionTimeoutException;
 import ch.cyberduck.core.exception.NotfoundException;
@@ -41,7 +40,6 @@ import org.junit.experimental.categories.Category;
 import java.net.SocketTimeoutException;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -52,11 +50,10 @@ public class FTPListServiceTest extends AbstractFTPTest {
 
     @Test
     public void testList() throws Exception {
-        final ListService service = new FTPListService(session, null, TimeZone.getDefault());
+        final ListService service = new FTPListService(session);
         final Path directory = new FTPWorkdirService(session).find();
         final Path file = new Path(directory, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new FTPTouchFeature(session).touch(file, new TransferStatus());
-        final Permission permission = new Permission(Permission.Action.read_write, Permission.Action.read_write, Permission.Action.read_write);
         final AttributedList<Path> list = service.list(directory, new DisabledListProgressListener() {
             @Override
             public void chunk(final Path parent, AttributedList<Path> list) {
@@ -69,7 +66,7 @@ public class FTPListServiceTest extends AbstractFTPTest {
 
     @Test
     public void testListExtended() throws Exception {
-        final FTPListService service = new FTPListService(session, null, TimeZone.getDefault());
+        final FTPListService service = new FTPListService(session);
         service.remove(FTPListService.Command.list);
         service.remove(FTPListService.Command.stat);
         service.remove(FTPListService.Command.mlsd);
@@ -88,20 +85,28 @@ public class FTPListServiceTest extends AbstractFTPTest {
 
     @Test
     public void testListEmptyDirectoryList() throws Exception {
-        final FTPListService list = new FTPListService(session, null, TimeZone.getDefault());
+        final FTPListService list = new FTPListService(session);
         list.remove(FTPListService.Command.stat);
         list.remove(FTPListService.Command.lista);
         list.remove(FTPListService.Command.mlsd);
         final Path home = new FTPWorkdirService(session).find();
         final Path directory = new Path(home, new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.directory));
         new FTPDirectoryFeature(session).mkdir(directory, new TransferStatus());
-        assertTrue(list.list(directory, new DisabledListProgressListener()).isEmpty());
+        final AtomicBoolean callback = new AtomicBoolean();
+        assertTrue(list.list(directory, new DisabledListProgressListener() {
+            @Override
+            public void chunk(final Path parent, final AttributedList<Path> list) {
+                assertNotSame(AttributedList.EMPTY, list);
+                callback.set(true);
+            }
+        }).isEmpty());
+        assertTrue(callback.get());
         new FTPDeleteFeature(session).delete(Collections.singletonList(directory), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
     @Test(expected = ConnectionTimeoutException.class)
     public void testListIOFailureStat() throws Exception {
-        final FTPListService service = new FTPListService(session, null, TimeZone.getDefault());
+        final FTPListService service = new FTPListService(session);
         service.remove(FTPListService.Command.lista);
         service.remove(FTPListService.Command.mlsd);
         final AtomicBoolean set = new AtomicBoolean();
@@ -122,7 +127,7 @@ public class FTPListServiceTest extends AbstractFTPTest {
     @Test(expected = NotfoundException.class)
     public void testListNotfound() throws Exception {
         final Path f = new Path(UUID.randomUUID().toString(), EnumSet.of(Path.Type.directory));
-        final FTPListService service = new FTPListService(session, null, TimeZone.getDefault());
+        final FTPListService service = new FTPListService(session);
         service.list(f, new DisabledListProgressListener());
     }
 }

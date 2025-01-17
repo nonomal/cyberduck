@@ -18,10 +18,12 @@ package ch.cyberduck.core.b2;
 import ch.cyberduck.core.BytecountStreamListener;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Local;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.ProgressListener;
+import ch.cyberduck.core.concurrency.Interruptibles;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.features.Write;
@@ -30,34 +32,33 @@ import ch.cyberduck.core.io.BandwidthThrottle;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.preferences.HostPreferences;
+import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.threading.BackgroundExceptionCallable;
 import ch.cyberduck.core.threading.ThreadPool;
 import ch.cyberduck.core.threading.ThreadPoolFactory;
 import ch.cyberduck.core.transfer.SegmentRetryCallable;
 import ch.cyberduck.core.transfer.TransferStatus;
-import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.security.MessageDigest;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 
-import com.google.common.base.Throwables;
-import com.google.common.util.concurrent.Uninterruptibles;
 import synapticloop.b2.exception.B2ApiException;
 import synapticloop.b2.response.B2FileInfoResponse;
 import synapticloop.b2.response.B2FinishLargeFileResponse;
 import synapticloop.b2.response.B2UploadPartResponse;
 import synapticloop.b2.response.BaseB2Response;
 
+import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_CREATION_DATE_MILLIS;
 import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS;
 
 public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, MessageDigest> {
@@ -95,11 +96,23 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
     }
 
     @Override
+    public BaseB2Response upload(final Path file, final Local local, final BandwidthThrottle throttle,
+                                 final ProgressListener progress, final StreamListener streamListener, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
+        final long partSize;
+        if(file.getType().contains(Path.Type.encrypted)) {
+            // For uploads to vault part size must be a multiple of 32 * 1024. Recommended partsize from B2 API may not meet that requirement.
+            partSize = PreferencesFactory.get().getLong("b2.upload.largeobject.size");
+        }
+        else {
+            partSize = this.partSize;
+        }
+        return this.upload(file, local, throttle, progress, streamListener, status, callback,
+                partSize < status.getLength() ? partSize : PreferencesFactory.get().getLong("b2.upload.largeobject.size.minimum"));
+    }
+
     public BaseB2Response upload(final Path file, final Local local,
-                                 final BandwidthThrottle throttle,
-                                 final StreamListener listener,
-                                 final TransferStatus status,
-                                 final ConnectionCallback callback) throws BackgroundException {
+                                 final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener, final TransferStatus status,
+                                 final ConnectionCallback callback, final Long partSize) throws BackgroundException {
         final ThreadPool pool = ThreadPoolFactory.get("largeupload", concurrency);
         try {
             // Get the results of the uploads in the order they were submitted
@@ -115,8 +128,11 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                         break;
                 }
             }
-            if(null != status.getTimestamp()) {
-                fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getTimestamp()));
+            if(null != status.getModified()) {
+                fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getModified()));
+            }
+            if(null != status.getCreated()) {
+                fileinfo.put(X_BZ_INFO_SRC_CREATION_DATE_MILLIS, String.valueOf(status.getCreated()));
             }
             final String fileId;
             if(status.isAppend()) {
@@ -124,7 +140,7 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                 final B2LargeUploadPartService partService = new B2LargeUploadPartService(session, fileid);
                 final List<B2FileInfoResponse> uploads = partService.find(file);
                 if(uploads.isEmpty()) {
-                    fileId = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()),
+                    fileId = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(file)),
                             containerService.getKey(file), status.getMime(), fileinfo).getFileId();
                 }
                 else {
@@ -133,7 +149,7 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                 }
             }
             else {
-                fileId = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()),
+                fileId = session.getClient().startLargeFileUpload(fileid.getVersionId(containerService.getContainer(file)),
                         containerService.getKey(file), status.getMime(), fileinfo).getFileId();
             }
             // Full size of file
@@ -145,14 +161,10 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
             for(int partNumber = 1; remaining > 0; partNumber++) {
                 boolean skip = false;
                 if(status.isAppend()) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Determine if part number %d can be skipped", partNumber));
-                    }
+                    log.info("Determine if part number {} can be skipped", partNumber);
                     for(B2UploadPartResponse c : completed) {
                         if(c.getPartNumber().equals(partNumber)) {
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Skip completed part number %d", partNumber));
-                            }
+                            log.info("Skip completed part number {}", partNumber);
                             skip = true;
                             offset += c.getContentLength();
                             break;
@@ -162,24 +174,13 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                 if(!skip) {
                     final long length = Math.min(Math.max((size / B2LargeUploadService.MAXIMUM_UPLOAD_PARTS), partSize), remaining);
                     // Submit to queue
-                    parts.add(this.submit(pool, file, local, throttle, listener, status, fileId, partNumber, offset, length, callback));
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Part %s submitted with size %d and offset %d", partNumber, length, offset));
-                    }
+                    parts.add(this.submit(pool, file, local, throttle, streamListener, status, fileId, partNumber, offset, length, callback));
+                    log.debug("Part {} submitted with size {} and offset {}", partNumber, length, offset);
                     remaining -= length;
                     offset += length;
                 }
             }
-            try {
-                for(Future<B2UploadPartResponse> f : parts) {
-                    completed.add(Uninterruptibles.getUninterruptibly(f));
-                }
-            }
-            catch(ExecutionException e) {
-                log.warn(String.format("Part upload failed with execution failure %s", e.getMessage()));
-                Throwables.throwIfInstanceOf(Throwables.getRootCause(e), BackgroundException.class);
-                throw new DefaultExceptionMappingService().map(Throwables.getRootCause(e));
-            }
+            completed.addAll(Interruptibles.awaitAll(parts));
             completed.sort(new Comparator<B2UploadPartResponse>() {
                 @Override
                 public int compare(final B2UploadPartResponse o1, final B2UploadPartResponse o2) {
@@ -190,10 +191,10 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
             for(B2UploadPartResponse part : completed) {
                 checksums.add(part.getContentSha1());
             }
+            progress.message(MessageFormat.format(LocaleFactory.localizedString("Finalize {0}", "Status"),
+                    file.getName()));
             final B2FinishLargeFileResponse response = session.getClient().finishLargeFileUpload(fileId, checksums.toArray(new String[checksums.size()]));
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Finished large file upload %s with %d parts", file, completed.size()));
-            }
+            log.info("Finished large file upload {} with {} parts", file, completed.size());
             fileid.cache(file, response.getFileId());
             // Mark parent status as complete
             status.withResponse(new B2AttributesFinderFeature(session, fileid).toAttributes(response)).setComplete();
@@ -215,9 +216,7 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                                                 final TransferStatus overall,
                                                 final String fileId, final int partNumber,
                                                 final Long offset, final Long length, final ConnectionCallback callback) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Submit part %d of %s to queue with offset %d and length %d", partNumber, file, offset, length));
-        }
+        log.info("Submit part {} of {} to queue with offset {} and length {}", partNumber, file, offset, length);
         final BytecountStreamListener counter = new BytecountStreamListener(listener);
         return pool.execute(new SegmentRetryCallable<>(session.getHost(), new BackgroundExceptionCallable<B2UploadPartResponse>() {
             @Override
@@ -233,9 +232,23 @@ public class B2LargeUploadService extends HttpUploadFeature<BaseB2Response, Mess
                 status.setChecksum(writer.checksum(file, status).compute(local.getInputStream(), status));
                 status.setSegment(true);
                 status.setPart(partNumber);
-                return (B2UploadPartResponse) B2LargeUploadService.super.upload(file, local, throttle, counter, status, overall, status, callback);
+                return (B2UploadPartResponse) B2LargeUploadService.this.upload(file, local, throttle, counter, status, overall, status, callback);
             }
         }, overall, counter));
+    }
+
+    @Override
+    public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
+        final B2LargeUploadPartService partService = new B2LargeUploadPartService(session, fileid);
+        final List<B2FileInfoResponse> upload = partService.find(file);
+        if(!upload.isEmpty()) {
+            Long size = 0L;
+            for(B2UploadPartResponse completed : partService.list(upload.iterator().next().getFileId())) {
+                size += completed.getContentLength();
+            }
+            return new Write.Append(true).withStatus(status).withOffset(size);
+        }
+        return new Write.Append(false).withStatus(status);
     }
 
     @Override

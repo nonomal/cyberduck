@@ -21,7 +21,6 @@ package ch.cyberduck.core;
 
 import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.features.Location;
-import ch.cyberduck.core.local.DefaultLocalTouchFeature;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.serializer.Deserializer;
@@ -30,14 +29,16 @@ import ch.cyberduck.core.serializer.Serializer;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringSubstitutor;
+import org.apache.commons.text.lookup.StringLookupFactory;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,26 +47,103 @@ import java.util.stream.Collectors;
 public class Profile implements Protocol {
     private static final Logger log = LogManager.getLogger(Profile.class);
 
-    private final Deserializer<String> dict;
+    private static final StringSubstitutor substitutor = new StringSubstitutor(
+            StringLookupFactory.INSTANCE.functionStringLookup(s -> PreferencesFactory.get().getProperty(s)));
+
+    private final Deserializer<?> dict;
     /**
      * The actual protocol implementation registered
      */
     private final Protocol parent;
 
+    public static final String OAUTH_CLIENT_ID_KEY = "OAuth Client ID";
+    public static final String OAUTH_CLIENT_SECRET_KEY = "OAuth Client Secret";
+    public static final String OAUTH_TOKEN_URL_KEY = "OAuth Token Url";
+    public static final String OAUTH_REDIRECT_URL_KEY = "OAuth Redirect Url";
+    public static final String OAUTH_AUTHORIZATION_URL_KEY = "OAuth Authorization Url";
+    public static final String OAUTH_PKCE_KEY = "OAuth PKCE";
+    public static final String SCOPES_KEY = "Scopes";
+    public static final String STS_ENDPOINT_KEY = "STS Endpoint";
+
+    public static final String DISK_KEY = "Disk";
+    public static final String ICON_KEY = "Icon";
+    public static final String PROTOCOL_KEY = "Protocol";
+    public static final String VENDOR_KEY = "Vendor";
+    public static final String BUNDLED_KEY = "Bundled";
+    public static final String NAME_KEY = "Name";
+    public static final String DESCRIPTION_KEY = "Description";
+    public static final String REGION_KEY = "Region";
+    public static final String REGIONS_KEY = "Regions";
+    public static final String SCHEME_KEY = "Scheme";
+    public static final String SCHEMES_KEY = "Schemes";
+    public static final String AUTHORIZATION_KEY = "Authorization";
+    public static final String CONTEXT_KEY = "Context";
+
+    public static final String DEFAULT_HOSTNAME_KEY = "Default Hostname";
+    public static final String DEFAULT_PORT_KEY = "Default Port";
+    public static final String DEFAULT_PATH_KEY = "Default Path";
+    public static final String DEFAULT_NICKNAME_KEY = "Default Nickname";
+
+    public static final String HOSTNAME_PLACEHOLDER_KEY = "Hostname Placeholder";
+    public static final String PATH_PLACEHOLDER_KEY = "Path Placeholder";
+    public static final String USERNAME_PLACEHOLDER_KEY = "Username Placeholder";
+    public static final String PASSWORD_PLACEHOLDER_KEY = "Password Placeholder";
+    public static final String TOKEN_PLACEHOLDER_KEY = "Token Placeholder";
+
+    public static final String HOSTNAME_CONFIGURABLE_KEY = "Hostname Configurable";
+    public static final String PORT_CONFIGURABLE_KEY = "Port Configurable";
+    public static final String PATH_CONFIGURABLE_KEY = "Path Configurable";
+    public static final String USERNAME_CONFIGURABLE_KEY = "Username Configurable";
+    public static final String PASSWORD_CONFIGURABLE_KEY = "Password Configurable";
+    public static final String ANONYMOUS_CONFIGURABLE_KEY = "Anonymous Configurable";
+    public static final String TOKEN_CONFIGURABLE_KEY = "Token Configurable";
+    public static final String OAUTH_CONFIGURABLE_KEY = "OAuth Configurable";
+    public static final String CERTIFICATE_CONFIGURABLE_KEY = "Certificate Configurable";
+    public static final String PRIVATE_KEY_CONFIGURABLE_KEY = "Private Key Configurable";
+
+    public static final String PROPERTIES_KEY = "Properties";
+    public static final String DEPRECATED_KEY = "Deprecated";
+    public static final String HELP_KEY = "Help";
+
     private Local disk;
     private Local icon;
 
-    public Profile(final Protocol parent, final Deserializer<String> dict) {
+    public Profile(final Protocol parent, final Deserializer<?> dict) {
         this.parent = parent;
         this.dict = dict;
-        this.disk = this.write(this.value("Disk"));
-        this.icon = this.write(this.value("Icon"));
+        this.disk = this.write(this.value(DISK_KEY));
+        this.icon = this.write(this.value(ICON_KEY));
     }
 
     @Override
-    public <T> T serialize(final Serializer serializer) {
+    public <T> T serialize(final Serializer<T> serializer) {
         for(String key : dict.keys()) {
-            serializer.setStringForKey(dict.stringForKey(key), key);
+            switch(key) {
+                case HOSTNAME_CONFIGURABLE_KEY:
+                case PORT_CONFIGURABLE_KEY:
+                case PATH_CONFIGURABLE_KEY:
+                case USERNAME_CONFIGURABLE_KEY:
+                case PASSWORD_CONFIGURABLE_KEY:
+                case ANONYMOUS_CONFIGURABLE_KEY:
+                case TOKEN_CONFIGURABLE_KEY:
+                case OAUTH_CONFIGURABLE_KEY:
+                case CERTIFICATE_CONFIGURABLE_KEY:
+                case PRIVATE_KEY_CONFIGURABLE_KEY:
+                case BUNDLED_KEY:
+                case DEPRECATED_KEY:
+                case OAUTH_PKCE_KEY:
+                    serializer.setBooleanForKey(dict.booleanForKey(key), key);
+                    break;
+                case SCOPES_KEY:
+                case REGIONS_KEY:
+                case PROPERTIES_KEY:
+                case SCHEMES_KEY:
+                    serializer.setStringListForKey(dict.listForKey(key), key);
+                    break;
+                default:
+                    serializer.setStringForKey(dict.stringForKey(key), key);
+                    break;
+            }
         }
         return serializer.getSerialized();
     }
@@ -87,8 +165,8 @@ public class Profile implements Protocol {
         if(this.isBundled()) {
             return true;
         }
-        final String protocol = this.value("Protocol");
-        final String vendor = this.value("Vendor");
+        final String protocol = this.value(PROTOCOL_KEY);
+        final String vendor = this.value(VENDOR_KEY);
         if(StringUtils.isNotBlank(protocol) && StringUtils.isNotBlank(vendor)) {
             final String property = PreferencesFactory.get().getProperty(StringUtils.lowerCase(String.format("profiles.%s.%s.enabled", protocol, vendor)));
             if(null == property) {
@@ -102,7 +180,7 @@ public class Profile implements Protocol {
 
     @Override
     public boolean isDeprecated() {
-        return this.bool("Deprecated");
+        return this.bool(DEPRECATED_KEY);
     }
 
     @Override
@@ -121,6 +199,11 @@ public class Profile implements Protocol {
     }
 
     @Override
+    public VersioningMode getVersioningMode() {
+        return parent.getVersioningMode();
+    }
+
+    @Override
     public String getIdentifier() {
         return parent.getIdentifier();
     }
@@ -132,17 +215,26 @@ public class Profile implements Protocol {
 
     @Override
     public String getHostnamePlaceholder() {
-        final String v = this.value("Hostname Placeholder");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(HOSTNAME_PLACEHOLDER_KEY);
+        if(null == v) {
             return parent.getHostnamePlaceholder();
         }
         return v;
     }
 
     @Override
+    public String getPathPlaceholder() {
+        final String v = this.value(PATH_PLACEHOLDER_KEY);
+        if(null == v) {
+            return parent.getPathPlaceholder();
+        }
+        return v;
+    }
+
+    @Override
     public String getUsernamePlaceholder() {
-        final String v = this.value("Username Placeholder");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(USERNAME_PLACEHOLDER_KEY);
+        if(null == v) {
             return parent.getUsernamePlaceholder();
         }
         return LocaleFactory.localizedString(v, "Credentials");
@@ -150,8 +242,8 @@ public class Profile implements Protocol {
 
     @Override
     public String getPasswordPlaceholder() {
-        final String v = this.value("Password Placeholder");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(PASSWORD_PLACEHOLDER_KEY);
+        if(null == v) {
             return parent.getPasswordPlaceholder();
         }
         return LocaleFactory.localizedString(v, "Credentials");
@@ -159,8 +251,8 @@ public class Profile implements Protocol {
 
     @Override
     public String getTokenPlaceholder() {
-        final String v = this.value("Token Placeholder");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(TOKEN_PLACEHOLDER_KEY);
+        if(null == v) {
             return parent.getTokenPlaceholder();
         }
         return LocaleFactory.localizedString(v, "Credentials");
@@ -168,8 +260,8 @@ public class Profile implements Protocol {
 
     @Override
     public String getDefaultHostname() {
-        final String v = this.value("Default Hostname");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(DEFAULT_HOSTNAME_KEY);
+        if(null == v) {
             return parent.getDefaultHostname();
         }
         return v;
@@ -177,7 +269,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getProvider() {
-        final String v = this.value("Vendor");
+        final String v = this.value(VENDOR_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getProvider();
         }
@@ -185,16 +277,16 @@ public class Profile implements Protocol {
     }
 
     public boolean isBundled() {
-        final String v = this.value("Bundled");
+        final String v = this.value(BUNDLED_KEY);
         if(StringUtils.isBlank(v)) {
-            return parent.isBundled();
+            return false;
         }
         return Boolean.parseBoolean(v);
     }
 
     @Override
     public String getName() {
-        final String v = this.value("Name");
+        final String v = this.value(NAME_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getName();
         }
@@ -203,7 +295,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getDescription() {
-        final String v = this.value("Description");
+        final String v = this.value(DESCRIPTION_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getDescription();
         }
@@ -212,7 +304,7 @@ public class Profile implements Protocol {
 
     @Override
     public int getDefaultPort() {
-        final String v = this.value("Default Port");
+        final String v = this.value(DEFAULT_PORT_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getDefaultPort();
         }
@@ -220,15 +312,15 @@ public class Profile implements Protocol {
             return Integer.parseInt(v);
         }
         catch(NumberFormatException e) {
-            log.warn(String.format("Port %s is not a number", e.getMessage()));
+            log.warn("Port {} is not a number", e.getMessage());
         }
         return parent.getDefaultPort();
     }
 
     @Override
     public String getDefaultPath() {
-        final String v = this.value("Default Path");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(DEFAULT_PATH_KEY);
+        if(null == v) {
             return parent.getDefaultPath();
         }
         return v;
@@ -236,16 +328,16 @@ public class Profile implements Protocol {
 
     @Override
     public String getDefaultNickname() {
-        final String v = this.value("Default Nickname");
-        if(StringUtils.isBlank(v)) {
-            return parent.getDefaultNickname();
+        final String v = this.value(DEFAULT_NICKNAME_KEY);
+        if(null == v) {
+            return null;
         }
         return v;
     }
 
     @Override
     public String getRegion() {
-        final String v = this.value("Region");
+        final String v = this.value(REGION_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getRegion();
         }
@@ -258,7 +350,7 @@ public class Profile implements Protocol {
             return parent.disk();
         }
         if(!disk.exists()) {
-            this.disk = this.write(this.value("Disk"));
+            this.disk = this.write(this.value(DISK_KEY));
         }
         // Temporary file
         return disk.getAbsolute();
@@ -273,7 +365,7 @@ public class Profile implements Protocol {
             return this.disk();
         }
         if(!icon.exists()) {
-            this.icon = this.write(this.value("Icon"));
+            this.icon = this.write(this.value(ICON_KEY));
         }
         // Temporary file
         return icon.getAbsolute();
@@ -297,7 +389,6 @@ public class Profile implements Protocol {
         final byte[] favicon = Base64.decodeBase64(icon);
         final Local file = TemporaryFileServiceFactory.get().create(new AlphanumericRandomStringService().random());
         try {
-            new DefaultLocalTouchFeature().touch(file);
             try (final OutputStream out = file.getOutputStream(false)) {
                 IOUtils.write(favicon, out);
             }
@@ -310,23 +401,8 @@ public class Profile implements Protocol {
     }
 
     @Override
-    public boolean validate(Credentials credentials, LoginOptions options) {
+    public boolean validate(final Credentials credentials, final LoginOptions options) {
         return parent.validate(credentials, options);
-    }
-
-    @Override
-    public CredentialsConfigurator getCredentialsFinder() {
-        return parent.getCredentialsFinder();
-    }
-
-    @Override
-    public HostnameConfigurator getHostnameFinder() {
-        return parent.getHostnameFinder();
-    }
-
-    @Override
-    public JumphostConfigurator getJumpHostFinder() {
-        return parent.getJumpHostFinder();
     }
 
     @Override
@@ -341,7 +417,7 @@ public class Profile implements Protocol {
 
     @Override
     public Scheme getScheme() {
-        final String v = this.value("Scheme");
+        final String v = this.value(SCHEME_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getScheme();
         }
@@ -349,14 +425,14 @@ public class Profile implements Protocol {
             return Scheme.valueOf(v);
         }
         catch(IllegalArgumentException e) {
-            log.warn(String.format("Unknown scheme %s", v));
+            log.warn("Unknown scheme {}", v);
             return null;
         }
     }
 
     @Override
     public String[] getSchemes() {
-        final List<String> values = this.list("Schemes");
+        final List<String> values = this.list(SCHEMES_KEY);
         if(values.isEmpty()) {
             return parent.getSchemes();
         }
@@ -365,7 +441,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getContext() {
-        final String v = this.value("Context");
+        final String v = this.value(CONTEXT_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getContext();
         }
@@ -374,7 +450,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getAuthorization() {
-        final String v = this.value("Authorization");
+        final String v = this.value(AUTHORIZATION_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getAuthorization();
         }
@@ -383,15 +459,16 @@ public class Profile implements Protocol {
 
     @Override
     public Set<Location.Name> getRegions() {
-        final List<String> regions = this.list("Regions");
+        final List<String> regions = this.list(REGIONS_KEY);
         if(regions.isEmpty()) {
             return parent.getRegions();
         }
-        final Set<Location.Name> set = new HashSet<>();
-        for(String region : regions) {
-            set.add(new Location.Name(region));
-        }
-        return set;
+        return parent.getRegions(regions);
+    }
+
+    @Override
+    public Set<Location.Name> getRegions(final List<String> regions) {
+        return parent.getRegions(regions);
     }
 
     @Override
@@ -401,84 +478,87 @@ public class Profile implements Protocol {
 
     @Override
     public boolean isAnonymousConfigurable() {
-        if(StringUtils.isBlank(this.value("Anonymous Configurable"))) {
+        if(StringUtils.isBlank(this.value(ANONYMOUS_CONFIGURABLE_KEY))) {
             return parent.isAnonymousConfigurable();
         }
-        return this.bool("Anonymous Configurable");
+        return this.bool(ANONYMOUS_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isUsernameConfigurable() {
-        if(StringUtils.isBlank(this.value("Username Configurable"))) {
+        if(StringUtils.isBlank(this.value(USERNAME_CONFIGURABLE_KEY))) {
             return parent.isUsernameConfigurable();
         }
-        return this.bool("Username Configurable");
+        return this.bool(USERNAME_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isPasswordConfigurable() {
-        if(StringUtils.isBlank(this.value("Password Configurable"))) {
+        if(StringUtils.isBlank(this.value(PASSWORD_CONFIGURABLE_KEY))) {
             return parent.isPasswordConfigurable();
         }
-        return this.bool("Password Configurable");
+        return this.bool(PASSWORD_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isTokenConfigurable() {
-        if(StringUtils.isBlank(this.value("Token Configurable"))) {
+        if(StringUtils.isBlank(this.value(TOKEN_CONFIGURABLE_KEY))) {
             return parent.isTokenConfigurable();
         }
-        return this.bool("Token Configurable");
+        return this.bool(TOKEN_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isOAuthConfigurable() {
+        if(StringUtils.isNotBlank(this.value(OAUTH_CONFIGURABLE_KEY))) {
+            return this.bool(OAUTH_CONFIGURABLE_KEY);
+        }
         return StringUtils.isNotBlank(this.getOAuthClientId());
     }
 
     @Override
     public boolean isCertificateConfigurable() {
-        if(StringUtils.isBlank(this.value("Certificate Configurable"))) {
+        if(StringUtils.isBlank(this.value(CERTIFICATE_CONFIGURABLE_KEY))) {
             return parent.isCertificateConfigurable();
         }
-        return this.bool("Certificate Configurable");
+        return this.bool(CERTIFICATE_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isPrivateKeyConfigurable() {
-        if(StringUtils.isBlank(this.value("Private Key Configurable"))) {
+        if(StringUtils.isBlank(this.value(PRIVATE_KEY_CONFIGURABLE_KEY))) {
             return parent.isPrivateKeyConfigurable();
         }
-        return this.bool("Private Key Configurable");
+        return this.bool(PRIVATE_KEY_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isHostnameConfigurable() {
-        if(StringUtils.isBlank(this.value("Hostname Configurable"))) {
+        if(StringUtils.isBlank(this.value(HOSTNAME_CONFIGURABLE_KEY))) {
             return parent.isHostnameConfigurable();
         }
-        return this.bool("Hostname Configurable");
+        return this.bool(HOSTNAME_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isPortConfigurable() {
-        if(StringUtils.isBlank(this.value("Port Configurable"))) {
+        if(StringUtils.isBlank(this.value(PORT_CONFIGURABLE_KEY))) {
             return parent.isPortConfigurable();
         }
-        return this.bool("Port Configurable");
+        return this.bool(PORT_CONFIGURABLE_KEY);
     }
 
     @Override
     public boolean isPathConfigurable() {
-        if(StringUtils.isBlank(this.value("Path Configurable"))) {
+        if(StringUtils.isBlank(this.value(PATH_CONFIGURABLE_KEY))) {
             return parent.isPathConfigurable();
         }
-        return this.bool("Path Configurable");
+        return this.bool(PATH_CONFIGURABLE_KEY);
     }
 
     @Override
     public String getOAuthAuthorizationUrl() {
-        final String v = this.value("OAuth Authorization Url");
+        final String v = this.value(OAUTH_AUTHORIZATION_URL_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getOAuthAuthorizationUrl();
         }
@@ -487,7 +567,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getOAuthTokenUrl() {
-        final String v = this.value("OAuth Token Url");
+        final String v = this.value(OAUTH_TOKEN_URL_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getOAuthTokenUrl();
         }
@@ -496,7 +576,7 @@ public class Profile implements Protocol {
 
     @Override
     public List<String> getOAuthScopes() {
-        final List<String> scopes = this.list("Scopes");
+        final List<String> scopes = this.list(SCOPES_KEY);
         if(scopes.isEmpty()) {
             return parent.getOAuthScopes();
         }
@@ -505,7 +585,7 @@ public class Profile implements Protocol {
 
     @Override
     public String getOAuthRedirectUrl() {
-        final String v = this.value("OAuth Redirect Url");
+        final String v = this.value(OAUTH_REDIRECT_URL_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getOAuthRedirectUrl();
         }
@@ -514,8 +594,8 @@ public class Profile implements Protocol {
 
     @Override
     public String getOAuthClientId() {
-        final String v = this.value("OAuth Client ID");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(OAUTH_CLIENT_ID_KEY);
+        if(null == v) {
             return parent.getOAuthClientId();
         }
         return v;
@@ -523,27 +603,44 @@ public class Profile implements Protocol {
 
     @Override
     public String getOAuthClientSecret() {
-        final String v = this.value("OAuth Client Secret");
-        if(StringUtils.isBlank(v)) {
+        final String v = this.value(OAUTH_CLIENT_SECRET_KEY);
+        if(null == v) {
             return parent.getOAuthClientSecret();
         }
         return v;
     }
 
     @Override
+    public boolean isOAuthPKCE() {
+        if(StringUtils.isBlank(this.value(OAUTH_PKCE_KEY))) {
+            return parent.isOAuthPKCE();
+        }
+        return this.bool(OAUTH_PKCE_KEY);
+    }
+
+    @Override
+    public String getSTSEndpoint() {
+        final String v = this.value(STS_ENDPOINT_KEY);
+        if(StringUtils.isBlank(v)) {
+            return parent.getSTSEndpoint();
+        }
+        return v;
+    }
+
+    @Override
     public Map<String, String> getProperties() {
-        final List<String> properties = this.list("Properties");
+        final List<String> properties = this.list(PROPERTIES_KEY);
         if(properties.isEmpty()) {
             return parent.getProperties();
         }
-        return properties.stream().collect(Collectors.toMap(
+        return properties.stream().distinct().collect(Collectors.toMap(
                 property -> StringUtils.contains(property, '=') ? StringUtils.substringBefore(property, '=') : property,
-                property -> StringUtils.contains(property, '=') ? StringUtils.substringAfter(property, '=') : StringUtils.EMPTY));
+                property -> StringUtils.contains(property, '=') ? substitutor.replace(StringUtils.substringAfter(property, '=')) : StringUtils.EMPTY));
     }
 
     @Override
     public String getHelp() {
-        final String v = this.value("Help");
+        final String v = this.value(HELP_KEY);
         if(StringUtils.isBlank(v)) {
             return parent.getHelp();
         }
@@ -561,7 +658,7 @@ public class Profile implements Protocol {
     }
 
     private String value(final String key) {
-        return dict.stringForKey(key);
+        return substitutor.replace(dict.stringForKey(key));
     }
 
     private List<String> list(final String key) {
@@ -569,7 +666,9 @@ public class Profile implements Protocol {
         if(null == list) {
             return Collections.emptyList();
         }
-        return list;
+        final ArrayList<String> substituted = new ArrayList<>(list);
+        substituted.replaceAll(substitutor::replace);
+        return substituted;
     }
 
     private boolean bool(final String key) {
@@ -626,8 +725,8 @@ public class Profile implements Protocol {
     public String toString() {
         final StringBuilder sb = new StringBuilder("Profile{");
         sb.append("parent=").append(parent);
-        sb.append(", vendor=").append(this.value("Vendor"));
-        sb.append(", description=").append(this.value("Description"));
+        sb.append(", vendor=").append(this.value(VENDOR_KEY));
+        sb.append(", description=").append(this.value(DESCRIPTION_KEY));
         sb.append(", image=").append(disk);
         sb.append('}');
         return sb.toString();

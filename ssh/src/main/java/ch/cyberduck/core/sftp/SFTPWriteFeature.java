@@ -20,11 +20,11 @@ package ch.cyberduck.core.sftp;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.VoidStatusOutputStream;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesReader;
-import ch.cyberduck.core.shared.AppendWriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.output.ChunkedOutputStream;
@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import net.schmizz.sshj.sftp.OpenMode;
 import net.schmizz.sshj.sftp.RemoteFile;
 
-public class SFTPWriteFeature extends AppendWriteFeature<Void> {
+public class SFTPWriteFeature implements Write<Void> {
     private static final Logger log = LogManager.getLogger(SFTPWriteFeature.class);
 
     private final SFTPSession session;
@@ -81,12 +81,8 @@ public class SFTPWriteFeature extends AppendWriteFeature<Void> {
             }
             final RemoteFile handle = session.sftp().open(file.getAbsolute(), flags);
             final int maxUnconfirmedWrites = this.getMaxUnconfirmedWrites(status);
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Using %d unconfirmed writes", maxUnconfirmedWrites));
-            }
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Skipping %d bytes", status.getOffset()));
-            }
+            log.info("Using {} unconfirmed writes", maxUnconfirmedWrites);
+            log.info("Skipping {} bytes", status.getOffset());
             // Open stream at offset
             return new VoidStatusOutputStream(new ChunkedOutputStream(handle.new RemoteFileOutputStream(status.getOffset(), maxUnconfirmedWrites) {
                 private final AtomicBoolean close = new AtomicBoolean();
@@ -94,7 +90,7 @@ public class SFTPWriteFeature extends AppendWriteFeature<Void> {
                 @Override
                 public void close() throws IOException {
                     if(close.get()) {
-                        log.warn(String.format("Skip double close of stream %s", this));
+                        log.warn("Skip double close of stream {}", this);
                         return;
                     }
                     try {
@@ -121,7 +117,7 @@ public class SFTPWriteFeature extends AppendWriteFeature<Void> {
     }
 
     @Override
-    public boolean random() {
-        return true;
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.random);
     }
 }

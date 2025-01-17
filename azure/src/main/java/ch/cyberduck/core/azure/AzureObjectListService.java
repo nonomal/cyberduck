@@ -35,6 +35,8 @@ import ch.cyberduck.core.preferences.HostPreferences;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.codec.binary.Hex;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.net.URISyntaxException;
 import java.util.EnumSet;
@@ -51,13 +53,13 @@ import com.microsoft.azure.storage.blob.CloudBlobDirectory;
 import com.microsoft.azure.storage.blob.ListBlobItem;
 
 public class AzureObjectListService implements ListService {
+    private static final Logger log = LogManager.getLogger(AzureObjectListService.class);
 
     private final AzureSession session;
-
     private final OperationContext context;
 
     private final PathContainerService containerService
-        = new DirectoryDelimiterPathContainerService();
+            = new DirectoryDelimiterPathContainerService();
 
     public AzureObjectListService(final AzureSession session, final OperationContext context) {
         this.session = session;
@@ -85,6 +87,7 @@ public class AzureObjectListService implements ListService {
                         new HostPreferences(session.getHost()).getInteger("azure.listing.chunksize"), token, options, context);
                 for(ListBlobItem object : result.getResults()) {
                     if(new SimplePathPredicate(new Path(object.getUri().getPath(), EnumSet.of(Path.Type.directory))).test(directory)) {
+                        log.debug("Skip placeholder key {}", object);
                         hasDirectoryPlaceholder = true;
                         continue;
                     }
@@ -109,6 +112,7 @@ public class AzureObjectListService implements ListService {
             }
             while(result.getHasMoreResults());
             if(!hasDirectoryPlaceholder && children.isEmpty()) {
+                log.warn("No placeholder found for directory {}", directory);
                 throw new NotfoundException(directory.getAbsolute());
             }
             return children;

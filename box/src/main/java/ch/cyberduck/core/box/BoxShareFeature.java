@@ -15,8 +15,8 @@ package ch.cyberduck.core.box;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DescriptiveUrl;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.LoginOptions;
 import ch.cyberduck.core.PasswordCallback;
@@ -35,12 +35,11 @@ import ch.cyberduck.core.box.io.swagger.client.model.FoldersfolderIdaddSharedLin
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.exception.UnsupportedException;
-import ch.cyberduck.core.features.PromptUrlProvider;
+import ch.cyberduck.core.features.Share;
 
-import java.net.URI;
 import java.text.MessageFormat;
 
-public class BoxShareFeature implements PromptUrlProvider {
+public class BoxShareFeature implements Share {
 
     private final BoxSession session;
     private final BoxFileidProvider fileid;
@@ -60,7 +59,7 @@ public class BoxShareFeature implements PromptUrlProvider {
     }
 
     @Override
-    public DescriptiveUrl toDownloadUrl(final Path file, final Object options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toDownloadUrl(final Path file, final Sharee sharee, final Object options, final PasswordCallback callback) throws BackgroundException {
         if(file.isDirectory()) {
             return this.createFolderSharedLink(file, callback);
         }
@@ -68,7 +67,7 @@ public class BoxShareFeature implements PromptUrlProvider {
     }
 
     @Override
-    public DescriptiveUrl toUploadUrl(final Path file, final Object options, final PasswordCallback callback) throws BackgroundException {
+    public DescriptiveUrl toUploadUrl(final Path file, final Sharee sharee, final Object options, final PasswordCallback callback) throws BackgroundException {
         throw new UnsupportedException();
     }
 
@@ -77,11 +76,11 @@ public class BoxShareFeature implements PromptUrlProvider {
             final String password = this.prompt(file, callback);
             final File link = new SharedLinksFilesApi(new BoxApiClient(session.getClient())).putFilesIdAddSharedLink(
                     "shared_link",
-                    fileid.getFileId(file, new DisabledListProgressListener()),
+                    fileid.getFileId(file),
                     new FilesFileIdaddSharedLinkBody()
                             .sharedLink(new FilesfileIdaddSharedLinkSharedLink().permissions(new FilesfileIdSharedLinkPermissions().canDownload(true))
                                     .password(password)));
-            return new DescriptiveUrl(URI.create(link.getSharedLink().getDownloadUrl()), DescriptiveUrl.Type.signed);
+            return new DescriptiveUrl(link.getSharedLink().getDownloadUrl(), DescriptiveUrl.Type.signed);
         }
         catch(ApiException e) {
             throw new BoxExceptionMappingService(fileid).map(e);
@@ -93,28 +92,25 @@ public class BoxShareFeature implements PromptUrlProvider {
             final String password = this.prompt(file, callback);
             final Folder link = new SharedLinksFoldersApi(new BoxApiClient(session.getClient())).putFoldersIdAddSharedLink(
                     "shared_link",
-                    fileid.getFileId(file, new DisabledListProgressListener()),
+                    fileid.getFileId(file),
                     new FoldersFolderIdaddSharedLinkBody()
                             .sharedLink(new FoldersfolderIdaddSharedLinkSharedLink().permissions(new FoldersfolderIdaddSharedLinkSharedLinkPermissions().canDownload(false))
                                     .password(password)));
-            return new DescriptiveUrl(URI.create(link.getSharedLink().getUrl()), DescriptiveUrl.Type.signed);
+            return new DescriptiveUrl(link.getSharedLink().getUrl(), DescriptiveUrl.Type.signed);
         }
         catch(ApiException e) {
             throw new BoxExceptionMappingService(fileid).map(e);
         }
     }
 
-    private String prompt(final Path file, final PasswordCallback callback) {
-        String password = null;
-        try {
-            password = callback.prompt(session.getHost(),
-                    LocaleFactory.localizedString("Passphrase", "Cryptomator"),
-                    MessageFormat.format(LocaleFactory.localizedString("Create a passphrase required to access {0}", "Credentials"), file.getName()),
-                    new LoginOptions().keychain(false).icon(session.getHost().getProtocol().disk())).getPassword();
+    private String prompt(final Path file, final PasswordCallback callback) throws LoginCanceledException {
+        final Credentials password = callback.prompt(session.getHost(),
+                LocaleFactory.localizedString("Passphrase", "Cryptomator"),
+                MessageFormat.format(LocaleFactory.localizedString("Create a passphrase required to access {0}", "Credentials"), file.getName()),
+                new LoginOptions().anonymous(true).keychain(false).icon(session.getHost().getProtocol().disk()));
+        if(password.isPasswordAuthentication()) {
+            return password.getPassword();
         }
-        catch(LoginCanceledException e) {
-            // Ignore no password set
-        }
-        return password;
+        return null;
     }
 }

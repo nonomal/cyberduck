@@ -21,9 +21,6 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.shared.OneTimeSchedulerFeature;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import java.io.IOException;
 
 import ch.iterate.openstack.swift.exception.GenericException;
@@ -32,19 +29,19 @@ import ch.iterate.openstack.swift.exception.GenericException;
  * Preload container size
  */
 public class SwiftContainerSizeLoader extends OneTimeSchedulerFeature<Long> {
-    private static final Logger log = LogManager.getLogger(SwiftContainerSizeLoader.class);
 
     private final SwiftSession session;
     private final SwiftRegionService regionService;
+    private final Path container;
 
     public SwiftContainerSizeLoader(final SwiftSession session, final SwiftRegionService regionService, final Path container) {
-        super(container);
         this.session = session;
         this.regionService = regionService;
+        this.container = container;
     }
 
     @Override
-    protected Long operate(final PasswordCallback callback, final Path container) throws BackgroundException {
+    protected Long operate(final PasswordCallback callback) throws BackgroundException {
         try {
             return session.getClient().getContainerInfo(regionService.lookup(container), container.getName()).getTotalSize();
         }

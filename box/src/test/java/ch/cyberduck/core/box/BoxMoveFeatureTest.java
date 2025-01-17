@@ -23,9 +23,12 @@ import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.shared.DefaultHomeFinderService;
+import ch.cyberduck.core.synchronization.Comparison;
+import ch.cyberduck.core.synchronization.ComparisonService;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
 
+import org.apache.commons.lang3.StringUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
@@ -35,7 +38,7 @@ import java.util.EnumSet;
 import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
-public class BoxMoveFeatureTest extends AbtractBoxTest {
+public class BoxMoveFeatureTest extends AbstractBoxTest {
 
     @Test
     public void testMove() throws Exception {
@@ -50,6 +53,7 @@ public class BoxMoveFeatureTest extends AbtractBoxTest {
         assertTrue(new BoxFindFeature(session, fileid).find(target));
         assertEquals(test.attributes().getModificationDate(), target.attributes().getModificationDate());
         assertEquals(test.attributes().getChecksum(), target.attributes().getChecksum());
+        assertEquals(Comparison.equal, session.getHost().getProtocol().getFeature(ComparisonService.class).compare(Path.Type.file, target.attributes(), new BoxAttributesFinderFeature(session, fileid).find(target)));
         new BoxDeleteFeature(session, fileid).delete(Collections.singletonList(target), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
@@ -86,5 +90,15 @@ public class BoxMoveFeatureTest extends AbtractBoxTest {
         final BoxFileidProvider fileid = new BoxFileidProvider(session);
         final Path test = new Path(new DefaultHomeFinderService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
         new BoxMoveFeature(session, fileid).move(test, new Path(new DefaultHomeFinderService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file)), new TransferStatus(), new Delete.DisabledCallback(), new DisabledConnectionCallback());
+    }
+
+    @Test
+    public void testRenameCaseOnly() throws Exception {
+        final BoxFileidProvider fileid = new BoxFileidProvider(session);
+        final String name = new AlphanumericRandomStringService().random();
+        final Path file = new BoxTouchFeature(session, fileid).touch(new Path(new DefaultHomeFinderService(session).find(), StringUtils.capitalize(name), EnumSet.of(Path.Type.file)), new TransferStatus());
+        final Path rename = new Path(new DefaultHomeFinderService(session).find(), StringUtils.lowerCase(name), EnumSet.of(Path.Type.file));
+        new BoxMoveFeature(session, fileid).move(file, rename, new TransferStatus().exists(true), new Delete.DisabledCallback(), new DisabledConnectionCallback());
+        new BoxDeleteFeature(session, fileid).delete(Collections.singletonList(rename), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

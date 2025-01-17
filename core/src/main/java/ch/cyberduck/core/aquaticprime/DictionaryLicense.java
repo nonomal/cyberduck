@@ -49,7 +49,7 @@ import com.dd.plist.NSData;
 import com.dd.plist.NSDictionary;
 import com.dd.plist.NSObject;
 import com.dd.plist.PropertyListFormatException;
-import com.dd.plist.XMLPropertyListParser;
+import com.dd.plist.PropertyListParser;
 
 public abstract class DictionaryLicense extends AbstractLicense {
     private static final Logger log = LogManager.getLogger(DictionaryLicense.class);
@@ -82,7 +82,7 @@ public abstract class DictionaryLicense extends AbstractLicense {
         }
         final NSData signature = (NSData) dictionary.objectForKey("Signature");
         if(null == signature) {
-            log.warn(String.format("Missing key 'Signature' in dictionary %s", dictionary));
+            log.warn("Missing key 'Signature' in dictionary {}", dictionary);
             throw new InvalidLicenseException();
         }
         // Append all values
@@ -112,17 +112,15 @@ public abstract class DictionaryLicense extends AbstractLicense {
             }
         }
         catch(NoSuchPaddingException
-                | BadPaddingException
-                | IllegalBlockSizeException
-                | InvalidKeyException
-                | InvalidKeySpecException
-                | NoSuchAlgorithmException e) {
-            log.warn(String.format("Signature verification failure for key %s", file));
+              | BadPaddingException
+              | IllegalBlockSizeException
+              | InvalidKeyException
+              | InvalidKeySpecException
+              | NoSuchAlgorithmException e) {
+            log.warn("Signature verification failure for key {}", file);
             throw new InvalidLicenseException();
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Valid key in %s", file));
-        }
+        log.info("Valid key in {}", file);
     }
 
     @Override
@@ -132,7 +130,7 @@ public abstract class DictionaryLicense extends AbstractLicense {
         }
         final NSObject value = dictionary.objectForKey(property);
         if(null == value) {
-            log.warn(String.format("No value for key %s in dictionary %s", property, dictionary));
+            log.warn("No value for key {} in dictionary {}", property, dictionary);
             return null;
         }
         return value.toString();
@@ -140,18 +138,26 @@ public abstract class DictionaryLicense extends AbstractLicense {
 
     private NSDictionary read(final Local file) {
         try {
-            return (NSDictionary) XMLPropertyListParser.parse(file.getInputStream());
+            return (NSDictionary) PropertyListParser.parse(file.getInputStream());
         }
         catch(ParserConfigurationException
-                | IOException
-                | SAXException
-                | PropertyListFormatException
-                | ParseException
-                | AccessDeniedException e) {
-            log.warn(String.format("Failure %s reading dictionary from %s", e.getMessage(), file));
+              | IOException
+              | SAXException
+              | PropertyListFormatException
+              | ParseException
+              | AccessDeniedException e) {
+            log.warn("Failure {} reading dictionary from {}", e.getMessage(), file);
         }
         return null;
     }
 
     protected abstract String getPublicKey();
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("DictionaryLicense{");
+        sb.append("file=").append(file);
+        sb.append('}');
+        return sb.toString();
+    }
 }

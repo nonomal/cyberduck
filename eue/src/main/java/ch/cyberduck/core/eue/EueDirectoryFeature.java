@@ -15,6 +15,7 @@ package ch.cyberduck.core.eue;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.eue.io.swagger.client.ApiException;
 import ch.cyberduck.core.eue.io.swagger.client.api.PostChildrenForAliasApi;
@@ -23,9 +24,10 @@ import ch.cyberduck.core.eue.io.swagger.client.model.ResourceCreationResponseEnt
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceCreationResponseEntry;
 import ch.cyberduck.core.eue.io.swagger.client.model.ResourceCreationResponseEntryEntity;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConflictException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
@@ -33,6 +35,7 @@ import org.apache.http.HttpStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.Collections;
 
 public class EueDirectoryFeature implements Directory<EueWriteFeature.Chunk> {
@@ -63,14 +66,13 @@ public class EueDirectoryFeature implements Directory<EueWriteFeature.Chunk> {
             switch(resourceCreationResponseEntry.getStatusCode()) {
                 case HttpStatus.SC_OK:
                     // Already exists
-                    log.warn(String.format("Folder %s already exists", folder));
+                    throw new ConflictException(folder.getAbsolute());
                 case HttpStatus.SC_CREATED:
                     final String resourceId = EueResourceIdProvider.getResourceIdFromResourceUri(resourceCreationResponseEntry.getHeaders().getLocation());
                     fileid.cache(folder, resourceId);
-                    return folder.withAttributes(
-                            new EueAttributesAdapter().toAttributes(new EueWriteFeature.Chunk(resourceId, 0L, null)));
+                    return folder;
                 default:
-                    log.warn(String.format("Failure %s creating folder %s", resourceCreationResponseEntry, folder));
+                    log.warn("Failure {} creating folder {}", resourceCreationResponseEntry, folder);
                     final ResourceCreationResponseEntryEntity entity = resourceCreationResponseEntry.getEntity();
                     if(null == entity) {
                         throw new EueExceptionMappingService().map(new ApiException(resourceCreationResponseEntry.getReason(),
@@ -86,12 +88,9 @@ public class EueDirectoryFeature implements Directory<EueWriteFeature.Chunk> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return new EueTouchFeature(session, fileid).isSupported(workdir, name);
-    }
-
-    @Override
-    public Directory<EueWriteFeature.Chunk> withWriter(final Write<EueWriteFeature.Chunk> writer) {
-        return this;
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
+        if(!EueTouchFeature.validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
+        }
     }
 }

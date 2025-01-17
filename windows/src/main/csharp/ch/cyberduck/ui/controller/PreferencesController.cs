@@ -39,6 +39,9 @@ using org.apache.logging.log4j;
 using org.apache.logging.log4j.core;
 using StructureMap;
 using Logger = org.apache.logging.log4j.Logger;
+using ch.cyberduck.core.eue.io.swagger.client.model;
+using com.google.common.graph;
+using ch.cyberduck.core.proxy;
 
 namespace Ch.Cyberduck.Ui.Controller
 {
@@ -73,6 +76,7 @@ namespace Ch.Cyberduck.Ui.Controller
             View.AlwaysUseDefaultEditorChangedEvent += View_AlwaysUseDefaultEditorChangedEvent;
             View.ShowHiddenFilesChangedEvent += View_ShowHiddenFilesChangedEvent;
             View.DoubleClickEditorChangedEvent += View_DoubleClickEditorChangedEvent;
+            View.EnableVersioningChangedEvent += View_EnableVersioningChangedEvent;
             View.ReturnKeyRenamesChangedEvent += View_ReturnKeyRenamesChangedEvent;
             View.InfoWindowShowsCurrentSelectionChangedEvent += View_InfoWindowShowsCurrentSelectionChangedEvent;
             View.AlternatingRowBackgroundChangedEvent += View_AlternatingRowBackgroundChangedEvent;
@@ -145,6 +149,7 @@ namespace Ch.Cyberduck.Ui.Controller
             View.ShowDebugLogEvent += View_ShowDebugLogEvent;
 
             View.CryptomatorAutoDetectVaultChangedEvent += View_CryptomatorAutoDetectVaultChangedEvent;
+            View.CryptomatorUseKeychainChangedEvent += View_CryptomatorUseKeychainChangedEvent;
 
             #region S3
 
@@ -213,6 +218,11 @@ namespace Ch.Cyberduck.Ui.Controller
         private void View_CryptomatorAutoDetectVaultChangedEvent()
         {
             PreferencesFactory.get().setProperty("cryptomator.vault.autodetect", View.AutoDetectVault);
+        }
+
+        private void View_CryptomatorUseKeychainChangedEvent()
+        {
+            PreferencesFactory.get().setProperty("cryptomator.vault.keychain", View.VaultUseKeychain);
         }
 
         public static PreferencesController Instance
@@ -307,17 +317,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
         private void View_ChangeSystemProxyEvent()
         {
-            LaunchIEOptions(4);
-        }
-
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="activeRegister">Register to select (connections settings=4)</param>
-        private void LaunchIEOptions(int activeRegister)
-        {
-            ApplicationLauncherFactory.get()
-                .open(new Application("rundll32.exe"), "shell32.dll,Control_RunDLL inetcpl.cpl,," + activeRegister);
+            ProxyConfigurationFactory.get().configure();
         }
 
         private void View_UpdateFeedChangedEvent()
@@ -824,6 +824,11 @@ namespace Ch.Cyberduck.Ui.Controller
             PreferencesFactory.get().setProperty("browser.doubleclick.edit", View.DoubleClickEditor);
         }
 
+        private void View_EnableVersioningChangedEvent()
+        {
+            PreferencesFactory.get().setProperty("editor.upload.file.versioning", View.EnableVersioning);
+        }
+
         private void View_ReturnKeyRenamesChangedEvent()
         {
             PreferencesFactory.get().setProperty("browser.enterkey.rename", View.ReturnKeyRenames);
@@ -923,8 +928,8 @@ namespace Ch.Cyberduck.Ui.Controller
             View.ConfirmDisconnect = PreferencesFactory.get().getBoolean("browser.disconnect.confirm");
             View.UseKeychain = PreferencesFactory.get().getBoolean("connection.login.keychain");
             PopulateDefaultProtocols();
-            View.DefaultProtocol =
-                ProtocolFactory.get().forName(PreferencesFactory.get().getProperty("connection.protocol.default"));
+            View.DefaultProtocol = ProtocolFactory.get().forNameOrDefault(
+                PreferencesFactory.get().getProperty("connection.protocol.default"));
             View.AlternatingRowBackground = PreferencesFactory.get().getBoolean("browser.alternatingRows");
             View.VerticalLines = PreferencesFactory.get().getBoolean("browser.verticalLines");
             View.HorizontalLines = PreferencesFactory.get().getBoolean("browser.horizontalLines");
@@ -977,6 +982,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
             PopulateAndSelectEditor();
             View.AlwaysUseDefaultEditor = PreferencesFactory.get().getBoolean("editor.alwaysUseDefault");
+            View.EnableVersioning = PreferencesFactory.get().getBoolean("editor.upload.file.versioning");
 
             #endregion
 
@@ -1063,11 +1069,10 @@ namespace Ch.Cyberduck.Ui.Controller
 
             View.UpdateEnabled = PeriodicUpdateCheckerFactory.get().hasUpdatePrivileges();
             View.AutomaticUpdateCheck = PreferencesFactory.get().getBoolean("update.check");
-            long lastCheck = PreferencesFactory.get().getLong("update.check.last");
+            long lastCheck = PreferencesFactory.get().getLong("update.check.timestamp");
             View.LastUpdateCheck = 0 == lastCheck
                 ? String.Empty
-                : UserDefaultsDateFormatter.GetLongFormat(
-                    new DateTime(PreferencesFactory.get().getLong("update.check.last")));
+                : UserDateFormatterFactory.get().getLongFormat(lastCheck);
             PopulateFeeds();
             View.UpdateFeed = PreferencesFactory.get().getProperty("update.feed");
 
@@ -1091,6 +1096,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
             #region Cryptomator
             View.AutoDetectVault = PreferencesFactory.get().getBoolean("cryptomator.vault.autodetect");
+            View.VaultUseKeychain = PreferencesFactory.get().getBoolean("cryptomator.vault.keychain");
             #endregion
         }
 
@@ -1205,7 +1211,8 @@ namespace Ch.Cyberduck.Ui.Controller
         private void PopulateDefaultS3BucketLocations()
         {
             IList<KeyValuePair<string, string>> defaultBucketLocations = new List<KeyValuePair<string, string>>();
-            Set locations = new S3Protocol().getRegions();
+            ProtocolFactory factory = ProtocolFactory.get();
+            Set locations = factory.forType(factory.find(ProtocolFactory.BUNDLED_PROFILE_PREDICATE), Protocol.Type.s3).getRegions();
             Iterator iter = locations.iterator();
             while (iter.hasNext())
             {
@@ -1219,7 +1226,8 @@ namespace Ch.Cyberduck.Ui.Controller
         private void PopulateDefaultGoogleBucketLocations()
         {
             IList<KeyValuePair<string, string>> defaultBucketLocations = new List<KeyValuePair<string, string>>();
-            Set locations = new GoogleStorageProtocol().getRegions();
+            ProtocolFactory factory = ProtocolFactory.get();
+            Set locations = factory.forType(factory.find(ProtocolFactory.BUNDLED_PROFILE_PREDICATE), Protocol.Type.googlestorage).getRegions();
             Iterator iter = locations.iterator();
             while (iter.hasNext())
             {
@@ -1233,7 +1241,8 @@ namespace Ch.Cyberduck.Ui.Controller
         private void PopulateDefaultS3StorageClasses()
         {
             IList<KeyValuePair<string, string>> storageClasses = new List<KeyValuePair<string, string>>();
-            Iterator iter = PreferencesFactory.get().getList("s3.storage.class.options").iterator();
+            ProtocolFactory factory = ProtocolFactory.get();
+            Iterator iter = PreferencesReader.toList(factory.forType(factory.find(ProtocolFactory.BUNDLED_PROFILE_PREDICATE), Protocol.Type.s3).getProperties().get("s3.storage.class.options") as string).iterator();
             while (iter.hasNext())
             {
                 string s = (string) iter.next();
@@ -1320,7 +1329,7 @@ namespace Ch.Cyberduck.Ui.Controller
             List<KeyValueIconTriple<Protocol, string>> protocols = new List<KeyValueIconTriple<Protocol, string>>();
             ProtocolFactory p = ProtocolFactory.get();
             foreach (Protocol protocol in p.find(new DefaultProtocolPredicate(
-                EnumSet.of(Protocol.Type.ftp, Protocol.Type.sftp, Protocol.Type.dav))).toArray(new Protocol[] { }))
+                EnumSet.of(Protocol.Type.ftp, Protocol.Type.sftp, Protocol.Type.dav, Protocol.Type.smb))).toArray(new Protocol[] { }))
             {
                 protocols.Add(new KeyValueIconTriple<Protocol, string>(protocol, protocol.getDescription(),
                     protocol.disk()));
@@ -1399,8 +1408,7 @@ namespace Ch.Cyberduck.Ui.Controller
                             defaultEditor.getName()));
                 }
             }
-            editors.Add(new KeyValueIconTriple<Application, string>(Application.notfound,
-                LocaleFactory.localizedString("Choose") + "…", String.Empty));
+
             View.PopulateEditors(editors);
             if (defaultEditor != null)
             {

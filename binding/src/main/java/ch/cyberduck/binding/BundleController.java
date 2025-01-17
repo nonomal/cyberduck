@@ -56,10 +56,11 @@ public abstract class BundleController extends ProxyController {
     public static final int TEXT_ALIGNMENT_RIGHT;
 
     static {
-        if(Factory.Platform.osversion.matches("10\\.(12|13|14|15|16).*")) {
+        if(Factory.Platform.osversion.matches("(10|11)\\..*")) {
             TEXT_ALIGNMENT_RIGHT = NSText.NSRightTextAlignment;
         }
         else {
+            // Fix #12703 for macOS 12+
             TEXT_ALIGNMENT_RIGHT = NSText.NSTextAlignmentRight;
         }
     }
@@ -67,10 +68,11 @@ public abstract class BundleController extends ProxyController {
     public static final int TEXT_ALIGNMENT_CENTER;
 
     static {
-        if(Factory.Platform.osversion.matches("10\\.(12|13|14|15|16).*")) {
+        if(Factory.Platform.osversion.matches("(10|11)\\..*")) {
             TEXT_ALIGNMENT_CENTER = NSText.NSCenterTextAlignment;
         }
         else {
+            // Fix #12703 for macOS 12+
             TEXT_ALIGNMENT_CENTER = NSText.NSTextAlignmentCenter;
         }
     }
@@ -103,7 +105,7 @@ public abstract class BundleController extends ProxyController {
     public void loadBundle() {
         final String bundleName = this.getBundleName();
         if(null == bundleName) {
-            log.debug(String.format("No bundle to load for controller %s", this.toString()));
+            log.debug("No bundle to load for controller {}", this.toString());
             return;
         }
         this.loadBundle(bundleName);
@@ -111,12 +113,10 @@ public abstract class BundleController extends ProxyController {
 
     public void loadBundle(final String bundleName) {
         if(awaked) {
-            log.warn(String.format("Bundle %s already loaded", bundleName));
+            log.warn("Bundle {} already loaded", bundleName);
             return;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Loading bundle %s", bundleName));
-        }
+        log.info("Loading bundle {}", bundleName);
         // Unarchives the contents of the nib file and links them to a specific owner object
         if(!NSBundle.loadNibNamed(bundleName, this.id())) {
             throw new FactoryException(String.format("Failure loading %s.xib", bundleName));

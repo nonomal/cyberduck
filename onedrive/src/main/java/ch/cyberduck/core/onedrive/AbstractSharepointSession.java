@@ -16,7 +16,6 @@ package ch.cyberduck.core.onedrive;
  */
 
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathNormalizer;
@@ -26,12 +25,12 @@ import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.features.Lock;
 import ch.cyberduck.core.onedrive.features.GraphLockFeature;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import org.nuxeo.onedrive.client.ODataQuery;
 import org.nuxeo.onedrive.client.OneDriveAPIException;
 import org.nuxeo.onedrive.client.types.Drive;
 import org.nuxeo.onedrive.client.types.DriveItem;
@@ -44,7 +43,6 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 
 public abstract class AbstractSharepointSession extends GraphSession {
-    private static final Logger log = LogManager.getLogger(SharepointSession.class);
 
     private final Path home;
 
@@ -58,22 +56,18 @@ public abstract class AbstractSharepointSession extends GraphSession {
         }
     }
 
-    public Path getHome() {
-        return home;
-    }
-
-    public boolean isHome(final Path home) {
-        return new SimplePathPredicate(home).test(home);
+    public boolean isHome(final Path file) {
+        return new SimplePathPredicate(home).test(file);
     }
 
     public abstract boolean isSingleSite();
 
     public Site getSite(final Path file) throws BackgroundException {
-        return Site.byId(client, fileid.getFileId(file, new DisabledListProgressListener()));
+        return Site.byId(client, fileid.getFileId(file));
     }
 
     public GroupItem getGroup(final Path file) throws BackgroundException {
-        return new GroupItem(client, fileid.getFileId(file, new DisabledListProgressListener()));
+        return new GroupItem(client, fileid.getFileId(file));
     }
 
     @Override
@@ -89,7 +83,7 @@ public abstract class AbstractSharepointSession extends GraphSession {
 
     @Override
     public DriveItem getItem(final Path file, final boolean resolveLastItem) throws BackgroundException {
-        final String versionId = fileid.getFileId(file, new DisabledListProgressListener());
+        final String versionId = fileid.getFileId(file);
         if(StringUtils.isEmpty(versionId)) {
             throw new NotfoundException(String.format("Version ID for %s is empty", file.getAbsolute()));
         }
@@ -107,7 +101,7 @@ public abstract class AbstractSharepointSession extends GraphSession {
             throw new NotfoundException(String.format("File %s is not part of any drive.", file.getAbsolute()));
         }
         final DriveItem ownItem;
-        if(driveContainer.getContainerPath().map(file::equals).orElse(false)) {
+        if(driveContainer.getContainerPath().map(new SimplePathPredicate(file)::test).orElse(false)) {
             ownItem = drive.getRoot();
         }
         else {
@@ -115,7 +109,8 @@ public abstract class AbstractSharepointSession extends GraphSession {
         }
         if(resolveLastItem) {
             try {
-                final DriveItem.Metadata metadata = ownItem.getMetadata();
+                // Query metadata, including RemoteItem metadata
+                final DriveItem.Metadata metadata = getMetadata(ownItem, new ODataQuery().select(DriveItem.Property.RemoteItem));
                 final DriveItem.Metadata remoteMetadata = metadata.getRemoteItem();
                 if(null != remoteMetadata) {
                     return (DriveItem) remoteMetadata.getItem();
@@ -134,7 +129,9 @@ public abstract class AbstractSharepointSession extends GraphSession {
     @Override
     public <T> T _getFeature(final Class<T> type) {
         if(type == Lock.class) {
-            return (T) new GraphLockFeature(this, fileid);
+            if(new HostPreferences(host).getBoolean("sharepoint.lock.enable")) {
+                return (T) new GraphLockFeature(this, fileid);
+            }
         }
         return super._getFeature(type);
     }
@@ -151,7 +148,7 @@ public abstract class AbstractSharepointSession extends GraphSession {
         if(!containerItem.isDefined()) {
             return false;
         }
-        return containerItem.isDrive() && (container || !containerItem.getContainerPath().map(file::equals).orElse(false));
+        return containerItem.isDrive() && (container || !containerItem.getContainerPath().map(new SimplePathPredicate(file)::test).orElse(false));
     }
 
     protected Deque<Path> decompose(final Path file) {

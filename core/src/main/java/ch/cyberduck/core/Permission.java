@@ -29,6 +29,8 @@ import org.apache.logging.log4j.Logger;
  * Encapsulating UNIX file permissions.
  */
 public class Permission implements Serializable {
+    private static final Logger log = LogManager.getLogger(Permission.class);
+
     public static final Permission EMPTY = new Permission(Action.none, Action.none, Action.none) {
         @Override
         public boolean isExecutable() {
@@ -47,20 +49,20 @@ public class Permission implements Serializable {
 
         @Override
         public String toString() {
-            return LocaleFactory.localizedString("--");
+            return "--";
         }
 
         @Override
         public String getMode() {
-            return LocaleFactory.localizedString("--");
+            return "--";
         }
 
         @Override
         public String getSymbol() {
-            return LocaleFactory.localizedString("--");
+            return "--";
         }
     };
-    private static final Logger log = LogManager.getLogger(Permission.class);
+
     private Action user;
     private Action group;
     private Action other;
@@ -129,7 +131,7 @@ public class Permission implements Serializable {
             this.fromInteger(Integer.valueOf(Integer.toString(mode), 8));
         }
         catch(NumberFormatException e) {
-            log.warn(String.format("Failure parsing %s", mode));
+            log.warn("Failure parsing {}", mode);
             this.set(Permission.EMPTY);
         }
     }
@@ -141,18 +143,18 @@ public class Permission implements Serializable {
      */
     public Permission(final Permission other) {
         this.set(other.user, other.group, other.other,
-            other.sticky, other.setuid, other.setgid);
+                other.sticky, other.setuid, other.setgid);
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
+    public <T> T serialize(final Serializer<T> dict) {
         dict.setStringForKey(this.getSymbol(), "Mask");
         return dict.getSerialized();
     }
 
     private void set(final Permission other) {
         this.set(other.user, other.group, other.other,
-            other.sticky, other.setuid, other.setgid);
+                other.sticky, other.setuid, other.setgid);
     }
 
     private void set(final Action u, final Action g, final Action o,
@@ -168,12 +170,12 @@ public class Permission implements Serializable {
     private void fromInteger(int n) {
         Action[] v = Action.values();
         set(
-            v[(n >>> 6) & 7],
-            v[(n >>> 3) & 7],
-            v[n & 7],
-            ((n >>> 9) & 1) == 1,
-            ((n >>> 9) & 4) == 4,
-            ((n >>> 9) & 2) == 2
+                v[(n >>> 6) & 7],
+                v[(n >>> 3) & 7],
+                v[n & 7],
+                ((n >>> 9) & 1) == 1,
+                ((n >>> 9) & 4) == 4,
+                ((n >>> 9) & 2) == 2
         );
     }
 
@@ -182,9 +184,9 @@ public class Permission implements Serializable {
      */
     private int toInteger() {
         return (sticky ? 1 << 9 : 0) | (setuid ? 4 << 9 : 0) | (setgid ? 2 << 9 : 0) |
-            user.ordinal() << 6 |
-            group.ordinal() << 3 |
-            other.ordinal();
+                user.ordinal() << 6 |
+                group.ordinal() << 3 |
+                other.ordinal();
     }
 
     /**
@@ -227,7 +229,7 @@ public class Permission implements Serializable {
             this.fromInteger(n);
         }
         catch(StringIndexOutOfBoundsException e) {
-            log.warn(String.format("Failure parsing %s", symbol));
+            log.warn("Failure parsing {}", symbol);
             this.set(Permission.EMPTY);
         }
     }
@@ -295,14 +297,14 @@ public class Permission implements Serializable {
     public String getSymbol() {
         final StringBuilder symbolic = new StringBuilder();
         symbolic.append(setuid ? user.implies(Action.execute) ?
-            StringUtils.substring(user.symbolic, 0, 2) + "s" : StringUtils.substring(user.symbolic, 0, 2) + "S" :
-            user.symbolic);
+                StringUtils.substring(user.symbolic, 0, 2) + "s" : StringUtils.substring(user.symbolic, 0, 2) + "S" :
+                user.symbolic);
         symbolic.append(setgid ? group.implies(Action.execute) ?
-            StringUtils.substring(group.symbolic, 0, 2) + "s" : StringUtils.substring(group.symbolic, 0, 2) + "S" :
-            group.symbolic);
+                StringUtils.substring(group.symbolic, 0, 2) + "s" : StringUtils.substring(group.symbolic, 0, 2) + "S" :
+                group.symbolic);
         symbolic.append(sticky ? other.implies(Action.execute) ?
-            StringUtils.substring(other.symbolic, 0, 2) + "t" : StringUtils.substring(other.symbolic, 0, 2) + "T" :
-            other.symbolic);
+                StringUtils.substring(other.symbolic, 0, 2) + "t" : StringUtils.substring(other.symbolic, 0, 2) + "T" :
+                other.symbolic);
         return symbolic.toString();
     }
 
@@ -323,8 +325,8 @@ public class Permission implements Serializable {
 
     public boolean isExecutable() {
         return this.getUser().implies(Action.execute)
-            || this.getGroup().implies(Action.execute)
-            || this.getOther().implies(Action.execute);
+                || this.getGroup().implies(Action.execute)
+                || this.getOther().implies(Action.execute);
     }
 
     /**
@@ -332,8 +334,8 @@ public class Permission implements Serializable {
      */
     public boolean isReadable() {
         return this.getUser().implies(Action.read)
-            || this.getGroup().implies(Action.read)
-            || this.getOther().implies(Action.read);
+                || this.getGroup().implies(Action.read)
+                || this.getOther().implies(Action.read);
     }
 
     /**
@@ -341,8 +343,8 @@ public class Permission implements Serializable {
      */
     public boolean isWritable() {
         return this.getUser().implies(Action.write)
-            || this.getGroup().implies(Action.write)
-            || this.getOther().implies(Action.write);
+                || this.getGroup().implies(Action.write)
+                || this.getOther().implies(Action.write);
     }
 
     @Override

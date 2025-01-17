@@ -46,7 +46,6 @@ import ch.cyberduck.binding.foundation.NSNotification;
 import ch.cyberduck.binding.foundation.NSNotificationCenter;
 import ch.cyberduck.binding.foundation.NSObject;
 import ch.cyberduck.core.*;
-import ch.cyberduck.core.aquaticprime.DisabledLicenseVerifierCallback;
 import ch.cyberduck.core.aquaticprime.License;
 import ch.cyberduck.core.aquaticprime.LicenseFactory;
 import ch.cyberduck.core.bonjour.NotificationRendezvousListener;
@@ -70,6 +69,8 @@ import ch.cyberduck.core.profiles.PeriodicProfilesUpdater;
 import ch.cyberduck.core.profiles.ProfilesUpdater;
 import ch.cyberduck.core.resources.IconCacheFactory;
 import ch.cyberduck.core.serializer.HostDictionary;
+import ch.cyberduck.core.sparkle.MenuItemSparkleUpdateHandler;
+import ch.cyberduck.core.sparkle.NotificationSparkleUpdateHandler;
 import ch.cyberduck.core.threading.AbstractBackgroundAction;
 import ch.cyberduck.core.threading.DefaultBackgroundExecutor;
 import ch.cyberduck.core.transfer.DownloadTransfer;
@@ -115,6 +116,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Predicate;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 
@@ -157,12 +159,6 @@ public class MainController extends BundleController implements NSApplication.De
      */
     private static final List<BrowserController> browsers
         = new ArrayList<BrowserController>();
-
-    /**
-     * Saved browsers
-     */
-    private final AbstractHostCollection sessions = new BookmarkCollection(
-        LocalFactory.get(SupportDirectoryFinderFactory.get().find(), "Sessions"), "session");
 
     private final NSWorkspace workspace = NSWorkspace.sharedWorkspace();
 
@@ -286,7 +282,7 @@ public class MainController extends BundleController implements NSApplication.De
         }
         else {
             this.applicationMenu.itemAtIndex(new NSInteger(5)).setAttributedTitle(
-                NSAttributedString.attributedStringWithAttributes(key.toString(), MENU_HELP_FONT_ATTRIBUTES)
+                    NSAttributedString.attributedStringWithAttributes(key.getEntitlement(), MENU_HELP_FONT_ATTRIBUTES)
             );
         }
     }
@@ -295,7 +291,14 @@ public class MainController extends BundleController implements NSApplication.De
      * Remove software update menu item if no update feed available
      */
     private void updateUpdateMenu() {
-        if(!updater.hasUpdatePrivileges()) {
+        if(updater.hasUpdatePrivileges()) {
+            final NSMenuItem item = this.applicationMenu.itemAtIndex(new NSInteger(1));
+            updater.addHandler(new MenuItemSparkleUpdateHandler(item));
+            if(preferences.getBoolean("update.check.auto")) {
+                updater.addHandler(new NotificationSparkleUpdateHandler(updater));
+            }
+        }
+        else {
             this.applicationMenu.removeItemAtIndex(new NSInteger(1));
         }
     }
@@ -551,9 +554,7 @@ public class MainController extends BundleController implements NSApplication.De
                 return;
             }
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Mounting default bookmark %s", bookmark));
-        }
+        log.debug("Mounting default bookmark {}", bookmark);
         controller.mount(bookmark);
     }
 
@@ -576,9 +577,7 @@ public class MainController extends BundleController implements NSApplication.De
 
     @Override
     public boolean application_openFile(final NSApplication app, final String filename) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Open file %s", filename));
-        }
+        log.debug("Open file {}", filename);
         final Local f = LocalFactory.get(filename);
         if(f.exists()) {
             if("duck".equals(f.getExtension())) {
@@ -588,17 +587,17 @@ public class MainController extends BundleController implements NSApplication.De
                     return true;
                 }
                 catch(AccessDeniedException e) {
-                    log.error(String.format("Failure reading bookmark from %s. %s", f, e.getMessage()));
+                    log.error("Failure reading bookmark from {}. {}", f, e.getMessage());
                     return false;
                 }
             }
             else if("cyberducklicense".equals(f.getExtension())) {
                 final License l = LicenseFactory.get(f);
-                if(l.verify(new DisabledLicenseVerifierCallback())) {
+                if(l.verify()) {
                     try {
                         f.copy(LocalFactory.get(SupportDirectoryFinderFactory.get().find(), f.getName()));
                         final NSAlert alert = NSAlert.alert(
-                            l.toString(),
+                                l.getEntitlement(),
                             LocaleFactory.localizedString("Thanks for your support! Your contribution helps to further advance development to make Cyberduck even better.", "License")
                                 + "\n\n"
                                 + LocaleFactory.localizedString("Your donation key has been copied to the Application Support folder.", "License"),
@@ -642,9 +641,7 @@ public class MainController extends BundleController implements NSApplication.De
             }
             else if("cyberduckprofile".equals(f.getExtension())) {
                 try {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Register profile %s", f));
-                    }
+                    log.debug("Register profile {}", f);
                     final Local copy = ProtocolFactory.get().register(f);
                     if(copy != null) {
                         final Profile profile = ProfileReaderFactory.get().read(copy);
@@ -653,7 +650,7 @@ public class MainController extends BundleController implements NSApplication.De
                     }
                 }
                 catch(AccessDeniedException e) {
-                    log.error(String.format("Failure reading profile from %s. %s", f, e));
+                    log.error("Failure reading profile from {}. {}", f, e);
                     return false;
                 }
             }
@@ -791,7 +788,7 @@ public class MainController extends BundleController implements NSApplication.De
             }
 
             @Override
-            public boolean validate() {
+            public boolean validate(final int option) {
                 return StringUtils.isNotEmpty(bookmarksPopup.selectedItem().representedObject());
             }
         };
@@ -816,9 +813,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public boolean application_openTempFile(NSApplication app, String filename) {
-        if(log.isDebugEnabled()) {
-            log.debug("applicationOpenTempFile:" + filename);
-        }
+        log.debug("applicationOpenTempFile:{}", filename);
         return this.application_openFile(app, filename);
     }
 
@@ -829,9 +824,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public boolean applicationShouldOpenUntitledFile(NSApplication sender) {
-        if(log.isDebugEnabled()) {
-            log.debug("applicationShouldOpenUntitledFile");
-        }
+        log.debug("applicationShouldOpenUntitledFile");
         return preferences.getBoolean("browser.open.untitled");
     }
 
@@ -840,9 +833,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public boolean applicationOpenUntitledFile(NSApplication app) {
-        if(log.isDebugEnabled()) {
-            log.debug("applicationOpenUntitledFile");
-        }
+        log.debug("applicationOpenUntitledFile");
         return false;
     }
 
@@ -860,9 +851,8 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public boolean applicationShouldHandleReopen_hasVisibleWindows(final NSApplication app, final boolean visibleWindowsFound) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Should handle reopen with windows %s", visibleWindowsFound));
-        }        // While an application is open, the Dock icon has a symbol below it.
+        // While an application is open, the Dock icon has a symbol below it.
+        log.debug("Should handle reopen with windows {}", visibleWindowsFound);
         // When a user clicks an open application’s icon in the Dock, the application
         // becomes active and all open unminimized windows are brought to the front;
         // minimized document windows remain in the Dock. If there are no unminimized
@@ -901,46 +891,24 @@ public class MainController extends BundleController implements NSApplication.De
      * (applicationWillFinishLaunching is sent before applicationOpenFile.)
      */
     @Override
-    public void applicationDidFinishLaunching(NSNotification notification) {
+    public void applicationWillFinishLaunching(NSNotification notification) {
         // Opt-in of automatic window tabbing
         NSWindow.setAllowsAutomaticWindowTabbing(true);
         // Load main menu
         this.loadBundle();
-        // Open default windows
-        if(preferences.getBoolean("browser.open.untitled")) {
-            final BrowserController c = newDocument();
-            c.window().makeKeyAndOrderFront(null);
-        }
         if(preferences.getBoolean("queue.window.open.default")) {
             TransferController c = TransferControllerFactory.get();
             c.window().makeKeyAndOrderFront(null);
         }
-        if(preferences.getBoolean("browser.serialize")) {
-            this.background(new AbstractBackgroundAction<Void>() {
-                @Override
-                public Void run() throws BackgroundException {
-                    sessions.load();
-                    return null;
-                }
-
-                @Override
-                public void cleanup() {
-                    for(Host host : sessions) {
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("New browser for saved session %s", host));
-                        }
-                        final BrowserController browser = newDocument(true, host.getUuid());
-                        browser.mount(host);
-                    }
-                    sessions.clear();
-                }
-            });
-        }
         final AbstractHostCollection bookmarks = BookmarkCollection.defaultCollection();
-        // Load all bookmarks in background
+        final AbstractHostCollection sessions = SessionsCollection.defaultCollection();
         this.background(new AbstractBackgroundAction<Void>() {
             @Override
             public Void run() throws BackgroundException {
+                if(preferences.getBoolean("browser.serialize")) {
+                    sessions.load();
+                }
+                // Load all bookmarks in background
                 bookmarks.load();
                 bookmarksSemaphore.countDown();
                 return null;
@@ -948,11 +916,24 @@ public class MainController extends BundleController implements NSApplication.De
 
             @Override
             public void cleanup() {
-                if(preferences.getBoolean("browser.open.untitled")) {
-                    if(preferences.getProperty("browser.open.bookmark.default") != null) {
-                        openDefaultBookmark(newDocument());
+                for(Host host : sessions) {
+                    log.info("New browser for saved session {}", host);
+                    final BrowserController browser = newDocument(true, host.getUuid());
+                    browser.mount(host);
+                }
+                if(sessions.isEmpty()) {
+                    // Open default windows
+                    if(preferences.getBoolean("browser.open.untitled")) {
+                        if(preferences.getProperty("browser.open.bookmark.default") != null) {
+                            openDefaultBookmark(newDocument());
+                        }
+                        else {
+                            final BrowserController c = newDocument();
+                            c.window().makeKeyAndOrderFront(null);
+                        }
                     }
                 }
+                sessions.clear();
                 // Set delegate for NSService
                 NSApplication.sharedApplication().setServicesProvider(MainController.this.id());
             }
@@ -976,9 +957,8 @@ public class MainController extends BundleController implements NSApplication.De
         final Rendezvous bonjour = RendezvousFactory.instance();
         bonjour.addListener(new NotificationRendezvousListener(bonjour));
         final SchemeHandler schemeHandler = SchemeHandlerFactory.get();
-        if(preferences.getBoolean("defaulthandler.reminder")
-            && preferences.getInteger("uses") > 0) {
-            if(!SchemeHandlerFactory.get().isDefaultHandler(Arrays.asList(Scheme.ftp.name(), Scheme.ftps.name(), Scheme.sftp.name()),
+        if(preferences.getBoolean("defaulthandler.reminder") && preferences.getInteger("uses") > 0) {
+            if(!schemeHandler.isDefaultHandler(Arrays.asList(Scheme.ftp.name(), Scheme.ftps.name(), Scheme.sftp.name()),
                 new Application(preferences.getProperty("application.identifier")))) {
                 final NSAlert alert = NSAlert.alert(
                     LocaleFactory.localizedString("Set Cyberduck as default application for FTP and SFTP locations?", "Configuration"),
@@ -1001,6 +981,17 @@ public class MainController extends BundleController implements NSApplication.De
                         new Application(preferences.getProperty("application.identifier")),
                         Arrays.asList(Scheme.ftp.name(), Scheme.ftps.name(), Scheme.sftp.name())
                     );
+                }
+            }
+        }
+        final ProtocolFactory protocols = ProtocolFactory.get();
+        // Iterate over custom schemes and register by default
+        for(Protocol protocol : protocols.find()) {
+            final String[] schemes = protocol.getSchemes();
+            for(String scheme : schemes) {
+                if(Arrays.stream(Scheme.values()).filter(Predicate.isEqual(Scheme.s3).negate()).noneMatch(s -> s.name().equals(scheme))) {
+                    log.info("Register custom scheme {}", scheme);
+                    schemeHandler.setDefaultHandler(new Application(preferences.getProperty("application.identifier")), Collections.singletonList(scheme));
                 }
             }
         }
@@ -1034,9 +1025,7 @@ public class MainController extends BundleController implements NSApplication.De
         // Import thirdparty bookmarks.
         this.background(new ImporterBackgroundAction(bookmarks, bookmarksSemaphore));
         final CrashReporter reporter = CrashReporter.create();
-        if(log.isInfoEnabled()) {
-            log.info("Check for crash report");
-        }
+        log.info("Check for crash report");
         reporter.checkForCrash(preferences.getProperty("website.crash"));
         if(updater.hasUpdatePrivileges()) {
             if(preferences.getBoolean("update.check")) {
@@ -1051,17 +1040,6 @@ public class MainController extends BundleController implements NSApplication.De
             // Synchronize and register timer
             profiles.register();
         }
-        // Register OAuth handler
-        final ProtocolFactory protocols = ProtocolFactory.get();
-        for(String handler : Arrays.asList(preferences.getProperty("oauth.handler.scheme"),
-                StringUtils.substringBefore(protocols.forType(Protocol.Type.googlestorage).getOAuthRedirectUrl(), ':'),
-                StringUtils.substringBefore(protocols.forType(Protocol.Type.googledrive).getOAuthRedirectUrl(), ':'))) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Register OAuth handler %s", handler));
-            }
-            schemeHandler.setDefaultHandler(new Application(preferences.getProperty("application.identifier")),
-                    Collections.singletonList(handler));
-        }
         NSAppleEventManager.sharedAppleEventManager().setEventHandler_andSelector_forEventClass_andEventID(
                 this.id(), Foundation.selector("handleGetURLEvent:withReplyEvent:"), kInternetEventClass, kAEGetURL);
     }
@@ -1071,9 +1049,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Action
     public void serviceUploadFileUrl_(final NSPasteboard pboard, final String userData) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("serviceUploadFileUrl_: with user data %s", userData));
-        }
+        log.debug("serviceUploadFileUrl_: with user data {}", userData);
         if(pboard.availableTypeFromArray(NSArray.arrayWithObject(NSPasteboard.FilenamesPboardType)) != null) {
             NSObject o = pboard.propertyListForType(NSPasteboard.FilenamesPboardType);
             if(o != null) {
@@ -1099,21 +1075,20 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public NSUInteger applicationShouldTerminate(final NSApplication app) {
-        if(log.isDebugEnabled()) {
-            log.debug("Application should quit with notification");
-        }
+        log.debug("Application should quit with notification");
         // Determine if there are any running transfers
         final NSUInteger result = TransferControllerFactory.applicationShouldTerminate(app);
         if(!result.equals(NSApplication.NSTerminateNow)) {
             return result;
         }
+        final SessionsCollection sessions = SessionsCollection.defaultCollection();
         // Determine if there are any open connections
         for(BrowserController browser : MainController.getBrowsers()) {
             if(preferences.getBoolean("browser.serialize")) {
                 if(browser.isMounted()) {
                     // The workspace should be saved. Serialize all open browser sessions
                     final Host serialized
-                        = new HostDictionary().deserialize(browser.getSession().getHost().serialize(SerializerFactory.get()));
+                            = new HostDictionary<>().deserialize(browser.getSession().getHost().serialize(SerializerFactory.get()));
                     serialized.setWorkdir(browser.workdir());
                     sessions.add(serialized);
                     browser.window().saveFrameUsingName(serialized.getUuid());
@@ -1161,15 +1136,13 @@ public class MainController extends BundleController implements NSApplication.De
     }
 
     public NSUInteger applicationShouldTerminateAfterDonationPrompt(final NSApplication app) {
-        if(log.isDebugEnabled()) {
-            log.debug("applicationShouldTerminateAfterDonationPrompt");
-        }
+        log.debug("applicationShouldTerminateAfterDonationPrompt");
         if(!displayDonationPrompt) {
             // Already displayed
             return NSApplication.NSTerminateNow;
         }
         final License key = LicenseFactory.find();
-        if(!key.verify(new DisabledLicenseVerifierCallback())) {
+        if(!key.verify()) {
             final String lastversion = preferences.getProperty("donate.reminder");
             if(NSBundle.mainBundle().infoDictionary().objectForKey("CFBundleShortVersionString").toString().equals(lastversion)) {
                 // Do not display if same version is installed
@@ -1180,9 +1153,7 @@ public class MainController extends BundleController implements NSApplication.De
             nextreminder.setTimeInMillis(preferences.getLong("donate.reminder.date"));
             // Display prompt every n days
             nextreminder.add(Calendar.DAY_OF_YEAR, preferences.getInteger("donate.reminder.interval"));
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Next reminder %s", nextreminder.getTime().toString()));
-            }
+            log.debug("Next reminder {}", nextreminder.getTime().toString());
             if(nextreminder.getTime().after(new Date(System.currentTimeMillis()))) {
                 // Do not display if shown in the reminder interval
                 return NSApplication.NSTerminateNow;
@@ -1207,9 +1178,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Override
     public void applicationWillTerminate(NSNotification notification) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Application will quit with notification %s", notification));
-        }
+        log.debug("Application will quit with notification {}", notification);
         this.invalidate();
         OAuth2TokenListenerRegistry.get().shutdown();
         // Clear temporary files
@@ -1251,7 +1220,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Action
     public void handleGetURLEvent_withReplyEvent(NSAppleEventDescriptor event, NSAppleEventDescriptor reply) {
-        log.debug(String.format("Received URL from event %s", event));
+        log.debug("Received URL from event {}", event);
         final NSAppleEventDescriptor param = event.paramDescriptorForKeyword(keyAEResult);
         if(null == param) {
             log.error("No URL parameter");
@@ -1267,11 +1236,15 @@ public class MainController extends BundleController implements NSApplication.De
                 updater.check(false);
                 break;
             default:
+                String action = null;
                 if(StringUtils.contains(url, ":oauth")) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Handle %s as OAuth callback", url));
-                    }
-                    final String action = StringUtils.substringAfter(url, ":oauth");
+                    action = StringUtils.substringAfter(url, ":oauth");
+                }
+                if(StringUtils.contains(url, "://oauth")) {
+                    action = StringUtils.substringAfter(url, "://oauth");
+                }
+                if(null != action) {
+                    log.debug("Handle {} as OAuth callback", url);
                     final List<NameValuePair> pairs = URLEncodedUtils.parse(URI.create(action), Charset.defaultCharset());
                     String state = StringUtils.EMPTY;
                     String code = StringUtils.EMPTY;
@@ -1287,7 +1260,7 @@ public class MainController extends BundleController implements NSApplication.De
                     oauth.notify(state, code);
                 }
                 else if(StringUtils.startsWith(url, CteraProtocol.CTERA_REDIRECT_URI)) {
-                    final String action = StringUtils.removeStart(url, String.format("%s:", preferences.getProperty("oauth.handler.scheme")));
+                    action = StringUtils.removeStart(url, String.format("%s:", preferences.getProperty("oauth.handler.scheme")));
                     final List<NameValuePair> pairs = URLEncodedUtils.parse(URI.create(action), Charset.defaultCharset());
                     String code = StringUtils.EMPTY;
                     for(NameValuePair pair : pairs) {
@@ -1338,9 +1311,7 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Action
     public void workspaceWillPowerOff(NSNotification notification) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Workspace will power off with notification %s", notification));
-        }
+        log.debug("Workspace will power off with notification {}", notification);
     }
 
     /**
@@ -1351,16 +1322,12 @@ public class MainController extends BundleController implements NSApplication.De
      */
     @Action
     public void workspaceWillLogout(NSNotification notification) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Workspace will logout with notification %s", notification));
-        }
+        log.debug("Workspace will logout with notification {}", notification);
     }
 
     @Action
     public void workspaceWillSleep(NSNotification notification) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Workspace will sleep with notification %s", notification));
-        }
+        log.debug("Workspace will sleep with notification {}", notification);
     }
 
     private static final class ImporterBackgroundAction extends AbstractBackgroundAction<Void> {
@@ -1388,16 +1355,14 @@ public class MainController extends BundleController implements NSApplication.De
         public Void run() {
             for(ThirdpartyBookmarkCollection t : collections) {
                 if(!t.isInstalled()) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("No application installed for %s", t.getBundleIdentifier()));
-                    }
+                    log.info("No application installed for {}", t.getBundleIdentifier());
                     continue;
                 }
                 try {
                     t.load();
                 }
                 catch(AccessDeniedException e) {
-                    log.warn(String.format("Failure %s loading bookmarks from %s", e, t));
+                    log.warn("Failure {} loading bookmarks from {}", e, t);
                 }
                 if(t.isEmpty()) {
                     // Flag as imported
@@ -1444,7 +1409,11 @@ public class MainController extends BundleController implements NSApplication.De
         final Selector action = item.action();
         if(action.equals(Foundation.selector("updateMenuClicked:"))) {
             if(updater.hasUpdatePrivileges()) {
-                return !updater.isUpdateInProgress(item);
+                if(item.representedObject() != null) {
+                    // Allow to run update when found
+                    return true;
+                }
+                return !updater.isUpdateInProgress();
             }
             return false;
         }

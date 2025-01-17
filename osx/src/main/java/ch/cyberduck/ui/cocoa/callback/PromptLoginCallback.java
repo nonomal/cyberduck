@@ -66,19 +66,20 @@ public final class PromptLoginCallback extends PromptPasswordCallback implements
 
     @Override
     public void await(final CountDownLatch signal, final Host bookmark, final String title, final String message) throws ConnectionCanceledException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Display progress alert for %s", bookmark));
-        }
+        log.debug("Display progress alert for {}", bookmark);
         final AlertController alert = new ProgressAlertController(signal, title, message, bookmark.getProtocol());
-        alert.beginSheet(parent);
+        final int returnCode = alert.beginSheet(parent);
+        switch(returnCode) {
+            case SheetCallback.DEFAULT_OPTION:
+                // User dismissed sheet
+                throw new ConnectionCanceledException();
+        }
     }
 
     @Override
     public void warn(final Host bookmark, final String title, final String message,
                      final String continueButton, final String disconnectButton, final String preference) throws ConnectionCanceledException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Display insecure connection alert for %s", bookmark));
-        }
+        log.debug("Display insecure connection alert for {}", bookmark);
         final AlertController alert = new InsecureLoginAlertController(title, message, continueButton, disconnectButton,
                 bookmark.getProtocol(), StringUtils.isNotBlank(preference));
         int option = alert.beginSheet(parent);
@@ -96,10 +97,8 @@ public final class PromptLoginCallback extends PromptPasswordCallback implements
     @Override
     public Credentials prompt(final Host bookmark, final String username,
                               final String title, final String reason, final LoginOptions options) throws LoginCanceledException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Prompt for credentials for %s", username));
-        }
-        final Credentials credentials = new Credentials(username).withSaved(options.keychain);
+        log.debug("Prompt for credentials for {}", username);
+        final Credentials credentials = new Credentials(username).withSaved(options.save);
         final LoginController controller = new LoginController(new Host(bookmark).withCredentials(credentials), title, reason, options);
         final SheetInvoker sheet = new SheetInvoker(controller, parent, controller);
         final int option = sheet.beginSheet();
@@ -110,7 +109,17 @@ public final class PromptLoginCallback extends PromptPasswordCallback implements
     }
 
     public Local select(final Local identity) throws LoginCanceledException {
-        final SheetInvoker sheet = new SheetInvoker(new DisabledSheetCallback(), parent, select) {
+        final SheetInvoker sheet = new SheetInvoker(new DisabledSheetCallback(), parent, new WindowController() {
+            @Override
+            protected String getBundleName() {
+                return null;
+            }
+
+            @Override
+            public NSWindow window() {
+                return select;
+            }
+        }) {
             @Override
             public void beginSheet(final NSWindow window) {
                 select = NSOpenPanel.openPanel();

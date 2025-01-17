@@ -25,13 +25,15 @@ import ch.cyberduck.core.features.Move;
 import ch.cyberduck.core.features.Vault;
 import ch.cyberduck.core.io.DisabledStreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
-import ch.cyberduck.core.vault.DefaultVaultRegistry;
+import ch.cyberduck.core.vault.VaultRegistry;
 import ch.cyberduck.core.vault.VaultUnlockCancelException;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.util.Collections;
+import java.util.EnumSet;
+import java.util.Optional;
 
 public class VaultRegistryMoveFeature implements Move {
     private static final Logger log = LogManager.getLogger(VaultRegistryMoveFeature.class);
@@ -39,9 +41,9 @@ public class VaultRegistryMoveFeature implements Move {
     private final Session<?> session;
     private Session<?> destination;
     private final Move proxy;
-    private final DefaultVaultRegistry registry;
+    private final VaultRegistry registry;
 
-    public VaultRegistryMoveFeature(final Session<?> session, final Move proxy, final DefaultVaultRegistry registry) {
+    public VaultRegistryMoveFeature(final Session<?> session, final Move proxy, final VaultRegistry registry) {
         this.session = session;
         this.destination = session;
         this.proxy = proxy;
@@ -52,9 +54,7 @@ public class VaultRegistryMoveFeature implements Move {
     public Path move(final Path source, final Path target, final TransferStatus status, final Delete.Callback delete, final ConnectionCallback callback) throws BackgroundException {
         final Vault vault = registry.find(session, source);
         if(vault.equals(registry.find(session, target, false))) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Move %s to %s inside vault %s", source, target, vault));
-            }
+            log.debug("Move {} to {} inside vault {}", source, target, vault);
             // Move files inside vault
             return vault.getFeature(session, Move.class, proxy).move(source, target, status, delete, callback);
         }
@@ -68,29 +68,39 @@ public class VaultRegistryMoveFeature implements Move {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
+    public EnumSet<Flags> features(final Path source, final Path target) {
         try {
             if(registry.find(session, source, false).equals(registry.find(session, target, false))) {
-                return registry.find(session, source, false).getFeature(session, Move.class, proxy).isRecursive(source, target);
+                return registry.find(session, source, false).getFeature(session, Move.class, proxy).features(source, target);
             }
-            return session.getFeature(Copy.class).isRecursive(source, target);
+            if(session.getFeature(Copy.class).features(source, target).contains(Copy.Flags.recursive)) {
+                return EnumSet.of(Flags.recursive);
+            }
+            return EnumSet.noneOf(Flags.class);
         }
         catch(VaultUnlockCancelException e) {
-            return proxy.isRecursive(source, target);
+            return proxy.features(source, target);
         }
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        // Run through registry without looking for vaults to circumvent deadlock due to synchronized load of vault
-        try {
-            if(registry.find(session, source, false).equals(registry.find(session, target, false))) {
-                return registry.find(session, source, false).getFeature(session, Move.class, proxy).isSupported(source, target);
+    public void preflight(final Path source, final Optional<Path> optional) throws BackgroundException {
+        if(optional.isPresent()) {
+            try {
+                final Path target = optional.get();
+                if(registry.find(session, source, false).equals(registry.find(session, target, false))) {
+                    registry.find(session, source, false).getFeature(session, Move.class, proxy).preflight(source, optional);
+                }
+                else {
+                    session.getFeature(Copy.class).preflight(source, optional);
+                }
             }
-            return session.getFeature(Copy.class).isSupported(source, target);
+            catch(VaultUnlockCancelException e) {
+                proxy.preflight(source, optional);
+            }
         }
-        catch(VaultUnlockCancelException e) {
-            return proxy.isSupported(source, target);
+        else {
+            proxy.preflight(source, optional);
         }
     }
 

@@ -21,12 +21,11 @@ package ch.cyberduck.core.s3;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathNormalizer;
 import ch.cyberduck.core.RootListService;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.Location;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jets3t.service.ServiceException;
@@ -41,7 +40,7 @@ public class S3BucketListService implements RootListService {
     private final S3LocationFeature.S3Region region;
 
     public S3BucketListService(final S3Session session) {
-        this(session, new S3LocationFeature.S3Region(null));
+        this(session, new S3LocationFeature.S3Region(session.getHost().getRegion()));
     }
 
     public S3BucketListService(final S3Session session, final S3LocationFeature.S3Region region) {
@@ -51,35 +50,23 @@ public class S3BucketListService implements RootListService {
 
     @Override
     public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("List containers for %s", session));
-        }
+        log.debug("List containers for {}", session);
         try {
             final AttributedList<Path> buckets = new AttributedList<>();
             // List all buckets owned
             for(StorageBucket b : session.getClient().listAllBuckets()) {
-                final Path bucket = new Path(PathNormalizer.normalize(b.getName()), EnumSet.of(Path.Type.volume, Path.Type.directory));
+                final PathAttributes attr = new PathAttributes();
+                final Path bucket = new Path(PathNormalizer.normalize(b.getName()), EnumSet.of(Path.Type.volume, Path.Type.directory), attr);
                 if(b.getOwner() != null) {
                     // Null if the owner is not available
-                    bucket.attributes().setOwner(b.getOwner().getId());
+                    attr.setOwner(b.getOwner().getId());
                 }
-                bucket.attributes().setCreationDate(b.getCreationDate().getTime());
+                attr.setCreationDate(b.getCreationDate().getTime());
                 if(b.isLocationKnown()) {
-                    bucket.attributes().setRegion(b.getLocation());
+                    attr.setRegion(b.getLocation());
                 }
-                if(region.getIdentifier() != null) {
-                    final String location;
-                    if(!b.isLocationKnown()) {
-                        location = session.getFeature(Location.class).getLocation(bucket).getIdentifier();
-                    }
-                    else {
-                        location = b.getLocation();
-                    }
-                    if(!StringUtils.equals(location, region.getIdentifier())) {
-                        log.warn(String.format("Skip bucket %s in region %s", bucket, location));
-                        continue;
-                    }
-                    bucket.attributes().setRegion(location);
+                else {
+                    attr.setRegion(region.getIdentifier());
                 }
                 buckets.add(bucket);
                 listener.chunk(directory, buckets);

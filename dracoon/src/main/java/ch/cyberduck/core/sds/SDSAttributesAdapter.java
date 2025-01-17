@@ -1,4 +1,6 @@
-package ch.cyberduck.core.sds;/*
+package ch.cyberduck.core.sds;
+
+/*
  * Copyright (c) 2002-2022 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -13,13 +15,13 @@ package ch.cyberduck.core.sds;/*
  * GNU General Public License for more details.
  */
 
-
 import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AttributesAdapter;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.sds.io.swagger.client.model.DeletedNode;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
@@ -47,7 +49,9 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
         final PathAttributes attributes = new PathAttributes();
         attributes.setVersionId(String.valueOf(node.getId()));
         attributes.setRevision(node.getBranchVersion());
-        attributes.setChecksum(Checksum.parse(node.getHash()));
+        if(node.isIsEncrypted() != null && !node.isIsEncrypted()) {
+            attributes.setChecksum(Checksum.parse(node.getHash()));
+        }
         // Legacy
         attributes.setModificationDate(node.getUpdatedAt() != null ? node.getUpdatedAt().getMillis() : -1L);
         // Override for >4.22
@@ -64,10 +68,13 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
             attributes.setSize(node.getSize());
         }
         if(null != node.getQuota()) {
-            attributes.setQuota(node.getQuota());
+            // Remaining space
+            attributes.setQuota(new Quota.Space(node.getSize(), node.getQuota()));
         }
         attributes.setPermission(this.toPermission(node));
-        attributes.setOwner(node.getUpdatedBy().getDisplayName());
+        if(null != node.getUpdatedBy()) {
+            attributes.setOwner(node.getUpdatedBy().getDisplayName());
+        }
         attributes.setAcl(this.toAcl(node));
         final Map<String, String> custom = new HashMap<>();
         if(null != node.getCntDownloadShares()) {
@@ -83,6 +90,19 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
             custom.put(KEY_CLASSIFICATION, String.valueOf(node.getClassification().getValue()));
         }
         attributes.setCustom(custom);
+        if(null != node.getVirusProtectionInfo()) {
+            switch(node.getVirusProtectionInfo().getVerdict()) {
+                case CLEAN:
+                    attributes.setVerdict(PathAttributes.Verdict.clean);
+                    break;
+                case IN_PROGRESS:
+                    attributes.setVerdict(PathAttributes.Verdict.pending);
+                    break;
+                case MALICIOUS:
+                    attributes.setVerdict(PathAttributes.Verdict.malicious);
+                    break;
+            }
+        }
         return attributes;
     }
 
@@ -115,33 +135,45 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
     }
 
     protected Permission toPermission(final Node node) {
-        final Permission permission = new Permission(Permission.Action.none, Permission.Action.none, Permission.Action.none);
-        if(node.isIsEncrypted() && node.getType() == Node.TypeEnum.FILE) {
-            try {
-                if(null != session.keyPair()) {
-                    permission.setUser(permission.getUser().or(Permission.Action.read));
-                }
-                else {
-                    log.warn(String.format("Missing read permission for node %s with missing key pair", node));
-                }
+        final Permission permission = new Permission();
+        if(node.getPermissions() != null) {
+            switch(node.getType()) {
+                case FOLDER:
+                case ROOM:
+                    if(node.getPermissions().isCreate()
+                            // For existing files the delete role is also required to overwrite
+                            && node.getPermissions().isDelete()) {
+                        permission.setUser(Permission.Action.all);
+                    }
+                    else {
+                        permission.setUser(Permission.Action.read.or(Permission.Action.execute));
+                    }
+                    break;
+                case FILE:
+                    if(node.isIsEncrypted() != null && node.isIsEncrypted()) {
+                        try {
+                            if(null != session.keyPair()) {
+                                permission.setUser(Permission.Action.none.or(Permission.Action.read));
+                            }
+                            else {
+                                log.warn("Missing read permission for node {} with missing key pair", node);
+                            }
+                        }
+                        catch(BackgroundException e) {
+                            log.warn("Ignore failure {} retrieving key pair", e.getMessage());
+                        }
+                    }
+                    else {
+                        if(node.getPermissions().isRead()) {
+                            permission.setUser(Permission.Action.read);
+                        }
+                    }
+                    if(node.getPermissions().isChange() && node.getPermissions().isDelete()) {
+                        permission.setUser(permission.getUser().or(Permission.Action.write));
+                    }
+                    break;
             }
-            catch(BackgroundException e) {
-                log.warn(String.format("Ignore failure %s retrieving key pair", e));
-            }
-        }
-        else {
-            permission.setUser(permission.getUser().or(Permission.Action.read));
-        }
-        switch(node.getType()) {
-            case ROOM:
-            case FOLDER:
-                permission.setUser(permission.getUser().or(Permission.Action.execute));
-        }
-        if(node.getPermissions().isChange() && node.getPermissions().isDelete()) {
-            permission.setUser(permission.getUser().or(Permission.Action.write));
-        }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Map node permissions %s to %s", node.getPermissions(), permission));
+            log.debug("Map node permissions {} to {}", node.getPermissions(), permission);
         }
         return permission;
     }
@@ -149,27 +181,36 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
     protected Acl toAcl(final Node node) {
         final Acl acl = new Acl();
         final Acl.User user = new Acl.CanonicalUser();
-        if(node.getPermissions().isManage()) {
-            acl.addAll(user, SDSPermissionsFeature.MANAGE_ROLE);
-        }
-        if(node.getPermissions().isRead()) {
-            acl.addAll(user, SDSPermissionsFeature.READ_ROLE);
-        }
-        if(node.getPermissions().isCreate()) {
-            acl.addAll(user, SDSPermissionsFeature.CREATE_ROLE);
-        }
-        if(node.getPermissions().isChange()) {
-            acl.addAll(user, SDSPermissionsFeature.CHANGE_ROLE);
-        }
-        if(node.getPermissions().isDelete()) {
-            acl.addAll(user, SDSPermissionsFeature.DELETE_ROLE);
-        }
-        if(node.getPermissions().isManageDownloadShare()) {
-            acl.addAll(user, SDSPermissionsFeature.DOWNLOAD_SHARE_ROLE);
-        }
-        if(node.getPermissions().isManageUploadShare()) {
-            acl.addAll(user, SDSPermissionsFeature.UPLOAD_SHARE_ROLE);
+        if(node.getPermissions() != null) {
+            if(node.getPermissions().isManage()) {
+                acl.addAll(user, SDSPermissionsFeature.MANAGE_ROLE);
+            }
+            if(node.getPermissions().isRead()) {
+                acl.addAll(user, SDSPermissionsFeature.READ_ROLE);
+            }
+            if(node.getPermissions().isCreate()) {
+                acl.addAll(user, SDSPermissionsFeature.CREATE_ROLE);
+            }
+            if(node.getPermissions().isChange()) {
+                acl.addAll(user, SDSPermissionsFeature.CHANGE_ROLE);
+            }
+            if(node.getPermissions().isDelete()) {
+                acl.addAll(user, SDSPermissionsFeature.DELETE_ROLE);
+            }
+            if(node.getPermissions().isManageDownloadShare()) {
+                acl.addAll(user, SDSPermissionsFeature.DOWNLOAD_SHARE_ROLE);
+            }
+            if(node.getPermissions().isManageUploadShare()) {
+                acl.addAll(user, SDSPermissionsFeature.UPLOAD_SHARE_ROLE);
+            }
         }
         return acl;
+    }
+
+    public static boolean isEncrypted(final PathAttributes attr) {
+        if(attr.getCustom().containsKey(KEY_ENCRYPTED)) {
+            return Boolean.parseBoolean(attr.getCustom().get(KEY_ENCRYPTED));
+        }
+        return false;
     }
 }

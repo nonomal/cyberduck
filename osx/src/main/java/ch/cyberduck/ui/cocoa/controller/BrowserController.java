@@ -45,6 +45,7 @@ import ch.cyberduck.core.editor.DefaultEditorListener;
 import ch.cyberduck.core.editor.Editor;
 import ch.cyberduck.core.editor.EditorFactory;
 import ch.cyberduck.core.exception.AccessDeniedException;
+import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.HostParserException;
 import ch.cyberduck.core.features.Location;
 import ch.cyberduck.core.features.Move;
@@ -55,8 +56,8 @@ import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.keychain.SFCertificatePanel;
 import ch.cyberduck.core.keychain.SecurityFunctions;
 import ch.cyberduck.core.local.Application;
+import ch.cyberduck.core.local.ApplicationQuitCallback;
 import ch.cyberduck.core.local.BrowserLauncherFactory;
-import ch.cyberduck.core.local.DisabledApplicationQuitCallback;
 import ch.cyberduck.core.local.TemporaryFileService;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
 import ch.cyberduck.core.logging.UnifiedSystemLogTranscriptListener;
@@ -94,11 +95,11 @@ import ch.cyberduck.core.worker.CreateDirectoryWorker;
 import ch.cyberduck.core.worker.CreateSymlinkWorker;
 import ch.cyberduck.core.worker.CreateVaultWorker;
 import ch.cyberduck.core.worker.DownloadShareWorker;
+import ch.cyberduck.core.worker.ListWorker;
 import ch.cyberduck.core.worker.LoadVaultWorker;
 import ch.cyberduck.core.worker.LockVaultWorker;
 import ch.cyberduck.core.worker.MountWorker;
 import ch.cyberduck.core.worker.SearchWorker;
-import ch.cyberduck.core.worker.SessionListWorker;
 import ch.cyberduck.core.worker.TouchWorker;
 import ch.cyberduck.core.worker.UploadShareWorker;
 import ch.cyberduck.ui.browser.BookmarkColumn;
@@ -111,6 +112,7 @@ import ch.cyberduck.ui.browser.UploadDirectoryFinder;
 import ch.cyberduck.ui.browser.UploadTargetFinder;
 import ch.cyberduck.ui.cocoa.callback.PromptAlertCallback;
 import ch.cyberduck.ui.cocoa.callback.PromptLimitedListProgressListener;
+import ch.cyberduck.ui.cocoa.callback.PromptShareeCallback;
 import ch.cyberduck.ui.cocoa.datasource.BookmarkTableDataSource;
 import ch.cyberduck.ui.cocoa.datasource.BrowserListViewDataSource;
 import ch.cyberduck.ui.cocoa.datasource.BrowserOutlineViewDataSource;
@@ -124,6 +126,8 @@ import ch.cyberduck.ui.cocoa.toolbar.BrowserToolbarFactory;
 import ch.cyberduck.ui.cocoa.toolbar.BrowserToolbarValidator;
 import ch.cyberduck.ui.cocoa.view.BookmarkCell;
 import ch.cyberduck.ui.cocoa.view.OutlineCell;
+import ch.cyberduck.ui.pasteboard.PasteboardService;
+import ch.cyberduck.ui.pasteboard.PasteboardServiceFactory;
 import ch.cyberduck.ui.quicklook.QuickLook;
 import ch.cyberduck.ui.quicklook.QuickLookFactory;
 
@@ -157,6 +161,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 public class BrowserController extends WindowController implements NSToolbar.Delegate, NSMenu.Validation, QLPreviewPanelController {
@@ -387,7 +392,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
         this.window.setToolbar(toolbar);
         this._configureBrowserColumns(browserListView, browserListViewDelegate);
         this._configureBrowserColumns(browserOutlineView, browserOutlineViewDelegate);
-        if(LicenseFactory.find().equals(LicenseFactory.EMPTY_LICENSE)) {
+        if(!LicenseFactory.find().verify()) {
             this.addDonateWindowTitle();
         }
         this.selectBookmarks(BookmarkSwitchSegement.bookmarks);
@@ -402,9 +407,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     }
 
     protected void setFilter(final Filter<Path> filter) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Set path filter to %s", filter));
-        }
+        log.debug("Set path filter to {}", filter);
         if(null == filter) {
             this.searchField.setStringValue(StringUtils.EMPTY);
             this.filenameFilter = SearchFilterFactory.create(showHiddenFiles);
@@ -491,9 +494,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
      * @param invalidate Invalidate the cache before rendering
      */
     public void reload(final Path workdir, final Set<Path> folders, final List<Path> selected, final boolean invalidate) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Reload data with selected files %s", selected));
-        }
+        log.debug("Reload data with selected files {}", selected);
         for(final Path folder : folders) {
             if(folder.getName().startsWith(".")) {
                 this.setShowHiddenFiles(true);
@@ -524,7 +525,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                 }
                 // Delay render until path is cached in the background
                 this.background(new WorkerBackgroundAction<>(this, pool,
-                                new SessionListWorker(cache, folder, listener) {
+                        new ListWorker(cache, folder, listener) {
                                     @Override
                                     public void cleanup(final AttributedList<Path> list) {
                                         // Put into cache
@@ -574,12 +575,10 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     private void select(final Path file) {
         final NSTableView browser = this.getSelectedBrowserView();
         final BrowserTableDataSource model = this.getSelectedBrowserModel();
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Select row for reference %s", file));
-        }
+        log.debug("Select row for reference {}", file);
         int row = model.indexOf(browser, file);
         if(-1 == row) {
-            log.warn(String.format("Failed to find row for %s", file));
+            log.warn("Failed to find row for {}", file);
             return;
         }
         final NSInteger index = new NSInteger(row);
@@ -593,7 +592,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             if(!file.isFile()) {
                 continue;
             }
-            downloads.add(new TransferItem(file, temporary.create(pool.getHost().getUuid(), file)));
+            downloads.add(new TransferItem(file, temporary.create(String.format("quicklook-%s", pool.getHost().getUuid()), file)));
         }
         if(downloads.size() > 0) {
             this.background(new QuicklookTransferBackgroundAction(this, quicklook, pool, downloads));
@@ -720,7 +719,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     @Action
     public boolean performDragOperation(final NSDraggingInfo sender) {
         for(Host bookmark : HostPasteboard.getPasteboard()) {
-            final Host duplicate = new HostDictionary().deserialize(bookmark.serialize(SerializerFactory.get()));
+            final Host duplicate = new HostDictionary<>().deserialize(bookmark.serialize(SerializerFactory.get()));
             // Make sure a new UUID is assigned for duplicate
             duplicate.setUuid(null);
             bookmarks.add(0, duplicate);
@@ -1139,7 +1138,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
              * @see NSOutlineView.Delegate
              */
             @Override
-            public void outlineView_willDisplayCell_forTableColumn_item(final NSOutlineView view, final NSTextFieldCell cell, final NSTableColumn tableColumn, final NSObject item) {
+            public void outlineView_willDisplayCell_forTableColumn_item(final NSOutlineView view, final NSCell cell, final NSTableColumn tableColumn, final NSObject item) {
                 if(null == item) {
                     return;
                 }
@@ -1151,10 +1150,10 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                     (Rococoa.cast(cell, OutlineCell.class)).setIcon(browserOutlineModel.iconForPath(file));
                 }
                 if(!BrowserController.this.isConnected() || !SearchFilterFactory.HIDDEN_FILTER.accept(file)) {
-                    cell.setTextColor(NSColor.disabledControlTextColor());
+                    Rococoa.cast(cell, NSTextFieldCell.class).setTextColor(NSColor.disabledControlTextColor());
                 }
                 else {
-                    cell.setTextColor(NSColor.controlTextColor());
+                    Rococoa.cast(cell, NSTextFieldCell.class).setTextColor(NSColor.controlTextColor());
                 }
             }
 
@@ -1167,17 +1166,13 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                 if(event != null) {
                     if(NSEvent.NSLeftMouseDragged == event.type()) {
                         if(!preferences.getBoolean("browser.view.autoexpand")) {
-                            if(log.isDebugEnabled()) {
-                                log.debug("Returning false to #outlineViewShouldExpandItem while dragging because browser.view.autoexpand == false");
-                            }
+                            log.debug("Returning false to #outlineViewShouldExpandItem while dragging because browser.view.autoexpand == false");
                             // See tickets #98 and #633
                             return false;
                         }
                         final NSInteger draggingColumn = view.columnAtPoint(view.convertPoint_fromView(event.locationInWindow(), null));
                         if(draggingColumn.intValue() != 0) {
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Returning false to #outlineViewShouldExpandItem for column %s", draggingColumn));
-                            }
+                            log.debug("Returning false to #outlineViewShouldExpandItem for column {}", draggingColumn);
                             // See ticket #60
                             return false;
                         }
@@ -1297,14 +1292,14 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             }
 
             @Override
-            public void tableView_willDisplayCell_forTableColumn_row(final NSTableView view, final NSTextFieldCell cell, final NSTableColumn tableColumn, final NSInteger row) {
+            public void tableView_willDisplayCell_forTableColumn_row(final NSTableView view, final NSCell cell, final NSTableColumn tableColumn, final NSInteger row) {
                 final Path file = browserListModel.get(workdir).get(row.intValue());
                 if(cell.isKindOfClass(Foundation.getClass(NSTextFieldCell.class.getSimpleName()))) {
                     if(!BrowserController.this.isConnected() || !SearchFilterFactory.HIDDEN_FILTER.accept(file)) {
-                        cell.setTextColor(NSColor.disabledControlTextColor());
+                        Rococoa.cast(cell, NSTextFieldCell.class).setTextColor(NSColor.disabledControlTextColor());
                     }
                     else {
-                        cell.setTextColor(NSColor.controlTextColor());
+                        Rococoa.cast(cell, NSTextFieldCell.class).setTextColor(NSColor.controlTextColor());
                     }
                 }
             }
@@ -1672,6 +1667,41 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                             NSIndexSet.indexSetWithIndex(next), false);
                 }
             }
+
+            @Override
+            public void tableView_willDisplayCell_forTableColumn_row(final NSTableView view, final NSCell cell, final NSTableColumn c, final NSInteger row) {
+                cell.setAccessibilityLabel(LocaleFactory.localizedString("Connect to server"));
+                if(c.identifier().equals(BookmarkColumn.icon.name())) {
+                    cell.setAccessibilityTitle(bookmarkModel.getSource().get(row.intValue()).getProtocol().getName());
+                }
+                if(c.identifier().equals(BookmarkColumn.bookmark.name())) {
+                    cell.setAccessibilityTitle(BookmarkNameProvider.toString(bookmarkModel.getSource().get(row.intValue())));
+                }
+                if(c.identifier().equals(BookmarkColumn.status.name())) {
+                    final Host host = bookmarkModel.getSource().get(row.intValue());
+                    if(host.equals(pool.getHost())) {
+                        switch(pool.getState()) {
+                            case open:
+                                cell.setAccessibilityTitle(LocaleFactory.localizedString("Idle", "Status"));
+                                break;
+                            case closed:
+                                cell.setAccessibilityTitle(LocaleFactory.localizedString("Disconnected", "Status"));
+                                break;
+                            case opening:
+                                cell.setAccessibilityTitle(MessageFormat.format(LocaleFactory.localizedString("Mounting {0}", "Status"),
+                                        BookmarkNameProvider.toString(host)));
+                                break;
+                            case closing:
+                                cell.setAccessibilityTitle(MessageFormat.format(LocaleFactory.localizedString("Disconnecting {0}", "Status"),
+                                        BookmarkNameProvider.toString(host)));
+                                break;
+                        }
+                    }
+                    else {
+                        cell.setAccessibilityTitle(LocaleFactory.localizedString("Disconnected", "Status"));
+                    }
+                }
+            }
         }).id());
         // receive drag events from types
         bookmarkTable.registerForDraggedTypes(NSArray.arrayWithObjects(
@@ -1878,7 +1908,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     public void duplicateBookmarkButtonClicked(final ID sender) {
         final Host selected = bookmarkModel.getSource().get(bookmarkTable.selectedRow().intValue());
         this.selectBookmarks(BookmarkSwitchSegement.bookmarks);
-        final Host duplicate = new HostDictionary().deserialize(selected.serialize(SerializerFactory.get()));
+        final Host duplicate = new HostDictionary<>().deserialize(selected.serialize(SerializerFactory.get()));
         // Make sure a new UUID is asssigned for duplicate
         duplicate.setUuid(null);
         this.addBookmark(duplicate);
@@ -1900,13 +1930,13 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             if(null == selected || !selected.isDirectory()) {
                 selected = workdir;
             }
-            bookmark = new HostDictionary().deserialize(pool.getHost().serialize(SerializerFactory.get()));
+            bookmark = new HostDictionary<>().deserialize(pool.getHost().serialize(SerializerFactory.get()));
             // Make sure a new UUID is asssigned for duplicate
             bookmark.setUuid(null);
             bookmark.setDefaultPath(selected.getAbsolute());
         }
         else {
-            bookmark = new Host(ProtocolFactory.get().forName(preferences.getProperty("connection.protocol.default")));
+            bookmark = new Host(ProtocolFactory.get().forNameOrDefault(preferences.getProperty("connection.protocol.default")));
         }
         this.selectBookmarks(BookmarkSwitchSegement.bookmarks);
         this.addBookmark(bookmark);
@@ -2215,7 +2245,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                     this.window, this.id(), Foundation.selector("certificateSheetDidEnd:returnCode:contextInfo:"), null, certs, true);
         }
         catch(CertificateException e) {
-            log.warn(String.format("Failure decoding certificate %s", e.getMessage()));
+            log.warn("Failure decoding certificate {}", e.getMessage());
         }
     }
 
@@ -2280,7 +2310,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             selected = workdir;
         }
         final BrowserController c = MainController.newDocument(true);
-        final Host duplicate = new HostDictionary().deserialize(pool.getHost().serialize(SerializerFactory.get()));
+        final Host duplicate = new HostDictionary<>().deserialize(pool.getHost().serialize(SerializerFactory.get()));
         // Make sure a new UUID is assigned for duplicate
         duplicate.setUuid(null);
         duplicate.setDefaultPath(selected.getAbsolute());
@@ -2400,7 +2430,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             @Override
             public void callback(final Path folder, final String region, final VaultCredentials passphrase) {
                 background(new WorkerBackgroundAction<>(BrowserController.this, pool,
-                        new CreateVaultWorker(region, passphrase, PasswordStoreFactory.get(), VaultFactory.get(folder,
+                        new CreateVaultWorker(region, passphrase, VaultFactory.get(folder,
                                 new HostPreferences(pool.getHost()).getProperty("cryptomator.vault.masterkey.filename"),
                                 new HostPreferences(pool.getHost()).getProperty("cryptomator.vault.config.filename"),
                                 new HostPreferences(pool.getHost()).getProperty("cryptomator.vault.pepper").getBytes(StandardCharsets.UTF_8))) {
@@ -2420,7 +2450,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
         final Path directory = new UploadTargetFinder(workdir).find(this.getSelectedPath());
         if(directory.attributes().getVault() != null) {
             // Lock and remove all open vaults
-            this.background(new WorkerBackgroundAction<>(this, pool, new LockVaultWorker(pool.getVault(), directory.attributes().getVault()) {
+            this.background(new WorkerBackgroundAction<>(this, pool, new LockVaultWorker(pool.getVaultRegistry(), directory.attributes().getVault()) {
                 @Override
                 public void cleanup(final Path vault) {
                     if(vault != null) {
@@ -2431,8 +2461,8 @@ public class BrowserController extends WindowController implements NSToolbar.Del
         }
         else {
             // Unlock vault
-            this.background(new WorkerBackgroundAction<>(this, pool, new LoadVaultWorker(new LoadingVaultLookupListener(pool.getVault(),
-                    PasswordStoreFactory.get(), PasswordCallbackFactory.get(this)), directory) {
+            this.background(new WorkerBackgroundAction<>(this, pool, new LoadVaultWorker(new LoadingVaultLookupListener(pool.getVaultRegistry(),
+                    PasswordCallbackFactory.get(this)), directory) {
                 @Override
                 public void cleanup(final Vault vault) {
                     if(vault != null) {
@@ -2487,9 +2517,20 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     }
 
     protected void edit(final Application application, final Path file) {
-        final Editor editor = editors.getOrDefault(file, EditorFactory.instance().create(pool.getHost(), file, this));
+        final Editor editor;
+        if(!editors.containsKey(file)) {
+            editors.put(file, editor = EditorFactory.instance().create(pool.getHost(), file, this));
+        }
+        else {
+            editor = editors.get(file);
+        }
         this.background(new WorkerBackgroundAction<>(this, pool, editor.open(
-                application, new DisabledApplicationQuitCallback(), new DefaultEditorListener(this, pool, editor, new DefaultEditorListener.Listener() {
+                application, new ApplicationQuitCallback() {
+                    @Override
+                    public void callback() {
+                        editors.remove(file);
+                    }
+                }, new DefaultEditorListener(this, pool, editor, new DefaultEditorListener.Listener() {
                     @Override
                     public void saved() {
                         reload(workdir, new PathReloadFinder().find(Collections.singletonList(file)), Collections.singletonList(file), true);
@@ -2501,10 +2542,10 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     public void openBrowserButtonClicked(final ID sender) {
         final DescriptiveUrlBag list;
         if(this.getSelectionCount() == 1) {
-            list = pool.getFeature(UrlProvider.class).toUrl(this.getSelectedPath());
+            list = pool.getFeature(UrlProvider.class).toUrl(this.getSelectedPath(), EnumSet.of(DescriptiveUrl.Type.http));
         }
         else {
-            list = pool.getFeature(UrlProvider.class).toUrl(workdir);
+            list = pool.getFeature(UrlProvider.class).toUrl(workdir, EnumSet.of(DescriptiveUrl.Type.http));
         }
         if(!list.isEmpty()) {
             BrowserLauncherFactory.get().open(list.find(DescriptiveUrl.Type.http).getUrl());
@@ -2556,30 +2597,29 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     public void shareFileButtonClicked(final ID sender) {
         final Path file = null != this.getSelectedPath() ? this.getSelectedPath() : this.workdir();
         this.background(new WorkerBackgroundAction<>(this, pool,
-                        new DownloadShareWorker<Void>(file, null, PasswordCallbackFactory.get(this)) {
+                        new DownloadShareWorker<Void>(file, null, PasswordCallbackFactory.get(this), new PromptShareeCallback(pool.getHost(), this)) {
                             @Override
                             public void cleanup(final DescriptiveUrl url) {
-                                // Display
-                                if(!DescriptiveUrl.EMPTY.equals(url)) {
+                                if(null != url) {
+                                    // Display
                                     final AlertController alert = new AlertController(NSAlert.alert(LocaleFactory.localizedString("Share…", "Main"),
                                             MessageFormat.format(LocaleFactory.localizedString("You have successfully created a share link for {0}.", "SDS"), file.getName()),
                                             LocaleFactory.localizedString("Continue", "Credentials"),
-                                            LocaleFactory.localizedString("Copy", "Main"),
+                                            DescriptiveUrl.EMPTY != url ? LocaleFactory.localizedString("Copy", "Main") : null,
                                             null)) {
                                         @Override
                                         public void callback(final int returncode) {
                                             switch(returncode) {
                                                 case SheetCallback.CANCEL_OPTION:
-                                                    final NSPasteboard pboard = NSPasteboard.generalPasteboard();
-                                                    pboard.declareTypes(NSArray.arrayWithObject(NSString.stringWithString(NSPasteboard.StringPboardType)), null);
-                                                    if(!pboard.setStringForType(url.getUrl(), NSPasteboard.StringPboardType)) {
-                                                        log.error(String.format("Error writing URL to %s", NSPasteboard.StringPboardType));
-                                                    }
+                                                    PasteboardServiceFactory.get().add(PasteboardService.Type.url, url.getUrl());
                                             }
                                         }
 
                                         @Override
                                         public NSView getAccessoryView(final NSAlert alert) {
+                                            if(null == url.getUrl()) {
+                                                return null;
+                                            }
                                             final NSTextField field = NSTextField.textfieldWithFrame(new NSRect(0, 22));
                                             field.setEditable(false);
                                             field.setSelectable(true);
@@ -2600,30 +2640,28 @@ public class BrowserController extends WindowController implements NSToolbar.Del
     public void requestFilesButtonClicked(final ID sender) {
         final Path file = null != this.getSelectedPath() ? this.getSelectedPath() : this.workdir();
         this.background(new WorkerBackgroundAction<>(this, pool,
-                        new UploadShareWorker<Void>(file, null, PasswordCallbackFactory.get(this)) {
+                        new UploadShareWorker<Void>(file, null, PasswordCallbackFactory.get(this), new PromptShareeCallback(pool.getHost(), this)) {
                             @Override
                             public void cleanup(final DescriptiveUrl url) {
-                                // Display
-                                if(!DescriptiveUrl.EMPTY.equals(url)) {
+                                if(null != url) {
                                     final AlertController alert = new AlertController(NSAlert.alert(LocaleFactory.localizedString("Share…", "Main"),
                                             MessageFormat.format(LocaleFactory.localizedString("You have successfully created a share link for {0}.", "SDS"), file.getName()),
                                             LocaleFactory.localizedString("Continue", "Credentials"),
-                                            LocaleFactory.localizedString("Copy", "Main"),
+                                            DescriptiveUrl.EMPTY != url ? LocaleFactory.localizedString("Copy", "Main") : null,
                                             null)) {
                                         @Override
                                         public void callback(final int returncode) {
                                             switch(returncode) {
                                                 case SheetCallback.CANCEL_OPTION:
-                                                    final NSPasteboard pboard = NSPasteboard.generalPasteboard();
-                                                    pboard.declareTypes(NSArray.arrayWithObject(NSString.stringWithString(NSPasteboard.StringPboardType)), null);
-                                                    if(!pboard.setStringForType(url.getUrl(), NSPasteboard.StringPboardType)) {
-                                                        log.error(String.format("Error writing URL to %s", NSPasteboard.StringPboardType));
-                                                    }
+                                                    PasteboardServiceFactory.get().add(PasteboardService.Type.url, url.getUrl());
                                             }
                                         }
 
                                         @Override
                                         public NSView getAccessoryView(final NSAlert alert) {
+                                            if(null == url.getUrl()) {
+                                                return null;
+                                            }
                                             final NSTextField field = NSTextField.textfieldWithFrame(new NSRect(0, 22));
                                             field.setEditable(false);
                                             field.setSelectable(true);
@@ -2980,7 +3018,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
      * can send and receive data of that type.
      */
     public ID validRequestorForSendType_returnType(String sendType, String returnType) {
-        log.debug("validRequestorForSendType_returnType:" + sendType + "," + returnType);
+        log.debug("validRequestorForSendType_returnType:{},{}", sendType, returnType);
         if(StringUtils.isNotEmpty(sendType)) {
             // Cannot send any data type
             return null;
@@ -3114,7 +3152,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             final Map<Path, Path> files = new HashMap<>();
             final Path parent = workdir;
             for(final Path next : pasteboard) {
-                Path renamed = new Path(parent, next.getName(), next.getType(), new PathAttributes(next.attributes()));
+                Path renamed = new Path(parent, next.getName(), EnumSet.of(next.isDirectory() ? Path.Type.directory : Path.Type.file));
                 files.put(next, renamed);
             }
             pasteboard.clear();
@@ -3227,9 +3265,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
      * @param selected  Selected files in browser
      */
     public void setWorkdir(final Path directory, final List<Path> selected) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Set working directory to %s", directory));
-        }
+        log.debug("Set working directory to {}", directory);
         // Remove any custom file filter
         this.setFilter(SearchFilterFactory.create(showHiddenFiles));
         final NSTableView browser = this.getSelectedBrowserView();
@@ -3259,9 +3295,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
      * @param bookmark Bookmark
      */
     public void mount(final Host bookmark) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Mount session for %s", bookmark));
-        }
+        log.debug("Mount session for {}", bookmark);
         this.unmount(new Runnable() {
             @Override
             public void run() {
@@ -3294,14 +3328,14 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                                     securityLabel.setEnabled(pool.getFeature(X509TrustManager.class) != null);
                                     scheduler = pool.getFeature(Scheduler.class);
                                     if(scheduler != null) {
-                                        scheduler.repeat(pool, PasswordCallbackFactory.get(BrowserController.this));
+                                        scheduler.repeat(PasswordCallbackFactory.get(BrowserController.this));
                                     }
                                 }
                             }
                         }
                 ) {
                     @Override
-                    public void init() {
+                    public void init() throws BackgroundException {
                         super.init();
                         if(window.respondsToSelector(Foundation.selector("setSubtitle:"))) {
                             window.setTitle(BookmarkNameProvider.toString(bookmark, false));
@@ -3340,9 +3374,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
      * @return True if succeeded
      */
     public boolean unmount(final SheetCallback callback, final Runnable disconnected) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Unmount session %s", pool));
-        }
+        log.debug("Unmount session {}", pool);
         if(this.isConnected()) {
             if(preferences.getBoolean("browser.disconnect.confirm")) {
                 // Defer the unmount to the callback function
@@ -3382,12 +3414,16 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             @Override
             public void run() {
                 if(scheduler != null) {
-                    scheduler.shutdown();
+                    scheduler.shutdown(false);
                 }
                 pool.shutdown();
                 pool = SessionPool.DISCONNECTED;
-                cache.clear();
                 setWorkdir(null);
+                cache.clear();
+                for(Editor editor : editors.values()) {
+                    editor.close();
+                }
+                editors.clear();
                 window.setTitle(StringUtils.EMPTY);
                 if(window.respondsToSelector(Foundation.selector("setSubtitle:"))) {
                     window.setSubtitle(StringUtils.EMPTY);
@@ -3529,7 +3565,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
         else if(action.equals(Foundation.selector("lockUnlockEncryptedVaultButtonClicked:"))) {
             if(this.isMounted()) {
                 final Path selected = new UploadTargetFinder(this.workdir()).find(this.getSelectedPath());
-                final VaultRegistry registry = pool.getVault();
+                final VaultRegistry registry = pool.getVaultRegistry();
                 if(registry.contains(selected)) {
                     item.setTitle(LocaleFactory.localizedString("Lock Vault", "Cryptomator"));
                     item.setImage(IconCacheFactory.<NSImage>get().iconNamed("NSLockUnlockedTemplate"));
@@ -3554,9 +3590,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
 
     @Override
     public NSToolbarItem toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar(final NSToolbar toolbar, final String itemIdentifier, boolean inserted) {
-        if(log.isDebugEnabled()) {
-            log.debug("toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar:" + itemIdentifier);
-        }
+        log.debug("toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar:{}", itemIdentifier);
         return browserToolbarFactory.create(itemIdentifier);
     }
 
@@ -3591,6 +3625,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
         for(Editor editor : editors.values()) {
             editor.close();
         }
+        editors.clear();
         temporary.shutdown();
         quicklook.close();
 
@@ -3614,6 +3649,9 @@ public class BrowserController extends WindowController implements NSToolbar.Del
 
         archiveMenu.setDelegate(null);
         editMenu.setDelegate(null);
+
+        InfoControllerFactory.remove(this);
+        ConnectionControllerFactory.remove(this);
 
         super.invalidate();
     }
@@ -3720,7 +3758,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             if(row < browserOutlineView.numberOfRows().intValue()) {
                 return cache.lookup(new NSObjectPathReference(browserOutlineView.itemAtRow(new NSInteger(row))));
             }
-            log.warn(String.format("No item at row %d", row));
+            log.warn("No item at row {}", row);
             return null;
         }
     }
@@ -3759,7 +3797,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             if(row < children.size()) {
                 return children.get(row);
             }
-            log.warn(String.format("No item at row %d", row));
+            log.warn("No item at row {}", row);
             return null;
         }
     }
@@ -3783,8 +3821,7 @@ public class BrowserController extends WindowController implements NSToolbar.Del
                     if(null == file) {
                         return false;
                     }
-                    return pool.getFeature(Move.class).isSupported(file, file);
-
+                    return pool.getFeature(Move.class).isSupported(file, Optional.empty());
                 }
             }
             return false;
@@ -3891,5 +3928,4 @@ public class BrowserController extends WindowController implements NSToolbar.Del
             }
         }
     }
-
 }

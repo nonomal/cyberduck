@@ -18,15 +18,18 @@ package ch.cyberduck.core.threading;
  * feedback@cyberduck.ch
  */
 
+import ch.cyberduck.core.exception.AntiVirusAccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.ConnectionRefusedException;
 import ch.cyberduck.core.exception.ConnectionTimeoutException;
+import ch.cyberduck.core.exception.LocalAccessDeniedException;
+import ch.cyberduck.core.exception.LocalNotfoundException;
 import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.exception.QuotaException;
 import ch.cyberduck.core.exception.ResolveFailedException;
 import ch.cyberduck.core.exception.SSLNegotiateException;
-import ch.cyberduck.core.exception.TransferStatusCanceledException;
+import ch.cyberduck.core.exception.TransferCanceledException;
 import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.io.IOResumeException;
 
@@ -48,9 +51,7 @@ public final class DefaultFailureDiagnostics implements FailureDiagnostics<Backg
 
     @Override
     public Type determine(final BackgroundException failure) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Determine cause for failure %s", failure));
-        }
+        log.debug("Determine cause for failure {}", failure.getMessage());
         for(Throwable cause : ExceptionUtils.getThrowableList(failure)) {
             if(failure instanceof UnsupportedException) {
                 return Type.unsupported;
@@ -61,7 +62,7 @@ public final class DefaultFailureDiagnostics implements FailureDiagnostics<Backg
             if(cause instanceof ResolveFailedException) {
                 return Type.network;
             }
-            if(failure instanceof TransferStatusCanceledException) {
+            if(failure instanceof TransferCanceledException) {
                 return Type.skip;
             }
             if(failure instanceof ConnectionCanceledException) {
@@ -89,14 +90,21 @@ public final class DefaultFailureDiagnostics implements FailureDiagnostics<Backg
                 return Type.network;
             }
             if(cause instanceof SocketException
-                || cause instanceof IOResumeException
-                || cause instanceof TimeoutException // Used in Promise#retrieve
-                || cause instanceof SocketTimeoutException
-                || cause instanceof UnknownHostException) {
+                    || cause instanceof IOResumeException
+                    || cause instanceof TimeoutException // Used in Promise#retrieve
+                    || cause instanceof SocketTimeoutException
+                    || cause instanceof UnknownHostException) {
                 return Type.network;
             }
             if(cause instanceof QuotaException) {
                 return Type.quota;
+            }
+            if(cause instanceof AntiVirusAccessDeniedException) {
+                return Type.antivirus;
+            }
+            if(cause instanceof LocalAccessDeniedException
+                    || cause instanceof LocalNotfoundException) {
+                return Type.filesystem;
             }
         }
         return Type.application;

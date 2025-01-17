@@ -29,12 +29,17 @@
     <property name="spotlight" value="${module}/spotlight"/>
 
     <property name="app.runtime.archs" value="'x86_64 arm64'"/>
-    <property name="app.runtime.system.min" value="10.12"/>
-    <property name="app.runtime.args"
-              value="-client --add-opens=java.base/sun.security.ssl=ALL-UNNAMED --add-opens=java.base/sun.security.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED -Djava.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.boot.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.nounpack=true -Djava.awt.headless=true -Dsun.jnu.encoding=utf-8 -Dfile.encoding=utf-8 -Dsun.io.useCanonCaches=false -DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector -XX:+UseG1GC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=20 -XX:+UseStringDeduplication"/>
+    <property name="app.runtime.system.min" value="10.13"/>
+    <property name="jvm.runtime.args"
+              value="-client --add-opens=java.base/sun.security.ssl=ALL-UNNAMED --add-opens=java.base/sun.security.util=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED -Djava.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.boot.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.library.path=$APP_PACKAGE/Contents/Frameworks -Djna.nounpack=true -Djava.awt.headless=true -Dsun.jnu.encoding=utf-8 -Dfile.encoding=utf-8 -Dsun.io.useCanonCaches=false -DLog4jContextSelector=org.apache.logging.log4j.core.selector.BasicContextSelector -XX:+UseShenandoahGC -XX:ShenandoahGCHeuristics=compact -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=20 -XX:+UseStringDeduplication"/>
+
+    <condition property="jvm.runtime.debug"
+               value="-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 ">
+        <equals arg1="${configuration}" arg2="debug"/>
+    </condition>
 
     <property name="build.xcodeoptions.default"
-              value="JVM_RUNTIME_ARGS='${app.runtime.args}' JAVA_HOME=${java.home} SYMROOT=${build} SDKROOT=macosx ARCHS=${app.runtime.archs} MACOSX_DEPLOYMENT_TARGET=${app.runtime.system.min}"/>
+              value="CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO JVM_RUNTIME_ARGS='${jvm.runtime.debug}${jvm.runtime.args}' JAVA_HOME=${java.home} SYMROOT=${build} SDKROOT=macosx ARCHS=${app.runtime.archs} MACOSX_DEPLOYMENT_TARGET=${app.runtime.system.min}"/>
 
     <condition property="build.xcodeoptions"
                value="${build.xcodeoptions.default} SPARKLEFEED='https://version.cyberduck.io/${sparkle.feed}/changelog.rss' INFOPLIST_PREPROCESSOR_DEFINITIONS=SPARKLE_BUILD"
@@ -99,19 +104,6 @@
         </antcall>
     </target>
 
-    <target name="notarize">
-        <echo message="Start notarizing '${notarize.archive.upload}'"/>
-        <exec dir="${home}" executable="/usr/bin/xcrun" spawn="false" failonerror="true"
-              resultproperty="exitcode_notarytool" output="result.plist" error="error.log">
-            <arg line="notarytool submit --apple-id '${env.NOTARIZATION_USER}' --password '${env.NOTARIZATION_PW}' --team-id G69SCX94XU --verbose '${notarize.archive.upload}' --wait --timeout 2h --output-format plist"/>
-        </exec>
-        <echo message="Start stapling '${notarize.archive.staple}'"/>
-        <exec dir="${home}" executable="/usr/bin/xcrun" spawn="false" failonerror="true">
-            <arg line="stapler staple -v '${notarize.archive.staple}'"/>
-        </exec>
-        <echo message="Stapling was successful"/>
-    </target>
-
     <target name="package" depends="version">
         <property name="bundle.archive.basename" value="${app.name}-${version}.${revision}"/>
         <property name="bundle.archive.zip" value="${bundle.archive.basename}.zip"/>
@@ -172,11 +164,9 @@
             <replacefilter token="${MACOSX_DEPLOYMENT_TARGET}" value="${app.runtime.system.min}"/>
         </replace>
         <echo message="Building ${build.deploy}/${bundle.archive.pkg}"/>
-        <echo
-                message="Code signing ${app.bundle} with certificate ${installer.certificate} from ${installer.keychain}"/>
-        <exec dir="${build.deploy}" executable="/usr/bin/productbuild" spawn="false" failonerror="true">
-            <arg
-                    line="--component ${app.bundle} /Applications --version ${version} --sign '${installer.certificate}' --keychain ${installer.keychain} ${build.deploy}/${bundle.archive.pkg}"/>
+        <echo message="Code signing ${app.bundle} with certificate ${installer.certificate} from ${installer.keychain}"/>
+        <exec dir="${build.deploy}" executable="/usr/bin/xcrun" spawn="false" failonerror="true">
+            <arg line="productbuild --component ${app.bundle} /Applications --version ${version} --sign '${installer.certificate}' --keychain ${installer.keychain} ${build.deploy}/${bundle.archive.pkg}"/>
         </exec>
         <antcall target="notarize" unless:true="${skipNotarize}">
             <param name="notarize.archive.upload" value="${build.deploy}/${bundle.archive.pkg}"/>

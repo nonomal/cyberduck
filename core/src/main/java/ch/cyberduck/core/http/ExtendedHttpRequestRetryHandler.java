@@ -29,6 +29,7 @@ import javax.net.ssl.SSLHandshakeException;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.net.ConnectException;
+import java.net.NoRouteToHostException;
 import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.List;
@@ -36,32 +37,33 @@ import java.util.List;
 public class ExtendedHttpRequestRetryHandler extends DefaultHttpRequestRetryHandler {
     private static final Logger log = LogManager.getLogger(ExtendedHttpRequestRetryHandler.class);
 
-    private static final List<Class<? extends IOException>> exceptions = Arrays.asList(
-        UnrecoverableIOException.class,
-        InterruptedIOException.class,
-        UnknownHostException.class,
-        ConnectException.class,
-        // Not providing SSLException.class, because broken pipe failures are wrapped in SSL Exceptions.
-        // "Broken pipe".equals(ExceptionUtils.getRootCause(failure).getMessage())
-        SSLHandshakeException.class);
+    private static final List<Class<? extends IOException>> excludes = Arrays.asList(
+            UnrecoverableIOException.class,
+            InterruptedIOException.class,
+            UnknownHostException.class,
+            ConnectException.class,
+            NoRouteToHostException.class,
+            // Not providing SSLException.class, because broken pipe failures are wrapped in SSL Exceptions.
+            // "Broken pipe".equals(ExceptionUtils.getRootCause(failure).getMessage())
+            SSLHandshakeException.class);
 
     public ExtendedHttpRequestRetryHandler(final int retryCount) {
-        super(retryCount, true, exceptions);
+        super(retryCount, true, excludes);
     }
 
     @Override
     public boolean retryRequest(final IOException exception, final int executionCount, final HttpContext context) {
         final Throwable cause = ExceptionUtils.getRootCause(exception);
         if(cause instanceof RuntimeException) {
-            log.error(String.format("Cancel retry request with execution count %d for failure %s", executionCount, cause));
+            log.error("Cancel retry request with execution count {} for failure {}", executionCount, cause.toString());
             return false;
         }
         final boolean retry = super.retryRequest(exception, executionCount, context);
         if(retry) {
-            log.info(String.format("Retry request with failure %s", exception));
+            log.info("Retry request with failure {}", exception.toString());
         }
         else {
-            log.warn(String.format("Cancel retry request with execution count %d for failure %s", executionCount, exception));
+            log.warn("Cancel retry request with execution count {} for failure {}", executionCount, exception.toString());
         }
         return retry;
     }

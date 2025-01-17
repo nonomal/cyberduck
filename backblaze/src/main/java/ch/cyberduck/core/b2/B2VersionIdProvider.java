@@ -17,7 +17,7 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.CachingVersionIdProvider;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.ListProgressListener;
+import ch.cyberduck.core.DirectoryDelimiterPathContainerService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -29,6 +29,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.Optional;
 
 import synapticloop.b2.exception.B2ApiException;
 import synapticloop.b2.response.B2BucketResponse;
@@ -47,18 +48,14 @@ public class B2VersionIdProvider extends CachingVersionIdProvider implements Ver
     }
 
     @Override
-    public String getVersionId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getVersionId(final Path file) throws BackgroundException {
         if(StringUtils.isNotBlank(file.attributes().getVersionId())) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return version %s from attributes for file %s", file.attributes().getVersionId(), file));
-            }
+            log.debug("Return version {} from attributes for file {}", file.attributes().getVersionId(), file);
             return file.attributes().getVersionId();
         }
-        final String cached = super.getVersionId(file, listener);
+        final String cached = super.getVersionId(file);
         if(cached != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return cached versionid %s for file %s", cached, file));
-            }
+            log.debug("Return cached versionid {} for file {}", cached, file);
             return cached;
         }
         try {
@@ -71,12 +68,25 @@ public class B2VersionIdProvider extends CachingVersionIdProvider implements Ver
                 return this.cache(file, info.getBucketId());
             }
             // Files that have been hidden will not be returned
-            final B2ListFilesResponse response = session.getClient().listFileNames(this.getVersionId(containerService.getContainer(file), listener), containerService.getKey(file), 1);
-            for(B2FileInfoResponse info : response.getFiles()) {
-                if(StringUtils.equals(containerService.getKey(file), info.getFileName())) {
-                    // Cache in file attributes
-                    return this.cache(file, info.getFileId());
+            final B2ListFilesResponse response = session.getClient().listFileNames(
+                    this.getVersionId(containerService.getContainer(file)), containerService.getKey(file), 1,
+                    new DirectoryDelimiterPathContainerService().getKey(file.getParent()),
+                    null);
+            // Find for exact filename match (.bzEmpty file for directories)
+            final Optional<B2FileInfoResponse> optional = response.getFiles().stream().filter(
+                    info -> StringUtils.equals(containerService.getKey(file), info.getFileName())).findFirst();
+            if(optional.isPresent()) {
+                // Cache in file attributes
+                return this.cache(file, optional.get().getFileId());
+            }
+            if(file.isDirectory()) {
+                // Search for common prefix returned when no placeholder file was found
+                if(response.getFiles().stream().anyMatch(
+                        info -> StringUtils.startsWith(info.getFileName(), new DirectoryDelimiterPathContainerService().getKey(file)))) {
+                    log.debug("Common prefix found for {} but no placeholder file", file);
+                    return null;
                 }
+                throw new NotfoundException(file.getAbsolute());
             }
             throw new NotfoundException(file.getAbsolute());
         }

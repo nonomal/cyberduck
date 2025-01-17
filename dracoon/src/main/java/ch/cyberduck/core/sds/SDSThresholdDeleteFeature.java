@@ -15,36 +15,63 @@ package ch.cyberduck.core.sds;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PasswordCallback;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
+import java.text.MessageFormat;
+import java.util.EnumSet;
 import java.util.Map;
 
 public class SDSThresholdDeleteFeature implements Delete {
 
     private final SDSSession session;
-    private final SDSNodeIdProvider fileid;
+    private final SDSNodeIdProvider nodeid;
+    private final PathContainerService containerService
+            = new SDSPathContainerService();
 
-    public SDSThresholdDeleteFeature(final SDSSession session, final SDSNodeIdProvider fileid) {
+    public SDSThresholdDeleteFeature(final SDSSession session, final SDSNodeIdProvider nodeid) {
         this.session = session;
-        this.fileid = fileid;
+        this.nodeid = nodeid;
     }
 
     @Override
     public void delete(final Map<Path, TransferStatus> files, final PasswordCallback prompt, final Callback callback) throws BackgroundException {
         if(files.size() == 1) {
-            new SDSDeleteFeature(session, fileid).delete(files, prompt, callback);
+            new SDSDeleteFeature(session, nodeid).delete(files, prompt, callback);
         }
         else {
-            new SDSBatchDeleteFeature(session, fileid).delete(files, prompt, callback);
+            new SDSBatchDeleteFeature(session, nodeid).delete(files, prompt, callback);
         }
     }
 
     @Override
-    public boolean isRecursive() {
-        return true;
+    public EnumSet<Flags> features() {
+        return EnumSet.of(Flags.recursive);
+    }
+
+    @Override
+    public void preflight(final Path file) throws BackgroundException {
+        final SDSPermissionsFeature permissions = new SDSPermissionsFeature(session, nodeid);
+        if(containerService.isContainer(file)) {
+            if(new HostPreferences(session.getHost()).getBoolean("sds.delete.dataroom.enable")) {
+                // Need the query permission on the parent data room if file itself is subroom
+                if(!new SDSPermissionsFeature(session, nodeid).containsRole(containerService.getContainer(file.getParent()), SDSPermissionsFeature.MANAGE_ROLE)) {
+                    throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+                }
+            }
+            else {
+                throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+            }
+        }
+        if(!permissions.containsRole(file, SDSPermissionsFeature.DELETE_ROLE)) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot delete {0}", "Error"), file.getName())).withFile(file);
+        }
     }
 }

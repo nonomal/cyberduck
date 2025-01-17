@@ -44,14 +44,16 @@ public class VersionsWorker extends Worker<AttributedList<Path>> {
 
     @Override
     public AttributedList<Path> run(final Session<?> session) throws BackgroundException {
-        if(file.isDirectory()) {
-            return AttributedList.emptyList();
-        }
         final Versioning feature = session.getFeature(Versioning.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
+        log.debug("Run with feature {}", feature);
+        if(feature.getConfiguration(file).isEnabled()) {
+            final AttributedList<Path> list = feature.list(file, listener);
+            if(list.isEmpty()) {
+                listener.chunk(file.getParent(), list);
+            }
+            return list;
         }
-        return feature.list(file, listener);
+        return AttributedList.emptyList();
     }
 
     @Override

@@ -31,6 +31,7 @@ import ch.cyberduck.core.PathNormalizer;
 import ch.cyberduck.core.cdn.Distribution;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Location;
+import ch.cyberduck.core.s3.S3LocationFeature;
 import ch.cyberduck.core.s3.S3Protocol;
 import ch.cyberduck.core.s3.S3Session;
 import ch.cyberduck.core.ssl.X509KeyManager;
@@ -54,7 +55,7 @@ public class CustomOriginCloudFrontDistributionConfiguration extends CloudFrontD
                                                            final X509KeyManager key) {
         // Configure with the same host as S3 to get the same credentials from the keychain.
         super(new S3Session(new Host(new S3Protocol(),
-            new S3Protocol().getDefaultHostname(), origin.getCdnCredentials()), trust, key), trust, key);
+            new S3Protocol().getDefaultHostname(), origin.getCdnCredentials()), trust, key), Location.disabled, trust, key);
         this.origin = origin;
     }
 
@@ -97,9 +98,7 @@ public class CustomOriginCloudFrontDistributionConfiguration extends CloudFrontD
     @Override
     protected URI getOrigin(final Path container, final Distribution.Method method) {
         final URI url = URI.create(String.format("%s%s", new DefaultWebUrlProvider().toUrl(origin).getUrl(), PathNormalizer.normalize(origin.getDefaultPath(), true)));
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Use origin %s for distribution %s", url, method));
-        }
+        log.debug("Use origin {} for distribution {}", url, method);
         return url;
     }
 

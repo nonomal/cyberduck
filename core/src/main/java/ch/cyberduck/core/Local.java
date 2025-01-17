@@ -43,6 +43,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.Channels;
 import java.nio.channels.FileChannel;
 import java.nio.channels.SeekableByteChannel;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.FileSystemException;
 import java.nio.file.Files;
@@ -67,6 +68,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
      * Absolute path in local file system
      */
     private String path;
+    private String bookmark;
 
     public Local(final String parent, final String name) {
         this(parent, name, PreferencesFactory.get().getProperty("local.delimiter"));
@@ -74,8 +76,8 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
 
     public Local(final String parent, final String name, final String delimiter) {
         this(parent.endsWith(delimiter) ?
-            String.format("%s%s", parent, name) :
-            String.format("%s%c%s", parent, CharUtils.toChar(delimiter), name));
+                String.format("%s%s", parent, name) :
+                String.format("%s%c%s", parent, CharUtils.toChar(delimiter), name));
     }
 
     public Local(final Local parent, final String name) {
@@ -84,8 +86,8 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
 
     public Local(final Local parent, final String name, final String delimiter) {
         this(parent.isRoot() ?
-            String.format("%s%s", parent.getAbsolute(), name) :
-            String.format("%s%c%s", parent.getAbsolute(), CharUtils.toChar(delimiter), name));
+                String.format("%s%s", parent.getAbsolute(), name) :
+                String.format("%s%c%s", parent.getAbsolute(), CharUtils.toChar(delimiter), name));
     }
 
     /**
@@ -112,8 +114,12 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
     }
 
     @Override
-    public <T> T serialize(final Serializer dict) {
-        dict.setStringForKey(path, "Path");
+    public <T> T serialize(final Serializer<T> dict) {
+        dict.setStringForKey(this.getAbbreviatedPath(), "Path");
+        final String bookmark = this.getBookmark();
+        if(bookmark != null) {
+            dict.setStringForKey(bookmark, "Bookmark");
+        }
         return dict.getSerialized();
     }
 
@@ -176,7 +182,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
             }
             catch(FileSystemException e) {
                 // Too many levels of symbolic links
-                log.warn(String.format("Failure resolving symlink target for %s. %s", path, e.getMessage()));
+                log.warn("Failure resolving symlink target for {}. {}", path, e.getMessage());
                 throw new LocalNotfoundException(MessageFormat.format("Failure to read attributes of {0}", this.getName()), e);
             }
             // For a link that actually points to something (either a file or a directory),
@@ -220,7 +226,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
         }
         catch(IOException e) {
             throw new LocalAccessDeniedException(MessageFormat.format(
-                LocaleFactory.localizedString("Cannot delete {0}", "Error"), this.getName()), e);
+                    LocaleFactory.localizedString("Cannot delete {0}", "Error"), this.getName()), e);
         }
     }
 
@@ -239,13 +245,18 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
                 return filter.accept(entry.getFileName().toString());
             }
         })) {
-            for(Path entry : stream) {
-                children.add(LocalFactory.get(entry.toString()));
+            try {
+                for(Path entry : stream) {
+                    children.add(LocalFactory.get(entry.toString()));
+                }
+            }
+            catch(DirectoryIteratorException e) {
+                throw e.getCause();
             }
         }
         catch(IOException e) {
             throw new LocalAccessDeniedException(MessageFormat.format(
-                LocaleFactory.localizedString("Listing directory {0} failed", "Error"), this.getName()), e);
+                    LocaleFactory.localizedString("Listing directory {0} failed", "Error"), this.getName()), e);
         }
         return children;
     }
@@ -260,14 +271,17 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
     }
 
     /**
-     * @return Security scoped bookmark outside of sandbox to store in preferences
+     * @return Application scoped bookmark to access outside of sandbox
      */
     public String getBookmark() {
-        return path;
+        return bookmark;
     }
 
+    /**
+     * @param data Security scoped bookmark to save for later retrieval of file reference or null to remove
+     */
     public void setBookmark(final String data) {
-        //
+        this.bookmark = data;
     }
 
     public Local withBookmark(final String data) {
@@ -353,7 +367,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
         }
         catch(IOException e) {
             throw new LocalAccessDeniedException(MessageFormat.format(
-                LocaleFactory.localizedString("Cannot rename {0}", "Error"), this.getName()), e);
+                    LocaleFactory.localizedString("Cannot rename {0}", "Error"), this.getName()), e);
         }
         path = renamed.getAbsolute();
     }
@@ -364,22 +378,20 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
 
     public void copy(final Local copy, final CopyOptions options) throws AccessDeniedException {
         if(copy.equals(this)) {
-            log.warn(String.format("%s and %s are identical. Not copied.", this.getName(), copy.getName()));
+            log.warn("{} and {} are identical. Not copied.", this.getName(), copy.getName());
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Copy to %s with options %s", copy, options));
-            }
+            log.debug("Copy to {} with options {}", copy, options);
             FileChannel in = null;
             FileChannel out = null;
             try {
-                in = this.getReadChannel(this.path);
-                out = copy.getWriteChannel(copy.path, options.append);
+                in = getReadChannel(this.path);
+                out = getWriteChannel(copy.path, options.append, !copy.exists());
                 out.transferFrom(in, out.size(), in.size());
             }
             catch(IOException e) {
                 throw new LocalAccessDeniedException(MessageFormat.format(
-                    LocaleFactory.localizedString("Cannot copy {0}", "Error"), this.getName()), e);
+                        LocaleFactory.localizedString("Cannot copy {0}", "Error"), this.getName()), e);
             }
             finally {
                 IOUtils.closeQuietly(in);
@@ -428,7 +440,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
 
 
     public InputStream getInputStream() throws AccessDeniedException {
-        return getInputStream(path);
+        return this.getInputStream(path);
     }
 
     protected InputStream getInputStream(final String path) throws AccessDeniedException {
@@ -440,7 +452,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
         }
     }
 
-    private FileChannel getReadChannel(final String path) throws LocalAccessDeniedException {
+    private static FileChannel getReadChannel(final String path) throws LocalAccessDeniedException {
         try {
             return FileChannel.open(Paths.get(path), StandardOpenOption.READ);
         }
@@ -450,18 +462,18 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
     }
 
     protected OutputStream getOutputStream(final String path, final boolean append) throws AccessDeniedException {
-        return Channels.newOutputStream(getWriteChannel(path, append));
+        return Channels.newOutputStream(getWriteChannel(path, append, !this.exists()));
     }
 
     public OutputStream getOutputStream(final boolean append) throws AccessDeniedException {
-        return Channels.newOutputStream(getWriteChannel(path, append));
+        return Channels.newOutputStream(getWriteChannel(path, append, !this.exists()));
     }
 
-    private FileChannel getWriteChannel(final String path, final boolean append) throws LocalAccessDeniedException {
+    private static FileChannel getWriteChannel(final String path, final boolean append, final boolean create) throws LocalAccessDeniedException {
         try {
             final Set<OpenOption> options = new HashSet<>();
             options.add(StandardOpenOption.WRITE);
-            if(!this.exists()) {
+            if(create) {
                 options.add(StandardOpenOption.CREATE);
             }
             if(append) {
@@ -478,6 +490,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
     }
 
     public Object lock(final boolean interactive) throws AccessDeniedException {
+        log.warn("No lock support in {}", this);
         return null;
     }
 
@@ -550,7 +563,7 @@ public class Local extends AbstractPath implements Referenceable, Serializable {
             final int bytesRead = channel.read(buffer);
             if(bytesRead > 0) {
                 buffer.position(0);
-                return buffer.get();
+                return Byte.toUnsignedInt(buffer.get());
             }
             else {
                 return -1;

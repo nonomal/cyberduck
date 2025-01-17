@@ -21,15 +21,14 @@ package ch.cyberduck.core.threading;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
 public class ScheduledThreadPool {
     private static final Logger log = LogManager.getLogger(ScheduledThreadPool.class);
 
-    private final ScheduledExecutorService pool;
+    private final ScheduledThreadPoolExecutor pool;
 
     /**
      * With FIFO (first-in-first-out) ordered wait queue.
@@ -44,7 +43,20 @@ public class ScheduledThreadPool {
      * @param handler Uncaught exception handler
      */
     public ScheduledThreadPool(final Thread.UncaughtExceptionHandler handler) {
-        pool = Executors.newScheduledThreadPool(1, new NamedThreadFactory("timer", handler));
+        this(handler, "timer");
+    }
+
+    public ScheduledThreadPool(final String threadNamePrefix) {
+        this(new LoggingUncaughtExceptionHandler(), threadNamePrefix);
+    }
+
+    public ScheduledThreadPool(final Thread.UncaughtExceptionHandler handler, final String threadNamePrefix) {
+        this.pool = new ScheduledThreadPoolExecutor(1, new NamedThreadFactory(threadNamePrefix, handler),
+                new DefaultThreadPool.CustomCallerPolicy());
+        // no execute after shutdown
+        this.pool.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        // cancel periodic tasks on shutdown
+        this.pool.setContinueExistingPeriodicTasksAfterShutdownPolicy(false);
     }
 
     /**
@@ -84,10 +96,22 @@ public class ScheduledThreadPool {
         return pool.schedule(runnable, delay, unit);
     }
 
-    public void shutdown() {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Shutdown pool %s", pool));
+    public void shutdown(final boolean gracefully) {
+        if(gracefully) {
+            log.info("Shutdown pool {} gracefully", pool);
+            pool.shutdown();
         }
-        pool.shutdown();
+        else {
+            log.info("Shutdown pool {} now", pool);
+            pool.shutdownNow();
+        }
+        try {
+            while(!pool.awaitTermination(1L, TimeUnit.SECONDS)) {
+                log.warn("Await termination for pool {}", pool);
+            }
+        }
+        catch(InterruptedException e) {
+            log.error("Failure awaiting pool termination. {}", e.getMessage());
+        }
     }
 }

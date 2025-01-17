@@ -4,19 +4,20 @@ import ch.cyberduck.core.*;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.ConnectionRefusedException;
-import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.features.UnixPermission;
+import ch.cyberduck.core.features.Versioning;
 import ch.cyberduck.core.ftp.list.FTPListService;
 import ch.cyberduck.core.preferences.PreferencesFactory;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.proxy.Proxy;
 import ch.cyberduck.core.proxy.ProxyFinder;
+import ch.cyberduck.core.shared.DefaultVersioningFeature;
 import ch.cyberduck.core.ssl.DefaultX509TrustManager;
 import ch.cyberduck.core.ssl.KeychainX509KeyManager;
-import ch.cyberduck.core.threading.CancelCallback;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.test.IntegrationTest;
 
@@ -29,7 +30,6 @@ import java.security.Principal;
 import java.security.cert.X509Certificate;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.TimeZone;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -52,20 +52,20 @@ public class FTPSessionTest extends AbstractFTPTest {
     @Test(expected = ConnectionRefusedException.class)
     public void testConnectHttpProxyForbiddenHttpResponse() throws Exception {
         final Host host = new Host(new FTPProtocol(), "mirror.switch.ch", new Credentials(
-            PreferencesFactory.get().getProperty("connection.login.anon.name"), null
+                PreferencesFactory.get().getProperty("connection.login.anon.name"), null
         ));
         final FTPSession session = new FTPSession(host);
         final LoginConnectionService c = new LoginConnectionService(
-            new DisabledLoginCallback(),
-            new DisabledHostKeyCallback(),
-            new DisabledPasswordStore(),
-            new DisabledProgressListener(),
-            new ProxyFinder() {
-                @Override
-                public Proxy find(final String target) {
-                    return new Proxy(Proxy.Type.HTTP, "localhost", 3128);
-                }
-            });
+                new DisabledLoginCallback(),
+                new DisabledHostKeyCallback(),
+                new DisabledPasswordStore(),
+                new DisabledProgressListener(),
+                new ProxyFinder() {
+                    @Override
+                    public Proxy find(final String target) {
+                        return new Proxy(Proxy.Type.HTTP, "localhost", 3128);
+                    }
+                });
         try {
             c.connect(session, new DisabledCancelCallback());
         }
@@ -95,52 +95,20 @@ public class FTPSessionTest extends AbstractFTPTest {
 
     @Test(expected = NotfoundException.class)
     public void testNotfound() throws Exception {
-        new FTPListService(session, null, TimeZone.getDefault()).list(new Path(UUID.randomUUID().toString(), EnumSet.of(Path.Type.directory)), new DisabledListProgressListener());
-    }
-
-    @Test
-    @Category(IntegrationTest.class)
-    public void testConnectionTlsUpgrade() throws Exception {
-        final Host host = new Host(new FTPProtocol(), "test.cyberduck.ch", new Credentials(
-            System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
-        ));
-        final FTPSession session = new FTPSession(host) {
-            @Override
-            public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
-                assertEquals(Session.State.open, this.getState());
-                super.login(proxy, prompt, cancel);
-                assertEquals(new FTPTLSProtocol(), host.getProtocol());
-            }
-        };
-        assertNotNull(session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback()));
-        assertTrue(session.isConnected());
-        assertNotNull(session.getClient());
-        assertEquals(new FTPProtocol(), host.getProtocol());
-        final AtomicBoolean warned = new AtomicBoolean();
-        ConnectionService l = new LoginConnectionService(new DisabledLoginCallback() {
-            @Override
-            public void warn(final Host bookmark, final String title, final String message, final String continueButton,
-                             final String disconnectButton, final String preference) throws LoginCanceledException {
-                warned.set(true);
-                // Cancel to switch
-                throw new LoginCanceledException();
-            }
-        }, new DisabledHostKeyCallback(), new DisabledPasswordStore(), new DisabledProgressListener());
-        l.connect(session, new DisabledCancelCallback());
-        assertEquals(new FTPTLSProtocol(), host.getProtocol());
-        assertTrue(warned.get());
+        new FTPListService(session).list(new Path(UUID.randomUUID().toString(), EnumSet.of(Path.Type.directory)), new DisabledListProgressListener());
     }
 
     @Test
     public void testFeatures() {
         assertNotNull(session.getFeature(UnixPermission.class));
         assertNotNull(session.getFeature(Timestamp.class));
+        assertEquals(DefaultVersioningFeature.class, session.getFeature(Versioning.class).getClass());
     }
 
     @Test
     public void testCloseFailure() throws Exception {
         final Host host = new Host(new FTPProtocol(), "test.cyberduck.ch", new Credentials(
-            System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
+                System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
         ));
         final BackgroundException failure = new BackgroundException(new FTPException(500, "f"));
         final FTPSession session = new FTPSession(host) {
@@ -149,7 +117,7 @@ public class FTPSessionTest extends AbstractFTPTest {
                 throw failure;
             }
         };
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
         assertEquals(Session.State.open, session.getState());
         try {
             session.close();
@@ -165,23 +133,23 @@ public class FTPSessionTest extends AbstractFTPTest {
     @Ignore
     public void testConnectMutualTls() throws Exception {
         final Host host = new Host(new FTPTLSProtocol(), "test.cyberduck.ch", new Credentials(
-            System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
+                System.getProperties().getProperty("ftp.user"), System.getProperties().getProperty("ftp.password")
         ));
         final AtomicBoolean callback = new AtomicBoolean();
         final FTPSession session = new FTPSession(host, new DefaultX509TrustManager(),
-            new KeychainX509KeyManager(new DisabledCertificateIdentityCallback(), host, new DisabledCertificateStore() {
-                @Override
-                public X509Certificate choose(final CertificateIdentityCallback prompt, final String[] keyTypes, final Principal[] issuers, final Host bookmark) throws ConnectionCanceledException {
-                    assertEquals("test.cyberduck.ch", bookmark.getHostname());
-                    callback.set(true);
-                    throw new ConnectionCanceledException();
-                }
-            }));
+                new KeychainX509KeyManager(new DisabledCertificateIdentityCallback(), host, new DisabledCertificateStore() {
+                    @Override
+                    public X509Certificate choose(final CertificateIdentityCallback prompt, final String[] keyTypes, final Principal[] issuers, final Host bookmark) throws ConnectionCanceledException {
+                        assertEquals("test.cyberduck.ch", bookmark.getHostname());
+                        callback.set(true);
+                        throw new ConnectionCanceledException();
+                    }
+                }));
         final LoginConnectionService c = new LoginConnectionService(
-            new DisabledLoginCallback(),
-            new DisabledHostKeyCallback(),
-            new DisabledPasswordStore(),
-            new DisabledProgressListener());
+                new DisabledLoginCallback(),
+                new DisabledHostKeyCallback(),
+                new DisabledPasswordStore(),
+                new DisabledProgressListener());
         c.connect(session, new DisabledCancelCallback());
         assertTrue(callback.get());
     }

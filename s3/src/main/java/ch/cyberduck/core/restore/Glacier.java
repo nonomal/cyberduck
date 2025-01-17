@@ -1,4 +1,6 @@
-package ch.cyberduck.core.restore;/*
+package ch.cyberduck.core.restore;
+
+/*
  * Copyright (c) 2002-2020 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -49,14 +51,14 @@ public class Glacier implements Restore {
 
     private final S3Session session;
     private final ClientConfiguration configuration;
-    private final Location locationFeature;
+    private final Location location;
 
-    public Glacier(final S3Session session, final X509TrustManager trust, final X509KeyManager key) {
+    public Glacier(final S3Session session, final Location location, final X509TrustManager trust, final X509KeyManager key) {
         this.session = session;
+        this.location = location;
         final Host bookmark = session.getHost();
         this.configuration = new CustomClientConfiguration(bookmark,
-            new ThreadLocalHostnameDelegatingTrustManager(trust, bookmark.getHostname()), key);
-        this.locationFeature = session.getFeature(Location.class);
+                new ThreadLocalHostnameDelegatingTrustManager(trust, bookmark.getHostname()), key);
     }
 
     /**
@@ -93,7 +95,7 @@ public class Glacier implements Restore {
         }
         catch(ConflictException e) {
             // 409 when restore is in progress
-            log.warn(String.format("Restore for %s already in progress %s", file, e));
+            log.warn("Restore for {} already in progress {}", file, e);
         }
     }
 
@@ -107,6 +109,9 @@ public class Glacier implements Restore {
         final AmazonS3ClientBuilder builder = AmazonS3ClientBuilder.standard()
             .withCredentials(AWSCredentialsConfigurator.toAWSCredentialsProvider(session.getClient().getProviderCredentials()))
             .withClientConfiguration(configuration);
+        if(session.getClient().isAuthenticatedConnection()) {
+            builder.withCredentials(AWSCredentialsConfigurator.toAWSCredentialsProvider(session.getClient().getProviderCredentials()));
+        }
         final Location.Name region = this.getRegion(container);
         if(S3Session.isAwsHostname(session.getHost().getHostname(), false)) {
             if(Location.unknown.equals(region)) {
@@ -124,6 +129,6 @@ public class Glacier implements Restore {
     }
 
     protected Location.Name getRegion(final Path container) throws BackgroundException {
-        return locationFeature.getLocation(container);
+        return location.getLocation(container);
     }
 }

@@ -19,24 +19,45 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.text.DefaultLexicographicOrderComparator;
+import ch.cyberduck.core.text.NaturalOrderComparator;
 
 import org.apache.commons.lang3.CharUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public abstract class AbstractHostCollection extends Collection<Host> implements EditableCollection {
-    private static final Logger log = LogManager.getLogger(AbstractHostCollection.class);
+
+    public static final Comparator<Host> SORT_BY_NICKNAME = new Comparator<Host>() {
+        @Override
+        public int compare(Host o1, Host o2) {
+            return new NaturalOrderComparator().compare(
+                    BookmarkNameProvider.toString(o1), BookmarkNameProvider.toString(o2)
+            );
+        }
+    };
+
+    public static final Comparator<Host> SORT_BY_HOSTNAME = new Comparator<Host>() {
+        @Override
+        public int compare(Host o1, Host o2) {
+            return new DefaultLexicographicOrderComparator().compare(o1.getHostname(), o2.getHostname());
+        }
+    };
+
+    public static final Comparator<Host> SORT_BY_PROTOCOL = new Comparator<Host>() {
+        @Override
+        public int compare(Host o1, Host o2) {
+            return new DefaultLexicographicOrderComparator().compare(o1.getProtocol().getIdentifier(), o2.getProtocol().getIdentifier());
+        }
+    };
 
     private static final AbstractHostCollection EMPTY = new AbstractHostCollection() {
         // Empty
@@ -58,13 +79,7 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
      * Default ordering using natural order of bookmark name
      */
     public void sort() {
-        this.sort(new Comparator<Host>() {
-            @Override
-            public int compare(final Host o1, final Host o2) {
-                return new DefaultLexicographicOrderComparator().compare(BookmarkNameProvider.toString(o1),
-                    BookmarkNameProvider.toString(o2));
-            }
-        });
+        this.sort(SORT_BY_NICKNAME);
     }
 
     public Map<String, List<Host>> groups() {
@@ -72,16 +87,22 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
     }
 
     public Map<String, List<Host>> groups(final HostFilter filter) {
-        return this.groups(Host::getLabels, filter);
+        return this.groups(HostGroups.LABELS, filter);
     }
 
     /**
      * A bookmark may be member of multiple groups
      *
+     * @param groups Defines group critera for host
+     * @param filter Filter to apply to result set
      * @return Map of bookmarks grouped by labels
      */
     public Map<String, List<Host>> groups(final HostGroups groups, final HostFilter filter) {
-        final Map<String, List<Host>> labels = new HashMap<>();
+        return this.groups(groups, filter, SORT_BY_NICKNAME);
+    }
+
+    public Map<String, List<Host>> groups(final HostGroups groups, final HostFilter filter, final Comparator<Host> comparator) {
+        final Map<String, List<Host>> labels = new TreeMap<>(new NaturalOrderComparator());
         for(Host host : this.stream().filter(filter::accept).collect(Collectors.toList())) {
             if(groups.groups(host).isEmpty()) {
                 final List<Host> list = labels.getOrDefault(StringUtils.EMPTY, new ArrayList<>());
@@ -96,6 +117,7 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
                 }
             }
         }
+        labels.forEach((String label, List<Host> hosts) -> hosts.sort(comparator));
         return labels;
     }
 
@@ -138,9 +160,9 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
     public Optional<Host> find(final Host input) {
         // Iterate over all bookmarks trying exact match
         return Optional.ofNullable(this.find(new HostComparePredicate(input))
-            .orElse(this.find(new DefaultPathPredicate(input))
-                .orElse(this.find(new ProfilePredicate(input))
-                    .orElse(this.find(new ProtocolIdentifierPredicate(input)).orElse(null)))));
+                .orElse(this.find(new DefaultPathPredicate(input))
+                        .orElse(this.find(new ProfilePredicate(input))
+                                .orElse(this.find(new ProtocolIdentifierPredicate(input)).orElse(null)))));
     }
 
     public Optional<Host> find(final Predicate<Host> predicate) {
@@ -189,15 +211,18 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
         @Override
         public boolean test(final Host h) {
             return super.test(h) &&
-                StringUtils.isNotBlank(input.getDefaultPath()) &&
-                StringUtils.startsWith(input.getDefaultPath(), h.getDefaultPath());
+                    StringUtils.isNotBlank(input.getDefaultPath()) &&
+                    StringUtils.startsWith(input.getDefaultPath(), h.getDefaultPath());
         }
     }
 
+    /**
+     * Tests for same protocol, hostname and username
+     */
     public static final class ProfilePredicate extends HostnamePredicate {
         private final Host input;
 
-        private ProfilePredicate(final Host input) {
+        public ProfilePredicate(final Host input) {
             super(input);
             this.input = input;
         }
@@ -211,7 +236,7 @@ public abstract class AbstractHostCollection extends Collection<Host> implements
     public static final class ProtocolIdentifierPredicate extends HostnamePredicate {
         private final Host input;
 
-        private ProtocolIdentifierPredicate(final Host input) {
+        public ProtocolIdentifierPredicate(final Host input) {
             super(input);
             this.input = input;
         }

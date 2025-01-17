@@ -32,6 +32,7 @@ import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpRequestBase;
 import org.apache.http.message.BasicHeader;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -68,28 +69,13 @@ public class DAVReadFeature implements Read {
             else {
                 header = String.format("bytes=%d-%d", range.getStart(), range.getEnd());
             }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Add range header %s for file %s", header, file));
-            }
+            log.debug("Add range header {} for file {}", header, file);
             headers.add(new BasicHeader(HttpHeaders.RANGE, header));
             // Disable compression
             headers.add(new BasicHeader(HttpHeaders.ACCEPT_ENCODING, "identity"));
         }
         try {
-            final StringBuilder resource = new StringBuilder(new DAVPathEncoder().encode(file));
-            if(!status.getParameters().isEmpty()) {
-                resource.append("?");
-            }
-            for(Map.Entry<String, String> parameter : status.getParameters().entrySet()) {
-                if(!resource.toString().endsWith("?")) {
-                    resource.append("&");
-                }
-                resource.append(URIEncoder.encode(parameter.getKey()))
-                        .append("=")
-                        .append(URIEncoder.encode(parameter.getValue()));
-
-            }
-            final HttpGet request = new HttpGet(resource.toString());
+            final HttpRequestBase request = this.toRequest(file, status);
             for(Header header : headers) {
                 request.addHeader(header);
             }
@@ -105,7 +91,7 @@ public class DAVReadFeature implements Read {
                     if(stream.getCode() == HttpStatus.SC_OK) {
                         if(TransferStatus.UNKNOWN_LENGTH != status.getLength()) {
                             if(stream.getLength() != status.getLength()) {
-                                log.warn(String.format("Range header not supported. Skipping %d bytes in file %s.", status.getOffset(), file));
+                                log.warn("Range header not supported. Skipping {} bytes in file {}.", status.getOffset(), file);
                                 stream.skip(status.getOffset());
                             }
                         }
@@ -124,6 +110,23 @@ public class DAVReadFeature implements Read {
         catch(IOException e) {
             throw new HttpExceptionMappingService().map("Download {0} failed", e, file);
         }
+    }
+
+    protected HttpRequestBase toRequest(final Path file, final TransferStatus status) throws BackgroundException {
+        final StringBuilder resource = new StringBuilder(new DAVPathEncoder().encode(file));
+        if(!status.getParameters().isEmpty()) {
+            resource.append("?");
+        }
+        for(Map.Entry<String, String> parameter : status.getParameters().entrySet()) {
+            if(!resource.toString().endsWith("?")) {
+                resource.append("&");
+            }
+            resource.append(URIEncoder.encode(parameter.getKey()))
+                    .append("=")
+                    .append(URIEncoder.encode(parameter.getValue()));
+
+        }
+        return new HttpGet(resource.toString());
     }
 
     public Set<Header> headers() {

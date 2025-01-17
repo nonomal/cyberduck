@@ -56,14 +56,14 @@ public class AzureContainerListService implements RootListService {
             do {
                 final BlobRequestOptions options = new BlobRequestOptions();
                 result = session.getClient().listContainersSegmented(null, ContainerListingDetails.NONE,
-                    new HostPreferences(session.getHost()).getInteger("azure.listing.chunksize"), token,
-                    options, context);
+                        new HostPreferences(session.getHost()).getInteger("azure.listing.chunksize"), token,
+                        options, context);
                 for(CloudBlobContainer container : result.getResults()) {
                     final PathAttributes attributes = new PathAttributes();
                     attributes.setETag(container.getProperties().getEtag());
                     attributes.setModificationDate(container.getProperties().getLastModified().getTime());
                     containers.add(new Path(PathNormalizer.normalize(container.getName()),
-                        EnumSet.of(Path.Type.volume, Path.Type.directory), attributes));
+                            EnumSet.of(Path.Type.volume, Path.Type.directory), attributes));
                 }
                 listener.chunk(directory, containers);
                 token = result.getContinuationToken();

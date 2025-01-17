@@ -17,7 +17,6 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
@@ -25,7 +24,7 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AclPermission;
 import ch.cyberduck.core.features.Location;
 import ch.cyberduck.core.preferences.HostPreferences;
-import ch.cyberduck.core.shared.DefaultAclFeature;
+import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.jets3t.service.acl.Permission;
 
@@ -38,8 +37,9 @@ import java.util.Set;
 
 import synapticloop.b2.BucketType;
 import synapticloop.b2.exception.B2ApiException;
+import synapticloop.b2.response.B2BucketResponse;
 
-public class B2BucketTypeFeature extends DefaultAclFeature implements AclPermission, Location {
+public class B2BucketTypeFeature implements AclPermission, Location {
 
     private final PathContainerService containerService
             = new B2PathContainerService();
@@ -61,12 +61,12 @@ public class B2BucketTypeFeature extends DefaultAclFeature implements AclPermiss
     }
 
     @Override
-    public void setPermission(final Path file, final Acl acl) throws BackgroundException {
+    public void setPermission(final Path file, final TransferStatus status) throws BackgroundException {
         if(containerService.isContainer(file)) {
             try {
-                final BucketType bucketType = this.toBucketType(acl);
-                session.getClient().updateBucket(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()),
-                        bucketType);
+                final BucketType bucketType = this.toBucketType(status.getAcl());
+                final B2BucketResponse response = session.getClient().updateBucket(fileid.getVersionId(containerService.getContainer(file)), bucketType);
+                status.setResponse(new B2AttributesFinderFeature(session, fileid).toAttributes(response));
             }
             catch(B2ApiException e) {
                 throw new B2ExceptionMappingService(fileid).map("Cannot change permissions of {0}", e, file);

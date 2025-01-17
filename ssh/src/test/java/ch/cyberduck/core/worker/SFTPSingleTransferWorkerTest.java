@@ -20,30 +20,35 @@ import ch.cyberduck.core.BytecountStreamListener;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Credentials;
 import ch.cyberduck.core.DisabledCancelCallback;
+import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledHostKeyCallback;
 import ch.cyberduck.core.DisabledLoginCallback;
+import ch.cyberduck.core.DisabledPasswordStore;
 import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.Local;
-import ch.cyberduck.core.LoginOptions;
+import ch.cyberduck.core.LoginConnectionService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Delete;
-import ch.cyberduck.core.features.Write;
+import ch.cyberduck.core.features.Upload;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.VoidStatusOutputStream;
 import ch.cyberduck.core.notification.DisabledNotificationService;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sftp.AbstractSFTPTest;
 import ch.cyberduck.core.sftp.SFTPAttributesFinderFeature;
 import ch.cyberduck.core.sftp.SFTPDeleteFeature;
+import ch.cyberduck.core.sftp.SFTPDirectoryFeature;
 import ch.cyberduck.core.sftp.SFTPHomeDirectoryService;
 import ch.cyberduck.core.sftp.SFTPSession;
+import ch.cyberduck.core.sftp.SFTPUploadFeature;
 import ch.cyberduck.core.sftp.SFTPWriteFeature;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DisabledX509TrustManager;
 import ch.cyberduck.core.transfer.DisabledTransferErrorCallback;
 import ch.cyberduck.core.transfer.DisabledTransferPrompt;
+import ch.cyberduck.core.transfer.SyncTransfer;
 import ch.cyberduck.core.transfer.Transfer;
 import ch.cyberduck.core.transfer.TransferAction;
 import ch.cyberduck.core.transfer.TransferItem;
@@ -55,26 +60,27 @@ import ch.cyberduck.test.IntegrationTest;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.io.output.CountingOutputStream;
+import org.apache.commons.lang3.RandomUtils;
 import org.junit.Test;
 import org.junit.experimental.categories.Category;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.SocketTimeoutException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 @Category(IntegrationTest.class)
 public class SFTPSingleTransferWorkerTest extends AbstractSFTPTest {
 
     @Test
-    public void testTransferredSizeRepeat() throws Exception {
+    public void testUploadTransferWithFailure() throws Exception {
         final Local local = new Local(System.getProperty("java.io.tmpdir"), UUID.randomUUID().toString());
         final byte[] content = new byte[98305];
         new Random().nextBytes(content);
@@ -83,7 +89,16 @@ public class SFTPSingleTransferWorkerTest extends AbstractSFTPTest {
         out.close();
         final BytecountStreamListener counter = new BytecountStreamListener();
         final AtomicBoolean failed = new AtomicBoolean();
-        final SFTPSession session = new SFTPSession(this.session.getHost(), new DisabledX509TrustManager(), new DefaultX509KeyManager()) {
+        final Host host = new Host(session.getHost()) {
+            @Override
+            public String getProperty(final String key) {
+                if("connection.retry".equals(key)) {
+                    return String.valueOf(1);
+                }
+                return super.getProperty(key);
+            }
+        }.withCredentials(new Credentials("test", "test"));
+        final SFTPSession session = new SFTPSession(host, new DisabledX509TrustManager(), new DefaultX509KeyManager()) {
             final SFTPWriteFeature write = new SFTPWriteFeature(this) {
                 @Override
                 public StatusOutputStream<Void> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
@@ -98,7 +113,7 @@ public class SFTPSingleTransferWorkerTest extends AbstractSFTPTest {
                             super.afterWrite(n);
                             if(this.getByteCount() >= 42768L) {
                                 // Buffer size
-                                assertEquals(32768L, counter.getSent());
+                                assertEquals(new HostPreferences(host).getLong("connection.chunksize"), counter.getSent());
                                 failed.set(true);
                                 throw new SocketTimeoutException();
                             }
@@ -115,21 +130,18 @@ public class SFTPSingleTransferWorkerTest extends AbstractSFTPTest {
             @Override
             @SuppressWarnings("unchecked")
             public <T> T _getFeature(final Class<T> type) {
-                if(type == Write.class) {
-                    return (T) write;
+                if(type == Upload.class) {
+                    return (T) new SFTPUploadFeature(write);
                 }
                 return super._getFeature(type);
             }
         };
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
-        session.login(Proxy.DIRECT, new DisabledLoginCallback() {
-            @Override
-            public Credentials prompt(final Host bookmark, final String username, final String title, final String reason, final LoginOptions options) {
-                return new Credentials("test", "test");
-            }
-        }, new DisabledCancelCallback());
+        new LoginConnectionService(new DisabledLoginCallback(),
+                new DisabledHostKeyCallback(),
+                new DisabledPasswordStore(),
+                new DisabledProgressListener()).connect(session, new DisabledCancelCallback());
         final Path test = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(), EnumSet.of(Path.Type.file));
-        final Transfer t = new UploadTransfer(session.getHost(), test, local);
+        final Transfer t = new UploadTransfer(host, test, local);
         assertTrue(new SingleTransferWorker(session, session, t, new TransferOptions(), new TransferSpeedometer(t), new DisabledTransferPrompt() {
             @Override
             public TransferAction prompt(final TransferItem file) {
@@ -141,10 +153,84 @@ public class SFTPSingleTransferWorkerTest extends AbstractSFTPTest {
         }.run(session));
         local.delete();
         assertTrue(t.isComplete());
+        assertEquals(t.getTransferred(), counter.getRecv(), 0L);
+        assertEquals(t.getTransferred(), counter.getSent(), 0L);
         assertEquals(content.length, new SFTPAttributesFinderFeature(session).find(test).getSize());
         assertEquals(content.length, counter.getRecv(), 0L);
         assertEquals(content.length, counter.getSent(), 0L);
         assertTrue(failed.get());
         new SFTPDeleteFeature(session).delete(Collections.singletonList(test), new DisabledLoginCallback(), new Delete.DisabledCallback());
+    }
+
+    @Test
+    public void testSynchronizeUpload() throws Exception {
+        final Local directory = new Local(System.getProperty("java.io.tmpdir"), new AlphanumericRandomStringService().random());
+        directory.mkdir();
+        final Local local = new Local(directory, new AlphanumericRandomStringService().random());
+        final byte[] content = new byte[2387];
+        new Random().nextBytes(content);
+        final OutputStream out = local.getOutputStream(false);
+        IOUtils.write(content, out);
+        out.close();
+        final BytecountStreamListener counter = new BytecountStreamListener();
+        final Path remotedirectory = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(),
+                EnumSet.of(Path.Type.directory));
+        final Path remotefile = new Path(remotedirectory, local.getName(), EnumSet.of(Path.Type.file));
+        final Transfer t = new SyncTransfer(session.getHost(), new TransferItem(remotedirectory, directory), TransferAction.overwrite);
+        assertTrue(new SingleTransferWorker(session, session, t, new TransferOptions(), new TransferSpeedometer(t), new DisabledTransferPrompt() {
+            @Override
+            public TransferAction prompt(final TransferItem file) {
+                return TransferAction.overwrite;
+            }
+        }, new DisabledTransferErrorCallback(),
+                new DisabledProgressListener(), counter, new DisabledLoginCallback(), new DisabledNotificationService()) {
+
+        }.run(session));
+        local.delete();
+        directory.delete();
+        assertTrue(t.isComplete());
+        assertEquals(t.getTransferred(), counter.getRecv(), 0L);
+        assertEquals(t.getTransferred(), counter.getSent(), 0L);
+        assertEquals(content.length, counter.getRecv(), 0L);
+        assertEquals(content.length, counter.getSent(), 0L);
+        new SFTPDeleteFeature(session).delete(Arrays.asList(remotefile, remotedirectory), new DisabledLoginCallback(), new Delete.DisabledCallback());
+    }
+
+    @Test
+    public void testSynchronizeDownload() throws Exception {
+        final Local directory = new Local(System.getProperty("java.io.tmpdir"), new AlphanumericRandomStringService().random());
+        directory.mkdir();
+        final Local local = new Local(directory, new AlphanumericRandomStringService().random());
+        final BytecountStreamListener counter = new BytecountStreamListener();
+        final Path remotedirectory = new Path(new SFTPHomeDirectoryService(session).find(), new AlphanumericRandomStringService().random(),
+                EnumSet.of(Path.Type.directory));
+        new SFTPDirectoryFeature(session).mkdir(remotedirectory, new TransferStatus());
+        final Path remotefile = new Path(remotedirectory, local.getName(), EnumSet.of(Path.Type.file));
+        final TransferStatus status = new TransferStatus();
+        final byte[] content = RandomUtils.nextBytes(8576);
+        status.setLength(content.length);
+        status.setExists(false);
+        final OutputStream out = new SFTPWriteFeature(session).write(remotefile, status, new DisabledConnectionCallback());
+        assertNotNull(out);
+        out.write(content);
+        out.close();
+        final Transfer t = new SyncTransfer(session.getHost(), new TransferItem(remotedirectory, directory), TransferAction.overwrite);
+        assertTrue(new SingleTransferWorker(session, session, t, new TransferOptions(), new TransferSpeedometer(t), new DisabledTransferPrompt() {
+            @Override
+            public TransferAction prompt(final TransferItem file) {
+                return TransferAction.overwrite;
+            }
+        }, new DisabledTransferErrorCallback(),
+                new DisabledProgressListener(), counter, new DisabledLoginCallback(), new DisabledNotificationService()) {
+
+        }.run(session));
+        local.delete();
+        directory.delete();
+        assertTrue(t.isComplete());
+        assertEquals(t.getTransferred(), counter.getRecv(), 0L);
+        assertEquals(t.getTransferred(), counter.getSent(), 0L);
+        assertEquals(content.length, counter.getRecv(), 0L);
+        assertEquals(content.length, counter.getSent(), 0L);
+        new SFTPDeleteFeature(session).delete(Arrays.asList(remotefile, remotedirectory), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 }

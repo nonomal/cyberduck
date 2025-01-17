@@ -48,17 +48,13 @@ public class ReadAclWorker extends Worker<List<Acl.UserAndRole>> {
     @Override
     public List<Acl.UserAndRole> run(final Session<?> session) throws BackgroundException {
         final AclPermission feature = session.getFeature(AclPermission.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
+        log.debug("Run with feature {}", feature);
         final List<Acl.UserAndRole> updated = new ArrayList<>();
         for(Path next : files) {
             if(this.isCanceled()) {
                 throw new ConnectionCanceledException();
             }
-            if(Acl.EMPTY == next.attributes().getAcl()) {
-                next.attributes().setAcl(feature.getPermission(next));
-            }
+            next.attributes().setAcl(feature.getPermission(next));
             for(Acl.UserAndRole acl : next.attributes().getAcl().asList()) {
                 if(updated.contains(acl)) {
                     continue;

@@ -27,12 +27,15 @@ import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.NotfoundException;
+import ch.cyberduck.core.preferences.HostPreferences;
 
+import org.apache.commons.collections4.ListUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.util.EnumSet;
+import java.util.List;
 
 import net.schmizz.sshj.sftp.FileAttributes;
 import net.schmizz.sshj.sftp.FileMode;
@@ -54,33 +57,36 @@ public class SFTPListService implements ListService {
 
     @Override
     public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
-        try {
-            final AttributedList<Path> children = new AttributedList<Path>();
-            final RemoteDirectory handle = session.sftp().openDir(directory.getAbsolute());
-            for(RemoteResourceInfo f : handle.scan(new RemoteResourceFilter() {
-                @Override
-                public boolean accept(RemoteResourceInfo remoteResourceInfo) {
-                    return true;
-                }
-            })) {
-                final PathAttributes attr = attributes.toAttributes(f.getAttributes());
-                final EnumSet<Path.Type> type = EnumSet.noneOf(Path.Type.class);
-                if(f.getAttributes().getType().equals(FileMode.Type.DIRECTORY)) {
-                    type.add(Path.Type.directory);
-                }
-                if(f.getAttributes().getType().equals(FileMode.Type.REGULAR)) {
-                    type.add(Path.Type.file);
-                }
-                if(f.getAttributes().getType().equals(FileMode.Type.SYMLINK)) {
-                    type.add(Path.Type.symboliclink);
-                }
-                final Path file = new Path(directory, f.getName(), type, attr);
-                if(this.post(file)) {
-                    children.add(file);
-                    listener.chunk(directory, children);
+        final AttributedList<Path> children = new AttributedList<Path>();
+        try (RemoteDirectory handle = session.sftp().openDir(directory.getAbsolute())) {
+            for(List<RemoteResourceInfo> list : ListUtils.partition(handle.scan(new RemoteResourceFilter() {
+                        @Override
+                        public boolean accept(RemoteResourceInfo remoteResourceInfo) {
+                            return true;
+                        }
+                    }),
+                    new HostPreferences(session.getHost()).getInteger("sftp.listing.chunksize"))) {
+                for(RemoteResourceInfo f : list) {
+                    final PathAttributes attr = attributes.toAttributes(f.getAttributes());
+                    final EnumSet<Path.Type> type = EnumSet.noneOf(Path.Type.class);
+                    switch(f.getAttributes().getType()) {
+                        case DIRECTORY:
+                            type.add(Path.Type.directory);
+                            break;
+                        case SYMLINK:
+                            type.add(Path.Type.symboliclink);
+                            break;
+                        default:
+                            type.add(Path.Type.file);
+                            break;
+                    }
+                    final Path file = new Path(directory, f.getName(), type, attr);
+                    if(this.post(file)) {
+                        children.add(file);
+                        listener.chunk(directory, children);
+                    }
                 }
             }
-            handle.close();
             return children;
         }
         catch(IOException e) {
@@ -114,16 +120,16 @@ public class SFTPListService implements ListService {
                 catch(SFTPException e) {
                     final BackgroundException reason = new SFTPExceptionMappingService().map(e);
                     if(reason instanceof NotfoundException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else if(reason instanceof AccessDeniedException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else if(reason instanceof InteroperabilityException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else {
-                        log.warn(String.format("Unknown failure reading symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Unknown failure reading symbolic link target of {}. {}", file, reason.toString());
                         throw reason;
                     }
                     type = Path.Type.file;
@@ -135,7 +141,7 @@ public class SFTPListService implements ListService {
                 file.setSymlinkTarget(target);
             }
             catch(IOException e) {
-                log.warn(String.format("Failure to read symbolic link of %s. %s", file, e.getMessage()));
+                log.warn("Failure to read symbolic link of {}. {}", file, e.getMessage());
                 return false;
             }
         }

@@ -91,11 +91,16 @@ public final class EueUploadHelper {
                                                                   final TransferStatus status, final UploadType uploadType) throws BackgroundException {
         try {
             final ResourceResourceIdBody body = new ResourceResourceIdBody().uploadType(uploadType);
-            if(status.getTimestamp() != null) {
-                final ResourceUpdateModelUpdate update = new ResourceUpdateModelUpdate();
-                update.setUiwin32(new UiWin32().lastModificationMillis(new DateTime(status.getTimestamp()).getMillis()));
-                body.setPatch(new ResourceUpdateModel().update(update));
+            final ResourceUpdateModelUpdate resourceUpdateModel = new ResourceUpdateModelUpdate();
+            final UiWin32 uiwin32 = new UiWin32();
+            if(status.getModified() != null) {
+                uiwin32.lastModificationMillis(new DateTime(status.getModified()).getMillis());
             }
+            if(status.getCreated() != null) {
+                uiwin32.creationMillis(new DateTime(status.getCreated()).getMillis());
+            }
+            resourceUpdateModel.setUiwin32(uiwin32);
+            body.setPatch(new ResourceUpdateModel().update(resourceUpdateModel));
             return new PostResourceApi(new EueApiClient(session)).resourceResourceIdPost(
                     resourceId, body, null, null, null, null);
         }
@@ -114,11 +119,16 @@ public final class EueUploadHelper {
         }
         resourceCreationRepresentation.setUploadType(uploadType);
         resourceCreationRepresentation.setResourceType(ResourceCreationRepresentationArrayInner.ResourceTypeEnum.FILE);
-        if(status.getTimestamp() != null) {
-            final ResourceCreationPropertiesModel property = new ResourceCreationPropertiesModel();
-            property.setUiwin32(new UiWin32().lastModificationMillis(new DateTime(status.getTimestamp()).getMillis()));
-            resourceCreationRepresentation.setProperties(property);
+        final ResourceCreationPropertiesModel propertiesModel = new ResourceCreationPropertiesModel();
+        final UiWin32 uiwin32 = new UiWin32();
+        if(status.getModified() != null) {
+            uiwin32.lastModificationMillis(new DateTime(status.getModified()).getMillis());
         }
+        if(status.getCreated() != null) {
+            uiwin32.creationMillis(new DateTime(status.getCreated()).getMillis());
+        }
+        propertiesModel.setUiwin32(uiwin32);
+        resourceCreationRepresentation.setProperties(propertiesModel);
         try {
             final ResourceCreationResponseEntries resourceCreationResponseEntries;
             final EueApiClient client = new EueApiClient(session);
@@ -142,7 +152,7 @@ public final class EueUploadHelper {
                 case HttpStatus.SC_CREATED:
                     break;
                 default:
-                    log.warn(String.format("Failure %s creating file %s", resourceCreationResponseEntry, filename));
+                    log.warn("Failure {} creating file {}", resourceCreationResponseEntry, filename);
                     if(null == resourceCreationResponseEntry.getEntity()) {
                         throw new EueExceptionMappingService().map(new ApiException(resourceCreationResponseEntry.getReason(),
                                 null, resourceCreationResponseEntry.getStatusCode(), client.getResponseHeaders()));

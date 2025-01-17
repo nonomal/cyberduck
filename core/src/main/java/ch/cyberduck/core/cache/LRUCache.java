@@ -51,7 +51,11 @@ public class LRUCache<Key, Value> {
     }
 
     public static <Key, Value> LRUCache<Key, Value> usingLoader(final Function<Key, Value> loader, final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration) {
-        return new LRUCache<>(loader, listener, maximumSize, expireDuration);
+        return usingLoader(loader, listener, maximumSize, expireDuration, true);
+    }
+
+    public static <Key, Value> LRUCache<Key, Value> usingLoader(final Function<Key, Value> loader, final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration, boolean expireAfterAccess) {
+        return new LRUCache<>(loader, listener, maximumSize, expireDuration, expireAfterAccess);
     }
 
     public static <Key, Value> LRUCache<Key, Value> build() {
@@ -71,20 +75,22 @@ public class LRUCache<Key, Value> {
     }
 
     public static <Key, Value> LRUCache<Key, Value> build(final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration) {
-        return new LRUCache<>(null, listener, maximumSize, expireDuration);
+        return build(listener, maximumSize, expireDuration, true);
+    }
+
+    public static <Key, Value> LRUCache<Key, Value> build(final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration, boolean expireAfterAccess) {
+        return new LRUCache<>(null, listener, maximumSize, expireDuration, expireAfterAccess);
     }
 
     private final Cache<Key, Value> delegate;
 
-    private LRUCache(final Function<Key, Value> loader, final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration) {
+    private LRUCache(final Function<Key, Value> loader, final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration, boolean expireAfterAccess) {
         final CacheBuilder<Object, Object> builder = CacheBuilder.newBuilder();
         if(listener != null) {
             builder.removalListener(new RemovalListener<Key, Value>() {
                 @Override
                 public void onRemoval(final RemovalNotification<Key, Value> notification) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Removed %s from cache with cause %s", notification.getKey(), notification.getCause()));
-                    }
+                    log.debug("Removed {} from cache with cause {}", notification.getKey(), notification.getCause());
                     listener.onRemoval(notification);
                 }
             });
@@ -93,7 +99,12 @@ public class LRUCache<Key, Value> {
             builder.maximumSize(maximumSize);
         }
         if(expireDuration > 0) {
-            builder.expireAfterAccess(expireDuration, TimeUnit.MILLISECONDS);
+            if(expireAfterAccess) {
+                builder.expireAfterAccess(expireDuration, TimeUnit.MILLISECONDS);
+            }
+            else {
+                builder.expireAfterWrite(expireDuration, TimeUnit.MILLISECONDS);
+            }
         }
         if(loader != null) {
             delegate = builder.build(new CacheLoader<Key, Value>() {
@@ -121,7 +132,7 @@ public class LRUCache<Key, Value> {
 
     public void put(final Key key, Value value) {
         if(null == key) {
-            log.warn(String.format("Discard caching %s=%s", key, value));
+            log.warn("Discard caching {}={}", key, value);
             return;
         }
         if(null == value) {

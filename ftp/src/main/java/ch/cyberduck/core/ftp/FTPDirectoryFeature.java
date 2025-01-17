@@ -19,9 +19,11 @@ package ch.cyberduck.core.ftp;
 
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
+
+import org.apache.commons.net.ftp.FTPReply;
 
 import java.io.IOException;
 
@@ -39,7 +41,14 @@ public class FTPDirectoryFeature implements Directory<Integer> {
             if(!session.getClient().makeDirectory(folder.getAbsolute())) {
                 throw new FTPException(session.getClient().getReplyCode(), session.getClient().getReplyString());
             }
-            return folder.withAttributes(new FTPAttributesFinderFeature(session).find(folder));
+            return folder;
+        }
+        catch(FTPException e) {
+            switch(e.getCode()) {
+                case FTPReply.FILE_UNAVAILABLE:
+                    throw new ConflictException(folder.getAbsolute());
+            }
+            throw new FTPExceptionMappingService().map("Cannot create folder {0}", e, folder);
         }
         catch(IOException e) {
             throw new FTPExceptionMappingService().map("Cannot create folder {0}", e, folder);
@@ -47,12 +56,7 @@ public class FTPDirectoryFeature implements Directory<Integer> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
-        return true;
-    }
-
-    @Override
-    public FTPDirectoryFeature withWriter(final Write writer) {
-        return this;
+    public void preflight(final Path workdir, final String filename) {
+        // Skip checking permission mask
     }
 }

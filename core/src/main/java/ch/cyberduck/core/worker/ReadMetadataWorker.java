@@ -34,7 +34,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class ReadMetadataWorker extends Worker<Map<String, String>> {
@@ -52,17 +52,12 @@ public class ReadMetadataWorker extends Worker<Map<String, String>> {
     @Override
     public Map<String, String> run(final Session<?> session) throws BackgroundException {
         final Metadata feature = session.getFeature(Metadata.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
+        log.debug("Run with feature {}", feature);
         // Map for metadata entry key > File & Metadata Values
         final Map<String, Map<Path, String>> graphMetadata = new HashMap<>();
         for(Path next : files) {
             // Read online metadata
-            if(Collections.<String, String>emptyMap() == next.attributes().getMetadata()) {
-                final Map<String, String> metadata = feature.getMetadata(next);
-                next.attributes().setMetadata(metadata);
-            }
+            next.attributes().setMetadata(feature.getMetadata(next));
             // take every entry of current metadata and store it in metaGraph
             for(Map.Entry<String, String> entry : next.attributes().getMetadata().entrySet()) {
                 if(graphMetadata.containsKey(entry.getKey())) {
@@ -85,9 +80,9 @@ public class ReadMetadataWorker extends Worker<Map<String, String>> {
             }
             else {
                 // single use of streams, reason: distinct is easier in Streams than it would be writing it manually
-                Supplier<Stream<String>> valueSupplier = () -> entry.getValue().values().stream().distinct();
-                // Check count against 1, if it is use that value, otherwise use null
-                String value = valueSupplier.get().count() == 1 ? valueSupplier.get().findAny().get() : null;
+                Stream<String> values = entry.getValue().values().stream().distinct();
+                // Use reducing collector, that returns null on non-unique values
+                final String value = values.collect(Collectors.reducing((a, v) -> null)).orElse(null);
                 // store it
                 metadata.put(entry.getKey(), value);
             }

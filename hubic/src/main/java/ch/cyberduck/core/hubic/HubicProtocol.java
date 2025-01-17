@@ -17,9 +17,13 @@ package ch.cyberduck.core.hubic;
 
 import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.LocaleFactory;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 import ch.cyberduck.core.openstack.SwiftProtocol;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class HubicProtocol extends AbstractProtocol {
 
     @Override
@@ -73,6 +77,11 @@ public class HubicProtocol extends AbstractProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public boolean isUsernameConfigurable() {
         return false;
     }
@@ -91,5 +100,10 @@ public class HubicProtocol extends AbstractProtocol {
     @Override
     public String icon() {
         return new SwiftProtocol().icon();
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.none;
     }
 }

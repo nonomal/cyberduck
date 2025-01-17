@@ -23,16 +23,15 @@ import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.TransferAcceleration;
-import ch.cyberduck.core.preferences.Preferences;
-import ch.cyberduck.core.preferences.PreferencesFactory;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.jets3t.service.S3ServiceException;
 import org.jets3t.service.model.AccelerateConfig;
 
 public class S3TransferAccelerationService implements TransferAcceleration {
-
-    private final Preferences preferences = PreferencesFactory.get();
+    private static final Logger log = LogManager.getLogger(S3TransferAccelerationService.class);
 
     private final S3Session session;
     private final PathContainerService containerService;
@@ -88,17 +87,10 @@ public class S3TransferAccelerationService implements TransferAcceleration {
 
     @Override
     public void configure(final boolean enable, final Path file) {
+        final Path bucket = containerService.getContainer(file);
         final Host host = session.getHost();
+        log.debug("Set S3 transfer acceleration to {}", enable);
         // Set accelerated endpoint
-        host.setProperty("s3.transferacceleration.enable", String.valueOf(enable));
-        if(enable) {
-            host.setProperty("s3.bucket.virtualhost.disable", String.valueOf(false));
-            host.setProperty("s3.upload.expect-continue", String.valueOf(false));
-        }
-        else {
-            // Revert default configuration
-            host.setProperty("s3.bucket.virtualhost.disable", preferences.getProperty("s3.bucket.virtualhost.disable"));
-            host.setProperty("s3.upload.expect-continue", preferences.getProperty("s3.upload.expect-continue"));
-        }
+        host.setProperty(String.format("s3.transferacceleration.%s.enable", bucket.getName()), String.valueOf(enable));
     }
 }

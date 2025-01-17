@@ -31,27 +31,17 @@ import ch.cyberduck.core.cdn.DistributionConfiguration;
 import ch.cyberduck.core.cloudfront.CustomOriginCloudFrontDistributionConfiguration;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.LoginCanceledException;
-import ch.cyberduck.core.features.AttributesFinder;
-import ch.cyberduck.core.features.Command;
-import ch.cyberduck.core.features.Copy;
-import ch.cyberduck.core.features.Delete;
-import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Find;
-import ch.cyberduck.core.features.Home;
-import ch.cyberduck.core.features.Move;
-import ch.cyberduck.core.features.Read;
-import ch.cyberduck.core.features.Symlink;
-import ch.cyberduck.core.features.Timestamp;
-import ch.cyberduck.core.features.Touch;
-import ch.cyberduck.core.features.UnixPermission;
-import ch.cyberduck.core.features.Write;
+import ch.cyberduck.core.features.*;
 import ch.cyberduck.core.ftp.list.FTPListService;
 import ch.cyberduck.core.idna.PunycodeConverter;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesReader;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.proxy.ProxySocketFactory;
 import ch.cyberduck.core.shared.DefaultCopyFeature;
+import ch.cyberduck.core.shared.DelegatingHomeFeature;
+import ch.cyberduck.core.shared.TildeResolvingHomeFeature;
+import ch.cyberduck.core.shared.WorkdirHomeFeature;
 import ch.cyberduck.core.ssl.CustomTrustSSLProtocolSocketFactory;
 import ch.cyberduck.core.ssl.DefaultX509KeyManager;
 import ch.cyberduck.core.ssl.DisabledX509TrustManager;
@@ -70,8 +60,9 @@ import org.apache.logging.log4j.Logger;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.text.MessageFormat;
+import java.time.Duration;
+import java.util.EnumSet;
 import java.util.Locale;
-import java.util.TimeZone;
 
 public class FTPSession extends SSLSession<FTPClient> {
     private static final Logger log = LogManager.getLogger(FTPSession.class);
@@ -79,10 +70,12 @@ public class FTPSession extends SSLSession<FTPClient> {
     private final PreferencesReader preferences
             = new HostPreferences(host);
 
+    private final FTPListService list = new FTPListService(this);
+    private final FTPReadFeature read = new FTPReadFeature(this);
+
     private Timestamp timestamp;
     private UnixPermission permission;
     private Symlink symlink;
-    private FTPListService listService;
     private Protocol.Case casesensitivity = Protocol.Case.sensitive;
 
     public FTPSession(final Host h) {
@@ -117,22 +110,9 @@ public class FTPSession extends SSLSession<FTPClient> {
             client.disconnect();
         }
         catch(IOException e) {
-            log.warn(String.format("Ignore disconnect failure %s", e.getMessage()));
+            log.warn("Ignore disconnect failure {}", e.getMessage());
         }
         super.disconnect();
-    }
-
-    @Override
-    public void interrupt() throws BackgroundException {
-        if(host.getProtocol().isSecure()) {
-            // The client and the server must share knowledge that the connection is ending in order to avoid a truncation attack.
-            // Either party may initiate the exchange of closing messages.
-            log.warn(String.format("Skip disconnect for %s connection to workaround hang in closing socket", host.getProtocol()));
-            super.disconnect();
-        }
-        else {
-            super.interrupt();
-        }
     }
 
     protected void configure(final FTPClient client) throws IOException {
@@ -142,7 +122,9 @@ public class FTPSession extends SSLSession<FTPClient> {
         final int timeout = ConnectionTimeoutFactory.get(preferences).getTimeout() * 1000;
         client.setConnectTimeout(timeout);
         client.setDefaultTimeout(timeout);
-        client.setDataTimeout(timeout);
+        client.setDataTimeout(Duration.ofMillis(timeout));
+        client.setControlKeepAliveTimeout(Duration.ofMillis(timeout));
+        client.setControlKeepAliveReplyTimeout(Duration.ofMillis(timeout));
         client.setUseEPSVwithIPv4(preferences.getBoolean("ftp.datachannel.epsv"));
         client.setDefaultPort(host.getProtocol().getDefaultPort());
         client.setParserFactory(new FTPParserFactory());
@@ -167,10 +149,10 @@ public class FTPSession extends SSLSession<FTPClient> {
     }
 
     @Override
-    protected FTPClient connect(final Proxy proxy, final HostKeyCallback callback, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    protected FTPClient connect(final ProxyFinder proxy, final HostKeyCallback callback, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         try {
             final CustomTrustSSLProtocolSocketFactory f
-                = new CustomTrustSSLProtocolSocketFactory(trust, key, preferences.getProperty("connection.ssl.protocols.ftp").split(","));
+                    = new CustomTrustSSLProtocolSocketFactory(trust, key, preferences.getProperty("connection.ssl.protocols.ftp").split(","));
 
             final LoggingProtocolCommandListener listener = new LoggingProtocolCommandListener(this);
             final FTPClient client = new FTPClient(host.getProtocol(), f, f.getSSLContext()) {
@@ -214,17 +196,17 @@ public class FTPSession extends SSLSession<FTPClient> {
         if(super.alert(callback)) {
             try {
                 if(client.hasFeature("AUTH", "TLS")
-                    && client.hasFeature("PBSZ")
-                    && client.hasFeature("PROT")) {
+                        && client.hasFeature("PBSZ")
+                        && client.hasFeature("PROT")) {
                     // Propose protocol change if AUTH TLS is available.
                     try {
                         callback.warn(host,
-                            MessageFormat.format(LocaleFactory.localizedString("Unsecured {0} connection", "Credentials"), host.getProtocol().getName()),
-                            MessageFormat.format("{0} {1}.", MessageFormat.format(LocaleFactory.localizedString("The server supports encrypted connections. Do you want to switch to {0}?", "Credentials"),
-                                ProtocolFactory.get().forScheme(Scheme.ftps).getName()), LocaleFactory.localizedString("Please contact your web hosting service provider for assistance", "Support")),
-                            LocaleFactory.localizedString("Continue", "Credentials"),
-                            LocaleFactory.localizedString("Change", "Credentials"),
-                            String.format("connection.unsecure.%s", host.getHostname()));
+                                MessageFormat.format(LocaleFactory.localizedString("Unsecured {0} connection", "Credentials"), host.getProtocol().getName()),
+                                MessageFormat.format("{0} {1}.", MessageFormat.format(LocaleFactory.localizedString("The server supports encrypted connections. Do you want to switch to {0}?", "Credentials"),
+                                        ProtocolFactory.get().forScheme(Scheme.ftps).getName()), LocaleFactory.localizedString("Please contact your web hosting service provider for assistance", "Support")),
+                                LocaleFactory.localizedString("Continue", "Credentials"),
+                                LocaleFactory.localizedString("Change", "Credentials"),
+                                String.format("connection.unsecure.%s", host.getHostname()));
                         // Continue chosen. Login using plain FTP.
                     }
                     catch(LoginCanceledException e) {
@@ -249,7 +231,7 @@ public class FTPSession extends SSLSession<FTPClient> {
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         try {
             if(client.login(host.getCredentials().getUsername(), host.getCredentials().getPassword())) {
                 if(host.getProtocol().isSecure()) {
@@ -260,13 +242,9 @@ public class FTPSession extends SSLSession<FTPClient> {
                 if(StandardCharsets.UTF_8.name().equals(host.getEncoding())) {
                     if(client.hasFeature("UTF8")) {
                         if(!FTPReply.isPositiveCompletion(client.sendCommand("OPTS UTF8 ON"))) {
-                            log.warn(String.format("Failed to negotiate UTF-8 charset %s", client.getReplyString()));
+                            log.warn("Failed to negotiate UTF-8 charset {}", client.getReplyString());
                         }
                     }
-                }
-                final TimeZone zone = host.getTimezone();
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Reset parser to timezone %s", zone));
                 }
                 String system = StringUtils.EMPTY; //Unknown
                 try {
@@ -276,9 +254,11 @@ public class FTPSession extends SSLSession<FTPClient> {
                     }
                 }
                 catch(IOException e) {
-                    log.warn(String.format("SYST command failed %s", e.getMessage()));
+                    log.warn("SYST command failed {}", e.getMessage());
                 }
-                listService = new FTPListService(this, system, zone);
+                read.configure(client.hasFeature("REST", "STREAM") ?
+                        EnumSet.of(Read.Flags.offset) : EnumSet.noneOf(Read.Flags.class));
+                list.configure(system);
                 if(client.hasFeature(FTPCmd.MFMT.getCommand())) {
                     timestamp = new FTPMFMTTimestampFeature(this);
                 }
@@ -308,7 +288,7 @@ public class FTPSession extends SSLSession<FTPClient> {
     @SuppressWarnings("unchecked")
     public <T> T _getFeature(final Class<T> type) {
         if(type == ListService.class) {
-            return (T) listService;
+            return (T) list;
         }
         if(type == Directory.class) {
             return (T) new FTPDirectoryFeature(this);
@@ -317,7 +297,10 @@ public class FTPSession extends SSLSession<FTPClient> {
             return (T) new FTPDeleteFeature(this);
         }
         if(type == Read.class) {
-            return (T) new FTPReadFeature(this);
+            return (T) read;
+        }
+        if(type == Upload.class) {
+            return (T) new FTPUploadFeature(this);
         }
         if(type == Write.class) {
             return (T) new FTPWriteFeature(this);
@@ -347,7 +330,7 @@ public class FTPSession extends SSLSession<FTPClient> {
             return (T) new CustomOriginCloudFrontDistributionConfiguration(host, trust, key);
         }
         if(type == Home.class) {
-            return (T) new FTPWorkdirService(this);
+            return (T) new DelegatingHomeFeature(new WorkdirHomeFeature(host), new TildeResolvingHomeFeature(host, new FTPWorkdirService(this)));
         }
         if(type == Touch.class) {
             return (T) new FTPTouchFeature(this);

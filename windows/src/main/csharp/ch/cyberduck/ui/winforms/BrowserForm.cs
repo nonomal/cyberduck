@@ -28,13 +28,11 @@ using Ch.Cyberduck.Core;
 using Ch.Cyberduck.Core.TaskDialog;
 using Ch.Cyberduck.Ui.Controller;
 using Ch.Cyberduck.Ui.Core;
-using Ch.Cyberduck.Ui.Core.Contracts;
 using Ch.Cyberduck.Ui.Winforms.Commondialog;
 using Ch.Cyberduck.Ui.Winforms.Controls;
 using org.apache.commons.io;
 using org.apache.commons.lang3;
 using org.apache.logging.log4j;
-using StructureMap;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -47,6 +45,7 @@ using System.Text;
 using System.Windows.Forms;
 using Windows.Win32;
 using Windows.Win32.Foundation;
+using ch.cyberduck.ui.browser;
 using static Ch.Cyberduck.ImageHelper;
 using static Windows.Win32.CorePInvoke;
 using static Windows.Win32.PInvoke;
@@ -146,22 +145,14 @@ namespace Ch.Cyberduck.Ui.Winforms
             actionToolStrip.Renderer = new NoGapRenderer();
 
             // configure browser properties
-            browser.UseExplorerTheme = true;
-            browser.UseTranslucentSelection = true;
-            browser.OwnerDraw = true;
-            browser.UseOverlays = false;
             browser.LabelEdit = true;
-            browser.AllowDrop = true;
 
             browser.ContextMenuStrip = null;
             browser.ContextMenu = browserContextMenu;
             browser.DropSink = new ExpandingBrowserDropSink(this);
             browser.DragSource = new BrowserDragSource(this);
 
-            browser.AllowColumnReorder = true;
-            browser.ShowImagesOnSubItems = true;
             browser.TreeColumnRenderer = new BrowserRenderer();
-            browser.SelectedRowDecoration = new ExplorerRowBorderDecoration();
             browser.ItemsChanged += (sender, args) => ItemsChanged();
             browser.BeforeSorting += BeforeSorting;
             browser.CellEditStarting += (sender, args) => args.Cancel = !ValidateRenameFile();
@@ -193,18 +184,12 @@ namespace Ch.Cyberduck.Ui.Winforms
             archiveMenuStrip.Items.Add(string.Empty);
 
             archiveMenuStrip.Opening += OnArchiveMenuStripOpening;
-            createArchiveMainMenuItem.MenuItems.Add(string.Empty);
-            createArchiveMainMenuItem.Popup += OnArchiveMenuItemOnPopup;
-            createArchiveBrowserContextMenuItem.MenuItems.Add(string.Empty);
-            createArchiveBrowserContextMenuItem.Popup += OnArchiveMenuItemOnPopup;
-            copyUrlMainMenuItem.MenuItems.Add(string.Empty);
-            copyUrlMainMenuItem.Popup += OnCopyUrlMenuItemPopup;
-            copyUrlBrowserContextMenuItem.MenuItems.Add(string.Empty);
-            copyUrlBrowserContextMenuItem.Popup += OnCopyUrlMenuItemPopup;
-            openUrlMainMenuItem.MenuItems.Add(string.Empty);
-            openUrlMainMenuItem.Popup += OnOpenUrlMenuItemPopup;
-            openUrlBrowserContextMenuItem.MenuItems.Add(string.Empty);
-            openUrlBrowserContextMenuItem.Popup += OnOpenUrlMenuItemPopup;
+            createArchiveMainMenuItem.Select += OnArchiveMenuItemOnPopup;
+            createArchiveBrowserContextMenuItem.Select += OnArchiveMenuItemOnPopup;
+            copyUrlMainMenuItem.Select += OnCopyUrlMenuItemPopup;
+            copyUrlBrowserContextMenuItem.Select += OnCopyUrlMenuItemPopup;
+            openUrlMainMenuItem.Select += OnOpenUrlMenuItemPopup;
+            openUrlBrowserContextMenuItem.Select += OnOpenUrlMenuItemPopup;
 
             textEncodingMenuStrip.Items.Add(string.Empty);
             textEncodingMainMenuItem.MenuItems.Add(string.Empty);
@@ -225,7 +210,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             historyToolStripButton.ToolTipText = LocaleFactory.localizedString("History");
             bonjourToolStripButton.ToolTipText = LocaleFactory.localizedString("Bonjour", "Browser");
 
-            keyMainMenuItem.Text = LicenseFactory.find().ToString();
+            keyMainMenuItem.Text = LicenseFactory.find().getEntitlement();
             keyMainMenuItem.Enabled = false;
 
             //Terminal app menu entries
@@ -275,7 +260,7 @@ namespace Ch.Cyberduck.Ui.Winforms
                 RendezvousCollection.defaultCollection().removeListener(bonjourMenuCollectionListener);
             };
 
-            if (!LicenseFactory.find().Equals(LicenseFactory.EMPTY_LICENSE))
+            if (LicenseFactory.find().verify())
             {
                 RemoveDonateButton();
             }
@@ -920,6 +905,7 @@ namespace Ch.Cyberduck.Ui.Winforms
             cryptomatorToolStripButton.ToolTipText = title;
             cryptomatorToolStripMenuItem1.Text = title;
             cryptomatorToolbarMenuItem.Text = title;
+            cryptomatorBrowserContextMenuItem.Text = title;
         }
 
         public bool SearchEnabled
@@ -1214,11 +1200,11 @@ namespace Ch.Cyberduck.Ui.Winforms
             PopulateCopyUrlMenuItemPopup(sender as MenuItem, GetCopyUrls());
         }
 
-        private void PopulateCopyUrlMenuItemPopup(MenuItem mainItem, IList<KeyValuePair<string, List<string>>> items)
+        private void PopulateCopyUrlMenuItemPopup(MenuItem mainItem, IList<KeyValuePair<string, List<DescriptiveUrl>>> items)
         {
             mainItem.MenuItems.Clear();
             int c = 0;
-            foreach (KeyValuePair<string, List<string>> pair in items)
+            foreach (KeyValuePair<string, List<DescriptiveUrl>> pair in items)
             {
                 if (c > 0)
                 {
@@ -1228,14 +1214,14 @@ namespace Ch.Cyberduck.Ui.Winforms
                 MenuItem item = mainItem.MenuItems.Add(pair.Key);
                 if (pair.Value.Count > 0)
                 {
-                    KeyValuePair<string, List<string>> pair1 = pair;
+                    KeyValuePair<string, List<DescriptiveUrl>> pair1 = pair;
                     item.Click += delegate
                     {
                         StringBuilder sb = new StringBuilder();
                         for (int i = 0; i < pair1.Value.Count; i++)
                         {
                             if (i > 0) sb.Append(Environment.NewLine);
-                            sb.Append(pair1.Value[i]);
+                            sb.Append(pair1.Value[i].getUrl());
                         }
                         try
                         {
@@ -1244,12 +1230,12 @@ namespace Ch.Cyberduck.Ui.Winforms
                         }
                         catch (ExternalException exception)
                         {
-                            Log.error("Could not copy URL to clipboard");
+                            Log.error("Could not copy URL to clipboard", exception);
                         }
                     };
-                    foreach (string url in pair.Value)
+                    foreach (DescriptiveUrl url in pair.Value)
                     {
-                        mainItem.MenuItems.Add(url).Enabled = false;
+                        mainItem.MenuItems.Add(url.getPreview()).Enabled = false;
                     }
                 }
                 else
@@ -1265,11 +1251,11 @@ namespace Ch.Cyberduck.Ui.Winforms
             PopulateOpenUrlMenuItemPopup(sender as MenuItem, GetOpenUrls());
         }
 
-        private void PopulateOpenUrlMenuItemPopup(MenuItem mainItem, IList<KeyValuePair<string, List<string>>> items)
+        private void PopulateOpenUrlMenuItemPopup(MenuItem mainItem, IList<KeyValuePair<string, List<DescriptiveUrl>>> items)
         {
             mainItem.MenuItems.Clear();
             int c = 0;
-            foreach (KeyValuePair<string, List<string>> pair in items)
+            foreach (KeyValuePair<string, List<DescriptiveUrl>> pair in items)
             {
                 if (c > 0)
                 {
@@ -1279,17 +1265,17 @@ namespace Ch.Cyberduck.Ui.Winforms
                 MenuItem item = mainItem.MenuItems.Add(pair.Key);
                 if (pair.Value.Count > 0)
                 {
-                    KeyValuePair<string, List<string>> pair1 = pair;
+                    KeyValuePair<string, List<DescriptiveUrl>> pair1 = pair;
                     item.Click += delegate
                     {
                         for (int i = 0; i < pair1.Value.Count; i++)
                         {
-                            BrowserLauncherFactory.get().open(pair1.Value[i]);
+                            BrowserLauncherFactory.get().open(pair1.Value[i].getUrl());
                         }
                     };
-                    foreach (string url in pair.Value)
+                    foreach (DescriptiveUrl url in pair.Value)
                     {
-                        mainItem.MenuItems.Add(url).Enabled = false;
+                        mainItem.MenuItems.Add(url.getPreview()).Enabled = false;
                     }
                 }
                 else
@@ -1692,14 +1678,6 @@ namespace Ch.Cyberduck.Ui.Winforms
         private void ConfigureBookmarkList(ObjectListView l, OLVColumn descColumn, OLVColumn imageColumn,
             OLVColumn activeColumn)
         {
-            l.ShowGroups = false;
-            l.UseOverlays = false;
-            l.OwnerDraw = true;
-            l.FullRowSelect = true;
-            l.MultiSelect = true;
-            l.HeaderStyle = ColumnHeaderStyle.None;
-            l.HideSelection = false;
-            l.AllowDrop = true;
             l.DropSink = new HostDropSink(this);
             l.DragSource = new HostDragSource(this);
 
@@ -2486,7 +2464,8 @@ namespace Ch.Cyberduck.Ui.Winforms
             foreach (ToolStripMenuItem item in columnContextMenu.Items)
             {
                 ToolStripMenuItem item1 = item;
-                MenuItem nItem = new MenuItem(LocaleFactory.localizedString(item.Text),
+                string tag = ((ColumnHeader)item.Tag).Tag as string;
+                MenuItem nItem = new MenuItem(null != tag ? BrowserColumn.valueOf(tag).ToString() : LocaleFactory.localizedString(item.Text),
                     delegate { item1.PerformClick(); });
                 //forward click event
                 nItem.Checked = item.Checked;

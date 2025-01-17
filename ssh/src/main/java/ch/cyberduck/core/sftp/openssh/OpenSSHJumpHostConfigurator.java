@@ -1,4 +1,6 @@
-package ch.cyberduck.core.sftp.openssh;/*
+package ch.cyberduck.core.sftp.openssh;
+
+/*
  * Copyright (c) 2002-2020 iterate GmbH. All rights reserved.
  * https://cyberduck.io/
  *
@@ -19,6 +21,7 @@ import ch.cyberduck.core.JumphostConfigurator;
 import ch.cyberduck.core.LocalFactory;
 import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.exception.HostParserException;
+import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.sftp.SFTPProtocol;
 import ch.cyberduck.core.sftp.openssh.config.transport.OpenSshConfig;
 
@@ -52,11 +55,10 @@ public class OpenSSHJumpHostConfigurator implements JumphostConfigurator {
         }
         final String proxyJump = configuration.lookup(alias).getProxyJump();
         if(StringUtils.isBlank(proxyJump)) {
+            log.debug("No configuration for alias {}", alias);
             return null;
         }
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Found jump host configuration %s from %s", proxyJump, configuration));
-        }
+        log.info("Found jump host configuration {} from {}", proxyJump, configuration);
         try {
             final Host host = new HostParser(new ProtocolFactory(Collections.singleton(new SFTPProtocol())), new SFTPProtocol()).get(proxyJump);
             // Resolve credentials
@@ -67,13 +69,13 @@ public class OpenSSHJumpHostConfigurator implements JumphostConfigurator {
             return host;
         }
         catch(HostParserException e) {
-            log.warn(String.format("Failure parsing JumpHost directive %s", proxyJump));
+            log.warn("Failure parsing JumpHost directive {}", proxyJump);
             return null;
         }
     }
 
     @Override
-    public JumphostConfigurator reload() {
+    public JumphostConfigurator reload() throws LoginCanceledException {
         hostname.reload();
         credentials.reload();
         return this;

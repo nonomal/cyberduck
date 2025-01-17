@@ -28,17 +28,16 @@ import ch.cyberduck.binding.foundation.NSNotification;
 import ch.cyberduck.binding.foundation.NSNotificationCenter;
 import ch.cyberduck.binding.foundation.NSRange;
 import ch.cyberduck.core.AbstractCollectionListener;
-import ch.cyberduck.core.Cache;
 import ch.cyberduck.core.Collection;
 import ch.cyberduck.core.Host;
 import ch.cyberduck.core.LocalFactory;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
-import ch.cyberduck.core.PathCache;
 import ch.cyberduck.core.SessionPoolFactory;
 import ch.cyberduck.core.TranscriptListener;
 import ch.cyberduck.core.TransferCollection;
 import ch.cyberduck.core.exception.AccessDeniedException;
+import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.io.BandwidthThrottle;
 import ch.cyberduck.core.local.ApplicationLauncherFactory;
 import ch.cyberduck.core.local.LocalTrashFactory;
@@ -595,7 +594,6 @@ public final class TransferController extends WindowController implements Transf
      */
     public void start(final Transfer transfer, final TransferOptions options, final TransferCallback callback) {
         final ProgressController progress = transferTableModel.getController(transfer);
-        final Cache<Path> cache = new PathCache(preferences.getInteger("transfer.cache.size"));
         final Host source = transfer.getSource();
         final Host destination = transfer.getDestination();
         final TransferBackgroundAction action = new TransferCollectionBackgroundAction(this,
@@ -603,7 +601,7 @@ public final class TransferController extends WindowController implements Transf
             null == destination ? SessionPool.DISCONNECTED : SessionPoolFactory.create(this, destination, progress),
             this, progress, transfer, options) {
             @Override
-            public void init() {
+            public void init() throws BackgroundException {
                 super.init();
                 if(preferences.getBoolean("queue.window.open.transfer.start")) {
                     window.makeKeyAndOrderFront(null);
@@ -654,9 +652,7 @@ public final class TransferController extends WindowController implements Transf
             if(pasteboard.isEmpty()) {
                 continue;
             }
-            if(log.isDebugEnabled()) {
-                log.debug("Paste download transfer from pasteboard");
-            }
+            log.debug("Paste download transfer from pasteboard");
             final List<TransferItem> downloads = new ArrayList<>();
             for(Path download : pasteboard) {
                 downloads.add(new TransferItem(download, LocalFactory.get(
@@ -712,9 +708,9 @@ public final class TransferController extends WindowController implements Transf
             final Collection<Transfer> transfers = transferTableModel.getSource();
             final Transfer transfer = transfers.get(index.intValue());
             if(!transfer.isRunning()) {
-                final TransferOptions options = new TransferOptions();
-                options.resumeRequested = true;
-                options.reloadRequested = false;
+                final TransferOptions options = new TransferOptions()
+                        .resume(true)
+                        .reload(false);
                 this.start(transfer, options);
             }
         }
@@ -727,9 +723,9 @@ public final class TransferController extends WindowController implements Transf
             final Collection<Transfer> transfers = transferTableModel.getSource();
             final Transfer transfer = transfers.get(index.intValue());
             if(!transfer.isRunning()) {
-                final TransferOptions options = new TransferOptions();
-                options.resumeRequested = false;
-                options.reloadRequested = true;
+                final TransferOptions options = new TransferOptions()
+                        .resume(false)
+                        .reload(true);
                 this.start(transfer, options);
             }
         }
@@ -792,7 +788,7 @@ public final class TransferController extends WindowController implements Transf
                         LocalTrashFactory.get().trash(l.local);
                     }
                     catch(AccessDeniedException e) {
-                        log.warn(String.format("Failure trashing file %s %s", l.local, e.getMessage()));
+                        log.warn("Failure trashing file {} {}", l.local, e.getMessage());
                     }
                 }
             }

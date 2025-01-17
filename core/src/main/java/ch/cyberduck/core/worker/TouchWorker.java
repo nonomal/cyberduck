@@ -22,6 +22,7 @@ import ch.cyberduck.core.MappingMimeTypeService;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Session;
+import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AclPermission;
 import ch.cyberduck.core.features.AttributesFinder;
@@ -38,7 +39,6 @@ import org.apache.logging.log4j.Logger;
 
 import java.text.MessageFormat;
 import java.util.EnumSet;
-import java.util.Objects;
 
 public class TouchWorker extends Worker<Path> {
     private static final Logger log = LogManager.getLogger(TouchWorker.class);
@@ -52,11 +52,10 @@ public class TouchWorker extends Worker<Path> {
     @Override
     public Path run(final Session<?> session) throws BackgroundException {
         final Touch feature = session.getFeature(Touch.class);
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run with feature %s", feature));
-        }
+        log.debug("Run with feature {}", feature);
         final TransferStatus status = new TransferStatus()
-                .withTimestamp(System.currentTimeMillis())
+                .withLength(0L)
+                .withModified(System.currentTimeMillis())
                 .hidden(!SearchFilterFactory.HIDDEN_FILTER.accept(file))
                 .exists(false)
                 .withLength(0L)
@@ -70,7 +69,7 @@ public class TouchWorker extends Worker<Path> {
         if(redundancy != null) {
             status.setStorageClass(redundancy.getDefault());
         }
-        status.setTimestamp(System.currentTimeMillis());
+        status.setModified(System.currentTimeMillis());
         if(PreferencesFactory.get().getBoolean("touch.permissions.change")) {
             final UnixPermission permission = session.getFeature(UnixPermission.class);
             if(permission != null) {
@@ -78,7 +77,7 @@ public class TouchWorker extends Worker<Path> {
             }
             final AclPermission acl = session.getFeature(AclPermission.class);
             if(acl != null) {
-                status.setAcl(acl.getDefault(EnumSet.of(Path.Type.file)));
+                status.setAcl(acl.getDefault(file));
             }
         }
         final Path result = feature.touch(file, status);
@@ -112,13 +111,13 @@ public class TouchWorker extends Worker<Path> {
             return false;
         }
         final TouchWorker that = (TouchWorker) o;
-        return Objects.equals(file, that.file);
+        return new SimplePathPredicate(file).test(that.file);
 
     }
 
     @Override
     public int hashCode() {
-        return file != null ? file.hashCode() : 0;
+        return file != null ? new SimplePathPredicate(file).hashCode() : 0;
     }
 
     @Override

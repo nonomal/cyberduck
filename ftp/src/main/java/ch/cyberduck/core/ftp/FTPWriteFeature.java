@@ -18,12 +18,11 @@ package ch.cyberduck.core.ftp;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.VoidStatusOutputStream;
-import ch.cyberduck.core.shared.AppendWriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.net.ftp.FTPReply;
@@ -34,7 +33,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class FTPWriteFeature extends AppendWriteFeature<Void> {
+public class FTPWriteFeature implements Write<Void> {
     private static final Logger log = LogManager.getLogger(FTPWriteFeature.class);
 
     private final FTPSession session;
@@ -55,7 +54,7 @@ public class FTPWriteFeature extends AppendWriteFeature<Void> {
                     try {
                         if(status.isAppend()) {
                             if(!status.isExists()) {
-                                log.warn(String.format("Allocate %d bytes for file %s", status.getOffset(), file));
+                                log.warn("Allocate {} bytes for file {}", status.getOffset(), file);
                                 session.getClient().allocate((int) status.getOffset());
                             }
                             return session.getClient().appendFileStream(file.getAbsolute());
@@ -68,7 +67,7 @@ public class FTPWriteFeature extends AppendWriteFeature<Void> {
                         throw new FTPExceptionMappingService().map(e);
                     }
                 }
-            }, new DisabledProgressListener());
+            });
             return new ReadReplyOutputStream(out, status);
         }
         catch(IOException e) {
@@ -89,7 +88,7 @@ public class FTPWriteFeature extends AppendWriteFeature<Void> {
         @Override
         public void close() throws IOException {
             if(close.get()) {
-                log.warn(String.format("Skip double close of stream %s", this));
+                log.warn("Skip double close of stream {}", this);
                 return;
             }
             try {
@@ -100,13 +99,13 @@ public class FTPWriteFeature extends AppendWriteFeature<Void> {
                         final String text = session.getClient().getReplyString();
                         if(status.isSegment()) {
                             // Ignore 451 and 426 response because stream was prematurely closed
-                            log.warn(String.format("Ignore unexpected reply %s when completing file segment %s", text, status));
+                            log.warn("Ignore unexpected reply {} when completing file segment {}", text, status);
                         }
                         else if(!status.isComplete()) {
-                            log.warn(String.format("Ignore unexpected reply %s with incomplete transfer status %s", text, status));
+                            log.warn("Ignore unexpected reply {} with incomplete transfer status {}", text, status);
                         }
                         else {
-                            log.warn(String.format("Unexpected reply %s when completing file download with status %s", text, status));
+                            log.warn("Unexpected reply {} when completing file download with status {}", text, status);
                             throw new FTPException(session.getClient().getReplyCode(), text);
                         }
                     }

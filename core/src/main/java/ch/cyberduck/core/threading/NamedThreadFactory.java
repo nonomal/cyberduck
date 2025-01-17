@@ -50,16 +50,12 @@ public class NamedThreadFactory implements ThreadFactory {
 
     @Override
     public Thread newThread(final Runnable action) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Create thread for runnable %s", action));
-        }
+        log.debug("Create thread for runnable {}", action);
         final Thread thread = new Thread(new Runnable() {
             @Override
             public void run() {
                 action.run();
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Finished execution of runnable %s", action));
-                }
+                log.debug("Finished execution of runnable {}", action);
             }
         });
         thread.setDaemon(true);
@@ -67,5 +63,16 @@ public class NamedThreadFactory implements ThreadFactory {
         thread.setPriority(priority.toInteger());
         thread.setUncaughtExceptionHandler(handler);
         return thread;
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("NamedThreadFactory{");
+        sb.append("threadNumber=").append(threadNumber);
+        sb.append(", name='").append(name).append('\'');
+        sb.append(", priority=").append(priority);
+        sb.append(", handler=").append(handler);
+        sb.append('}');
+        return sb.toString();
     }
 }

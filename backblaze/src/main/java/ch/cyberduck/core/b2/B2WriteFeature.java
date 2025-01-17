@@ -17,7 +17,6 @@ package ch.cyberduck.core.b2;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
@@ -31,23 +30,22 @@ import ch.cyberduck.core.io.ChecksumComputeFactory;
 import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import org.apache.http.entity.AbstractHttpEntity;
+import org.apache.http.HttpEntity;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
+import java.util.EnumSet;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import synapticloop.b2.exception.B2ApiException;
-import synapticloop.b2.response.B2FileInfoResponse;
 import synapticloop.b2.response.B2FileResponse;
 import synapticloop.b2.response.B2GetUploadPartUrlResponse;
 import synapticloop.b2.response.B2GetUploadUrlResponse;
-import synapticloop.b2.response.B2UploadPartResponse;
 import synapticloop.b2.response.BaseB2Response;
 
+import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_CREATION_DATE_MILLIS;
 import static ch.cyberduck.core.b2.B2MetadataFeature.X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS;
 
 public class B2WriteFeature extends AbstractHttpWriteFeature<BaseB2Response> implements Write<BaseB2Response> {
@@ -71,12 +69,12 @@ public class B2WriteFeature extends AbstractHttpWriteFeature<BaseB2Response> imp
     @Override
     public HttpResponseOutputStream<BaseB2Response> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         // Submit store call to background thread
-        final DelayedHttpEntityCallable<BaseB2Response> command = new DelayedHttpEntityCallable<BaseB2Response>() {
+        final DelayedHttpEntityCallable<BaseB2Response> command = new DelayedHttpEntityCallable<BaseB2Response>(file) {
             /**
              * @return The SHA-1 returned by the server for the uploaded object
              */
             @Override
-            public BaseB2Response call(final AbstractHttpEntity entity) throws BackgroundException {
+            public BaseB2Response call(final HttpEntity entity) throws BackgroundException {
                 try {
                     final Checksum checksum = status.getChecksum();
                     if(status.isSegment()) {
@@ -85,24 +83,20 @@ public class B2WriteFeature extends AbstractHttpWriteFeature<BaseB2Response> imp
                     }
                     else {
                         if(null == urls.get()) {
-                            final B2GetUploadUrlResponse uploadUrl = session.getClient().getUploadUrl(fileid.getVersionId(containerService.getContainer(file), new DisabledListProgressListener()));
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Obtained upload URL %s for file %s", uploadUrl, file));
-                            }
+                            final B2GetUploadUrlResponse uploadUrl = session.getClient().getUploadUrl(fileid.getVersionId(containerService.getContainer(file)));
+                            log.debug("Obtained upload URL {} for file {}", uploadUrl, file);
                             urls.set(uploadUrl);
                             return this.upload(uploadUrl, entity, checksum);
                         }
                         else {
                             final B2GetUploadUrlResponse uploadUrl = urls.get();
-                            if(log.isDebugEnabled()) {
-                                log.debug(String.format("Use cached upload URL %s for file %s", uploadUrl, file));
-                            }
+                            log.debug("Use cached upload URL {} for file {}", uploadUrl, file);
                             try {
                                 return this.upload(uploadUrl, entity, checksum);
                             }
                             catch(IOException | B2ApiException e) {
                                 // Upload many files to the same upload_url until that URL gives an error
-                                log.warn(String.format("Remove cached upload URL after failure %s", e));
+                                log.warn("Remove cached upload URL after failure {}", e.toString());
                                 urls.remove();
                                 // Retry
                                 return this.upload(uploadUrl, entity, checksum);
@@ -118,10 +112,13 @@ public class B2WriteFeature extends AbstractHttpWriteFeature<BaseB2Response> imp
                 }
             }
 
-            private BaseB2Response upload(final B2GetUploadUrlResponse uploadUrl, final AbstractHttpEntity entity, final Checksum checksum) throws B2ApiException, IOException {
+            private BaseB2Response upload(final B2GetUploadUrlResponse uploadUrl, final HttpEntity entity, final Checksum checksum) throws B2ApiException, IOException {
                 final Map<String, String> fileinfo = new HashMap<>(status.getMetadata());
-                if(null != status.getTimestamp()) {
-                    fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getTimestamp()));
+                if(null != status.getModified()) {
+                    fileinfo.put(X_BZ_INFO_SRC_LAST_MODIFIED_MILLIS, String.valueOf(status.getModified()));
+                }
+                if(null != status.getCreated()) {
+                    fileinfo.put(X_BZ_INFO_SRC_CREATION_DATE_MILLIS, String.valueOf(status.getCreated()));
                 }
                 final B2FileResponse response = session.getClient().uploadFile(uploadUrl,
                         containerService.getKey(file),
@@ -140,26 +137,12 @@ public class B2WriteFeature extends AbstractHttpWriteFeature<BaseB2Response> imp
     }
 
     @Override
-    public boolean timestamp() {
-        return true;
-    }
-
-    @Override
     public ChecksumCompute checksum(final Path file, final TransferStatus status) {
         return ChecksumComputeFactory.get(HashAlgorithm.sha1);
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        final B2LargeUploadPartService partService = new B2LargeUploadPartService(session, fileid);
-        final List<B2FileInfoResponse> upload = partService.find(file);
-        if(!upload.isEmpty()) {
-            Long size = 0L;
-            for(B2UploadPartResponse completed : partService.list(upload.iterator().next().getFileId())) {
-                size += completed.getContentLength();
-            }
-            return new Append(true).withStatus(status).withSize(size);
-        }
-        return new Append(false).withStatus(status);
+    public EnumSet<Flags> features(final Path file) {
+        return EnumSet.of(Flags.timestamp, Flags.checksum, Flags.mime);
     }
 }

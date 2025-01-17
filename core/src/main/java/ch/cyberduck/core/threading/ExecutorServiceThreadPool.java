@@ -35,24 +35,20 @@ public abstract class ExecutorServiceThreadPool implements ThreadPool {
     @Override
     public void shutdown(boolean gracefully) {
         if(gracefully) {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Shutdown pool %s gracefully", pool));
-            }
+            log.info("Shutdown pool {} gracefully", pool);
             pool.shutdown();
         }
         else {
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Shutdown pool %s now", pool));
-            }
+            log.info("Shutdown pool {} now", pool);
             pool.shutdownNow();
         }
         try {
             while(!pool.awaitTermination(1L, TimeUnit.SECONDS)) {
-                log.warn(String.format("Await termination for pool %s", pool));
+                log.warn("Await termination for pool {}", pool);
             }
         }
         catch(InterruptedException e) {
-            log.error(String.format("Failure awaiting pool termination. %s", e.getMessage()));
+            log.error("Failure awaiting pool termination. {}", e.getMessage());
         }
     }
 
@@ -68,5 +64,13 @@ public abstract class ExecutorServiceThreadPool implements ThreadPool {
     @Override
     public AbstractExecutorService executor() {
         return pool;
+    }
+
+    @Override
+    public String toString() {
+        final StringBuilder sb = new StringBuilder("ExecutorServiceThreadPool{");
+        sb.append("pool=").append(pool);
+        sb.append('}');
+        return sb.toString();
     }
 }

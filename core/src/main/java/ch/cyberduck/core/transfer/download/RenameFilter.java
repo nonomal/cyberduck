@@ -23,6 +23,7 @@ import ch.cyberduck.core.Path;
 import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.features.AttributesFinder;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.transfer.symlink.SymlinkResolver;
 
@@ -35,12 +36,15 @@ public class RenameFilter extends AbstractDownloadFilter {
     private static final Logger log = LogManager.getLogger(RenameFilter.class);
 
     public RenameFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session) {
-        super(symlinkResolver, session, new DownloadFilterOptions(session.getHost()));
+        this(symlinkResolver, session, session.getFeature(AttributesFinder.class), new DownloadFilterOptions(session.getHost()));
     }
 
-    public RenameFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session,
-                        final DownloadFilterOptions options) {
-        super(symlinkResolver, session, options);
+    public RenameFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final DownloadFilterOptions options) {
+        this(symlinkResolver, session, session.getFeature(AttributesFinder.class), options);
+    }
+
+    public RenameFilter(final SymlinkResolver<Path> symlinkResolver, final Session<?> session, final AttributesFinder attribute, final DownloadFilterOptions options) {
+        super(symlinkResolver, session, attribute, options);
     }
 
     @Override
@@ -57,21 +61,15 @@ public class RenameFilter extends AbstractDownloadFilter {
                 status.withRename(LocalFactory.get(local.getParent(), proposal));
             }
             while(status.getRename().local.exists());
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Changed download target from %s to %s", local, status.getRename().local));
-            }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Clear exist flag for file %s", local));
-            }
+            log.info("Changed download target from {} to {}", local, status.getRename().local);
+            log.debug("Clear exist flag for file {}", local);
             status.setExists(false);
         }
         else {
             if(parent.getRename().local != null) {
                 status.withRename(LocalFactory.get(parent.getRename().local, file.getName()));
             }
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Changed download target from %s to %s", local, status.getRename().local));
-            }
+            log.info("Changed download target from {} to {}", local, status.getRename().local);
         }
         return status;
     }

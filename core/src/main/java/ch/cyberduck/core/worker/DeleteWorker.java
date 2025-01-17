@@ -19,7 +19,6 @@ package ch.cyberduck.core.worker;
  */
 
 import ch.cyberduck.core.Filter;
-import ch.cyberduck.core.Host;
 import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.LocaleFactory;
@@ -32,6 +31,8 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Trash;
+import ch.cyberduck.core.features.Versioning;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.transfer.TransferStatus;
 
@@ -41,13 +42,12 @@ import org.apache.logging.log4j.Logger;
 import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 public class DeleteWorker extends Worker<List<Path>> {
-
     private static final Logger log = LogManager.getLogger(DeleteWorker.class);
 
     /**
@@ -97,7 +97,7 @@ public class DeleteWorker extends Worker<List<Path>> {
         final Delete delete;
         if(trash) {
             if(null == session.getFeature(Trash.class)) {
-                log.warn(String.format("No trash feature available for %s", session));
+                log.warn("No trash feature available for {}", session);
                 delete = session.getFeature(Delete.class);
             }
             else {
@@ -113,43 +113,63 @@ public class DeleteWorker extends Worker<List<Path>> {
             if(this.isCanceled()) {
                 throw new ConnectionCanceledException();
             }
-            recursive.putAll(this.compile(session.getHost(), delete, list, new WorkerListProgressListener(this, listener), file));
+            recursive.putAll(this.compile(delete, list, new WorkerListProgressListener(this, listener), file));
         }
         // Iterate again to delete any files that can be omitted when recursive operation is supported
         if(delete.isRecursive()) {
-            recursive.keySet().removeIf(f -> recursive.keySet().stream().anyMatch(f::isChild));
+            recursive.keySet().removeIf(f -> !f.getType().contains(Path.Type.decrypted) && recursive.keySet().stream().anyMatch(f::isChild));
         }
-        delete.delete(recursive, prompt, new Delete.Callback() {
-            @Override
-            public void delete(final Path file) {
-                listener.message(MessageFormat.format(LocaleFactory.localizedString("Deleting {0}", "Status"), file.getName()));
-                callback.delete(file);
-                if(file.isDirectory()) {
-                    if(delete.isRecursive()) {
-                        files.stream().filter(f -> f.isChild(file)).forEach(callback::delete);
+        final HostPreferences preferences = new HostPreferences(session.getHost());
+        if(preferences.getBoolean("versioning.enable") && preferences.getBoolean("versioning.delete.enable")) {
+            switch(session.getHost().getProtocol().getVersioningMode()) {
+                case custom:
+                    final Versioning versioning = session.getFeature(Versioning.class);
+                    if(versioning != null) {
+                        for(Iterator<Path> iter = recursive.keySet().iterator(); iter.hasNext(); ) {
+                            final Path f = iter.next();
+                            if(versioning.getConfiguration(f).isEnabled()) {
+                                if(versioning.save(f)) {
+                                    log.debug("Skip deleting {}", f);
+                                    iter.remove();
+                                }
+                            }
+                        }
+                    }
+            }
+        }
+        if(!recursive.isEmpty()) {
+            delete.delete(recursive, prompt, new Delete.Callback() {
+                @Override
+                public void delete(final Path file) {
+                    listener.message(MessageFormat.format(LocaleFactory.localizedString("Deleting {0}", "Status"), file.getName()));
+                    callback.delete(file);
+                    if(file.isDirectory()) {
+                        if(delete.isRecursive()) {
+                            files.stream().filter(f -> f.isChild(file)).forEach(callback::delete);
+                        }
                     }
                 }
-            }
-        });
+            });
+        }
         return new ArrayList<>(recursive.keySet());
     }
 
-    protected Map<Path, TransferStatus> compile(final Host host, final Delete delete, final ListService list, final ListProgressListener listener, final Path file) throws BackgroundException {
+    protected Map<Path, TransferStatus> compile(final Delete delete, final ListService list, final ListProgressListener listener, final Path file) throws BackgroundException {
         // Compile recursive list
         final Map<Path, TransferStatus> recursive = new LinkedHashMap<>();
         if(file.isFile() || file.isSymbolicLink()) {
             if(null != file.attributes().getVersionId()) {
                 if(file.attributes().isDuplicate()) {
                     // Delete previous versions or pending upload
-                    log.warn(String.format("Delete version %s", file));
+                    log.warn("Delete version {}", file);
                 }
                 else {
                     if(file.getType().contains(Path.Type.upload)) {
-                        log.warn(String.format("Delete pending upload %s", file));
+                        log.warn("Delete pending upload {}", file);
                     }
                     else {
                         // Add delete marker
-                        log.warn(String.format("Nullify version to add delete marker for %s", file));
+                        log.warn("Nullify version to add delete marker for {}", file);
                         file.attributes().setVersionId(null);
                     }
                 }
@@ -157,12 +177,12 @@ public class DeleteWorker extends Worker<List<Path>> {
             recursive.put(file, new TransferStatus().withLockId(this.getLockId(file)));
         }
         else if(file.isDirectory()) {
-            if(!delete.isRecursive()) {
+            if(!delete.isRecursive() || file.getType().contains(Path.Type.decrypted)) {
                 for(Path child : list.list(file, listener).filter(filter)) {
                     if(this.isCanceled()) {
                         throw new ConnectionCanceledException();
                     }
-                    recursive.putAll(this.compile(host, delete, list, listener, child));
+                    recursive.putAll(this.compile(delete, list, listener, child));
                 }
             }
             // Add parent after children
@@ -184,23 +204,6 @@ public class DeleteWorker extends Worker<List<Path>> {
     @Override
     public List<Path> initialize() {
         return Collections.emptyList();
-    }
-
-    @Override
-    public boolean equals(final Object o) {
-        if(this == o) {
-            return true;
-        }
-        if(!(o instanceof DeleteWorker)) {
-            return false;
-        }
-        final DeleteWorker that = (DeleteWorker) o;
-        return Objects.equals(files, that.files);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(files);
     }
 
     @Override

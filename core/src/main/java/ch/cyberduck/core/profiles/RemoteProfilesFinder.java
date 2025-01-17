@@ -18,6 +18,7 @@ package ch.cyberduck.core.profiles;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Filter;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Local;
@@ -27,11 +28,14 @@ import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Read;
-import ch.cyberduck.core.local.DefaultLocalTouchFeature;
+import ch.cyberduck.core.local.TemporaryFileService;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
 import ch.cyberduck.core.shared.DefaultPathHomeFeature;
 import ch.cyberduck.core.shared.DelegatingHomeFeature;
+import ch.cyberduck.core.transfer.TransferPathFilter;
 import ch.cyberduck.core.transfer.TransferStatus;
+import ch.cyberduck.core.transfer.download.CompareFilter;
+import ch.cyberduck.core.transfer.symlink.DisabledDownloadSymlinkResolver;
 
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.concurrent.ConcurrentException;
@@ -49,55 +53,61 @@ import java.util.stream.Collectors;
 public class RemoteProfilesFinder implements ProfilesFinder {
     private static final Logger log = LogManager.getLogger(RemoteProfilesFinder.class);
 
+    private final TemporaryFileService temp = TemporaryFileServiceFactory.get();
     private final ProtocolFactory protocols;
     private final Session<?> session;
+    private final TransferPathFilter comparison;
+    private final Filter<Path> filter;
 
     public RemoteProfilesFinder(final Session<?> session) {
         this(ProtocolFactory.get(), session);
     }
 
     public RemoteProfilesFinder(final ProtocolFactory protocols, final Session<?> session) {
+        this(protocols, session, new CompareFilter(new DisabledDownloadSymlinkResolver(), session), new ProfileFilter());
+    }
+
+    public RemoteProfilesFinder(final Session<?> session,
+                                final TransferPathFilter comparison, final Filter<Path> filter) {
+        this(ProtocolFactory.get(), session, comparison, filter);
+    }
+
+    public RemoteProfilesFinder(final ProtocolFactory protocols, final Session<?> session,
+                                final TransferPathFilter comparison, final Filter<Path> filter) {
         this.protocols = protocols;
         this.session = session;
+        this.comparison = comparison;
+        this.filter = filter;
     }
 
     @Override
     public Set<ProfileDescription> find(final Visitor visitor) throws BackgroundException {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetch profiles from %s", session.getHost()));
-        }
-        final ProfileFilter filter = new ProfileFilter();
+        log.info("Fetch profiles from {}", session.getHost());
         final AttributedList<Path> list = session.getFeature(ListService.class).list(new DelegatingHomeFeature(
-            new DefaultPathHomeFeature(session.getHost())).find(), new DisabledListProgressListener());
+                new DefaultPathHomeFeature(session.getHost())).find(), new DisabledListProgressListener());
         return list.filter(filter).toStream().map(file -> visitor.visit(new RemoteProfileDescription(protocols, file,
                 new LazyInitializer<Local>() {
                     @Override
                     protected Local initialize() throws ConcurrentException {
                         try {
-                            final Read read = session.getFeature(Read.class);
-                            if(log.isInfoEnabled()) {
-                                log.info(String.format("Download profile %s", file));
+                            final Local local = temp.create("profiles", file);
+                            if(comparison.accept(file, local, new TransferStatus().exists(true), new DisabledProgressListener())) {
+                                final Read read = session.getFeature(Read.class);
+                                log.info("Download profile {}", file);
+                                // Read latest version
+                                try (InputStream in = read.read(file.withAttributes(new PathAttributes(file.attributes())
+                                        // Read latest version
+                                        .withVersionId(null)), new TransferStatus().withLength(TransferStatus.UNKNOWN_LENGTH), new DisabledConnectionCallback()); OutputStream out = local.getOutputStream(false)) {
+                                    IOUtils.copy(in, out);
+                                }
                             }
-                            final InputStream in = read.read(file.withAttributes(new PathAttributes(file.attributes())
-                                    // Read latest version
-                                    .withVersionId(null)), new TransferStatus().withLength(TransferStatus.UNKNOWN_LENGTH), new DisabledConnectionCallback());
-                            final Local temp = TemporaryFileServiceFactory.get().create(file.getName());
-                        new DefaultLocalTouchFeature().touch(temp);
-                        final OutputStream out = temp.getOutputStream(false);
-                        try {
-                            IOUtils.copy(in, out);
+                            return local;
                         }
-                        finally {
-                            in.close();
-                            out.close();
+                        catch(BackgroundException | IOException e) {
+                            throw new ConcurrentException(e);
                         }
-                        return temp;
-                    }
-                    catch(BackgroundException | IOException e) {
-                        throw new ConcurrentException(e);
                     }
                 }
-            }
         ))).collect(Collectors.toSet());
     }
 

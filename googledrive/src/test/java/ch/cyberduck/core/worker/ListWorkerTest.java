@@ -58,13 +58,13 @@ public class ListWorkerTest extends AbstractDriveTest {
         assertTrue(new DefaultFindFeature(session).find(folder));
         {
             // trash folder and recreate it
-            final String fileid = fileidProvider.getFileId(folder, new DisabledListProgressListener());
+            final String fileid = fileidProvider.getFileId(folder);
             final File body = new File();
             body.set("trashed", true);
             session.getClient().files().update(fileid, body).execute();
             folder = new DriveDirectoryFeature(session, fileidProvider).mkdir(folder, new TransferStatus());
             final PathCache cache = new PathCache(10);
-            final SessionListWorker worker = new SessionListWorker(cache, parent, new DisabledListProgressListener());
+            final ListWorker worker = new ListWorker(cache, parent, new DisabledListProgressListener());
             final AttributedList<Path> list = worker.run(session);
             assertEquals(2, list.size());
             worker.cleanup(list);
@@ -75,12 +75,12 @@ public class ListWorkerTest extends AbstractDriveTest {
         }
         {
             // trash recreated folder
-            final String fileid = fileidProvider.getFileId(folder, new DisabledListProgressListener());
+            final String fileid = fileidProvider.getFileId(folder);
             final File body = new File();
             body.set("trashed", true);
             session.getClient().files().update(fileid, body).execute();
             final PathCache cache = new PathCache(10);
-            final SessionListWorker worker = new SessionListWorker(cache, parent, new DisabledListProgressListener());
+            final ListWorker worker = new ListWorker(cache, parent, new DisabledListProgressListener());
             final AttributedList<Path> list = worker.run(session);
             assertEquals(2, list.size());
             worker.cleanup(list);

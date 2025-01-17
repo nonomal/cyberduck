@@ -24,8 +24,8 @@ import ch.cyberduck.core.NullSession;
 import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.Scheme;
 import ch.cyberduck.core.TestProtocol;
+import ch.cyberduck.core.proxy.DisabledProxyFinder;
 import ch.cyberduck.core.proxy.Proxy;
-import ch.cyberduck.core.serializer.impl.dd.ProfilePlistReader;
 
 import org.junit.Test;
 
@@ -70,7 +70,6 @@ public class RemoteProfilesFinderTest {
                 return false;
             }
         })));
-        final ProfilePlistReader reader = new ProfilePlistReader(protocols);
         final TestProtocol protocol = new TestProtocol() {
             @Override
             public String getIdentifier() {
@@ -94,7 +93,7 @@ public class RemoteProfilesFinderTest {
         };
         final Host host = new HostParser(protocols, protocol).get("https://svn.cyberduck.io/trunk/profiles");
         final NullSession session = new NullSession(host);
-        session.open(Proxy.DIRECT, new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
+        session.open(new DisabledProxyFinder(), new DisabledHostKeyCallback(), new DisabledLoginCallback(), new DisabledCancelCallback());
         final RemoteProfilesFinder finder = new RemoteProfilesFinder(session);
         final Set<ProfileDescription> stream = finder.find();
         assertTrue(stream.isEmpty());

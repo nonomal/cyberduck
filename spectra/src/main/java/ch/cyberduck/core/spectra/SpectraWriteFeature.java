@@ -21,12 +21,12 @@ import ch.cyberduck.core.io.ChecksumCompute;
 import ch.cyberduck.core.io.ChecksumComputeFactory;
 import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.s3.S3AccessControlListFeature;
+import ch.cyberduck.core.s3.S3PathContainerService;
 import ch.cyberduck.core.s3.S3WriteFeature;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
 import org.jets3t.service.model.S3Object;
-import org.jets3t.service.utils.ServiceUtils;
 
 public class SpectraWriteFeature extends S3WriteFeature {
 
@@ -34,7 +34,7 @@ public class SpectraWriteFeature extends S3WriteFeature {
 
     public SpectraWriteFeature(final SpectraSession session) {
         super(session, new S3AccessControlListFeature(session));
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new S3PathContainerService(session.getHost());
     }
 
     /**
@@ -52,7 +52,7 @@ public class SpectraWriteFeature extends S3WriteFeature {
                 case md5:
                     // Set checksum on our own to avoid jets3t setting AWS metadata for MD5 as metadata must remain
                     // constant for all chunks
-                    object.addMetadata("Content-MD5", ServiceUtils.toBase64(ServiceUtils.fromHex(checksum.hash)));
+                    object.addMetadata("Content-MD5", checksum.base64);
                     break;
             }
         }

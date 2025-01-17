@@ -30,6 +30,7 @@ import ch.cyberduck.core.AbstractCollectionListener;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.threading.BackgroundAction;
 import ch.cyberduck.core.threading.BackgroundActionRegistry;
+import ch.cyberduck.core.threading.DefaultMainAction;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -45,11 +46,18 @@ import java.util.Map;
 public final class ActivityController extends WindowController {
     private static final Logger log = LogManager.getLogger(ActivityController.class);
 
-    private final BackgroundActionRegistry registry
-        = BackgroundActionRegistry.global();
+    private final BackgroundActionRegistry registry;
 
     private final Map<BackgroundAction, TaskController> tasks
-        = Collections.synchronizedMap(new LinkedHashMap<BackgroundAction, TaskController>());
+            = Collections.synchronizedMap(new LinkedHashMap<>());
+
+    public ActivityController() {
+        this(BackgroundActionRegistry.global());
+    }
+
+    public ActivityController(final BackgroundActionRegistry registry) {
+        this.registry = registry;
+    }
 
     @Override
     public void awakeFromNib() {
@@ -58,7 +66,7 @@ public final class ActivityController extends WindowController {
         registry.addListener(backgroundActionListener);
         // Add already running background actions
         final BackgroundAction[] actions = registry.toArray(
-            new BackgroundAction[registry.size()]);
+                new BackgroundAction[registry.size()]);
         for(final BackgroundAction action : actions) {
             tasks.put(action, new TaskController(action));
         }
@@ -74,23 +82,21 @@ public final class ActivityController extends WindowController {
     }
 
     private final AbstractCollectionListener<BackgroundAction> backgroundActionListener
-        = new AbstractCollectionListener<BackgroundAction>() {
+            = new AbstractCollectionListener<BackgroundAction>() {
 
         @Override
         public void collectionItemAdded(final BackgroundAction action) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Add background action %s", action));
-            }
+            log.debug("Add background action {}", action);
             tasks.put(action, new TaskController(action));
             reload();
         }
 
         @Override
         public void collectionItemRemoved(final BackgroundAction action) {
-            log.debug(String.format("Remove background action %s", action));
+            log.debug("Remove background action {}", action);
             final TaskController controller = tasks.remove(action);
             if(null == controller) {
-                log.warn(String.format("Failed to find controller for action %s", action));
+                log.warn("Failed to find controller for action {}", action);
                 return;
             }
             controller.invalidate();
@@ -102,10 +108,15 @@ public final class ActivityController extends WindowController {
      *
      */
     private void reload() {
-        while(table.subviews().count().intValue() > 0) {
-            (Rococoa.cast(table.subviews().lastObject(), NSView.class)).removeFromSuperviewWithoutNeedingDisplay();
-        }
-        table.reloadData();
+        this.invoke(new DefaultMainAction() {
+            @Override
+            public void run() {
+                while(table.subviews().count().intValue() > 0) {
+                    (Rococoa.cast(table.subviews().lastObject(), NSView.class)).removeFromSuperviewWithoutNeedingDisplay();
+                }
+                table.reloadData();
+            }
+        });
     }
 
     @Override
@@ -153,7 +164,7 @@ public final class ActivityController extends WindowController {
             }
         }).id());
         this.table.setDelegate((delegate = new AbstractTableDelegate<TaskController, ActivityColumn>(
-            table.tableColumnWithIdentifier("Default")
+                table.tableColumnWithIdentifier("Default")
         ) {
             @Override
             public void enterKeyPressed(final ID sender) {
@@ -192,14 +203,21 @@ public final class ActivityController extends WindowController {
 
             public NSView tableView_viewForTableColumn_row(final NSTableView view, final NSTableColumn column, final NSInteger row) {
                 final TaskController controller = getController(row);
+                if(null == controller) {
+                    return null;
+                }
                 return controller.view();
             }
         }).id());
         this.table.sizeToFit();
     }
 
-    protected TaskController getController(final NSInteger row) {
-        return tasks.values().toArray(new TaskController[tasks.size()])[row.intValue()];
+    private TaskController getController(final NSInteger row) {
+        final TaskController[] controllers = tasks.values().toArray(new TaskController[tasks.size()]);
+        if(row.intValue() >= controllers.length) {
+            return null;
+        }
+        return controllers[row.intValue()];
     }
 
     @Override

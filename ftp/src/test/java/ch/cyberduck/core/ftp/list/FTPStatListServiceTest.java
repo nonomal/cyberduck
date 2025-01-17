@@ -18,9 +18,12 @@ package ch.cyberduck.core.ftp.list;
 import ch.cyberduck.core.AlphanumericRandomStringService;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.DisabledLoginCallback;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.ftp.AbstractFTPTest;
+import ch.cyberduck.core.ftp.FTPDeleteFeature;
 import ch.cyberduck.core.ftp.FTPTouchFeature;
 import ch.cyberduck.core.ftp.FTPWorkdirService;
 import ch.cyberduck.core.ftp.parser.CompositeFileEntryParser;
@@ -53,6 +56,7 @@ public class FTPStatListServiceTest extends AbstractFTPTest {
         new FTPTouchFeature(session).touch(file, new TransferStatus());
         final AttributedList<Path> list = service.list(directory, new DisabledListProgressListener());
         assertTrue(list.contains(file));
+        new FTPDeleteFeature(session).delete(Collections.singletonList(file), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
     @Test
@@ -77,7 +81,7 @@ public class FTPStatListServiceTest extends AbstractFTPTest {
         assertEquals(6, list.size());
         final Path parent = new Path("/cgi-bin", EnumSet.of(Path.Type.directory));
         final AttributedList<Path> parsed = new FTPListResponseReader(parser, true).read(
-            parent, list, new DisabledListProgressListener()
+                parent, list
         );
         assertEquals(2, parsed.size());
         assertTrue(parsed.contains(new Path(parent, "tmp", EnumSet.of(Path.Type.directory))));
@@ -97,7 +101,7 @@ public class FTPStatListServiceTest extends AbstractFTPTest {
         assertTrue(list.contains("-rw-------   0 David-Kocher -          529 Jun 17 07:59 App.config"));
         final Path parent = new Path("/cyberduck", EnumSet.of(Path.Type.directory));
         final AttributedList<Path> parsed = new FTPListResponseReader(parser, true).read(
-            parent, list, new DisabledListProgressListener());
+                parent, list);
         assertEquals(2, parsed.size());
     }
 

@@ -29,6 +29,7 @@ import ch.cyberduck.binding.foundation.NSFileManager;
 import ch.cyberduck.binding.foundation.NSMutableArray;
 import ch.cyberduck.binding.foundation.NSObject;
 import ch.cyberduck.binding.foundation.NSURL;
+import ch.cyberduck.core.AbstractHostCollection;
 import ch.cyberduck.core.Acl;
 import ch.cyberduck.core.AttributedList;
 import ch.cyberduck.core.Cache;
@@ -55,7 +56,6 @@ import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.local.DefaultLocalDirectoryFeature;
 import ch.cyberduck.core.local.FileDescriptor;
 import ch.cyberduck.core.local.FileDescriptorFactory;
-import ch.cyberduck.core.local.IconServiceFactory;
 import ch.cyberduck.core.local.LocalTouchFactory;
 import ch.cyberduck.core.pasteboard.PathPasteboard;
 import ch.cyberduck.core.pasteboard.PathPasteboardFactory;
@@ -68,7 +68,6 @@ import ch.cyberduck.core.transfer.CopyTransfer;
 import ch.cyberduck.core.transfer.DownloadTransfer;
 import ch.cyberduck.core.transfer.Transfer;
 import ch.cyberduck.core.transfer.TransferItem;
-import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.transfer.UploadTransfer;
 import ch.cyberduck.core.transfer.download.DownloadFilterOptions;
 import ch.cyberduck.ui.browser.BrowserColumn;
@@ -96,6 +95,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 public abstract class BrowserTableDataSource extends ProxyController implements NSDraggingSource {
@@ -107,10 +107,10 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
     private final FileDescriptor descriptor = FileDescriptorFactory.get();
     private final Preferences preferences = PreferencesFactory.get();
     private final LRUCache<Item, NSAttributedString> attributed = LRUCache.build(
-        preferences.getInteger("browser.model.cache.size")
+            preferences.getInteger("browser.model.cache.size")
     );
     private final LRUCache<Path, AttributedList<Path>> filtered = LRUCache.build(
-        preferences.getInteger("browser.model.cache.size")
+            preferences.getInteger("browser.model.cache.size")
     );
     protected final BrowserController controller;
     protected final Cache<Path> cache;
@@ -195,9 +195,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
     }
 
     protected void setObjectValueForItem(final Path item, final NSObject value, final String identifier) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Set new value %s for item %s", value, item));
-        }
+        log.debug("Set new value {} for item {}", value, item);
         if(identifier.equals(BrowserColumn.filename.name())) {
             if(StringUtils.isNotBlank(value.toString()) && !item.getName().equals(value.toString())) {
                 final Path renamed = new Path(item.getParent(), value.toString(), item.getType(), new PathAttributes(item.attributes()).withVersionId(null));
@@ -217,9 +215,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
         if(null == item) {
             return null;
         }
-        if(log.isTraceEnabled()) {
-            log.trace("objectValueForItem:" + item.getAbsolute());
-        }
+        log.trace("objectValueForItem:{}", item.getAbsolute());
         if(identifier.equals(BrowserColumn.icon.name())) {
             return this.iconForPath(item);
         }
@@ -229,37 +225,35 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
         if(null != value) {
             return value;
         }
-        if(log.isTraceEnabled()) {
-            log.trace(String.format("Lookup failed for %s in cache", key));
-        }
+        log.trace("Lookup failed for {} in cache", key);
         if(identifier.equals(BrowserColumn.filename.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                item.getName(),
-                TableCellAttributes.browserFontLeftAlignment());
+                    item.getName(),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.size.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                sizeFormatter.format(item.attributes().getSize()),
-                TableCellAttributes.browserFontRightAlignment());
+                    sizeFormatter.format(item.attributes().getSize()),
+                    TableCellAttributes.browserFontRightAlignment());
         }
         else if(identifier.equals(BrowserColumn.modified.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                dateFormatter.getShortFormat(item.attributes().getModificationDate(),
-                    preferences.getBoolean("browser.date.natural")),
-                TableCellAttributes.browserFontLeftAlignment()
+                    dateFormatter.getShortFormat(item.attributes().getModificationDate(),
+                            preferences.getBoolean("browser.date.natural")),
+                    TableCellAttributes.browserFontLeftAlignment()
             );
         }
         else if(identifier.equals(BrowserColumn.owner.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                StringUtils.isBlank(item.attributes().getOwner()) ?
-                    LocaleFactory.localizedString("Unknown") : item.attributes().getOwner(),
-                TableCellAttributes.browserFontLeftAlignment());
+                    StringUtils.isBlank(item.attributes().getOwner()) ?
+                            LocaleFactory.localizedString("Unknown") : item.attributes().getOwner(),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.group.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                StringUtils.isBlank(item.attributes().getGroup()) ?
-                    LocaleFactory.localizedString("Unknown") : item.attributes().getGroup(),
-                TableCellAttributes.browserFontLeftAlignment());
+                    StringUtils.isBlank(item.attributes().getGroup()) ?
+                            LocaleFactory.localizedString("Unknown") : item.attributes().getGroup(),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.permission.name())) {
             final Acl acl = item.attributes().getAcl();
@@ -267,53 +261,53 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                 final StringBuilder s = new StringBuilder();
                 for(Map.Entry<Acl.User, Set<Acl.Role>> entry : acl.entrySet()) {
                     s.append(String.format("%s%s:%s", s.length() == 0 ? StringUtils.EMPTY : ", ",
-                        entry.getKey().getDisplayName(), entry.getValue()));
+                            entry.getKey().getDisplayName(), entry.getValue()));
                 }
                 value = NSAttributedString.attributedStringWithAttributes(s.toString(),
-                    TableCellAttributes.browserFontLeftAlignment());
+                        TableCellAttributes.browserFontLeftAlignment());
             }
             else {
                 final Permission permission = item.attributes().getPermission();
                 value = NSAttributedString.attributedStringWithAttributes(
-                    permission.toString(),
-                    TableCellAttributes.browserFontLeftAlignment());
+                        permission.toString(),
+                        TableCellAttributes.browserFontLeftAlignment());
             }
         }
         else if(identifier.equals(BrowserColumn.kind.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                descriptor.getKind(item),
-                TableCellAttributes.browserFontLeftAlignment());
+                    descriptor.getKind(item),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.extension.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                item.isFile() ? StringUtils.isNotBlank(item.getExtension()) ? item.getExtension() :
-                    LocaleFactory.localizedString("None") : LocaleFactory.localizedString("None"),
-                TableCellAttributes.browserFontLeftAlignment());
+                    item.isFile() ? StringUtils.isNotBlank(item.getExtension()) ? item.getExtension() :
+                            LocaleFactory.localizedString("None") : LocaleFactory.localizedString("None"),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.region.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                StringUtils.isNotBlank(item.attributes().getRegion()) ? item.attributes().getRegion() :
-                    LocaleFactory.localizedString("Unknown"),
-                TableCellAttributes.browserFontLeftAlignment());
+                    StringUtils.isNotBlank(item.attributes().getRegion()) ? item.attributes().getRegion() :
+                            LocaleFactory.localizedString("Unknown"),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.version.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                StringUtils.isNotBlank(item.attributes().getVersionId()) ? item.attributes().getVersionId() :
-                    LocaleFactory.localizedString("None"),
-                TableCellAttributes.browserFontLeftAlignment());
+                    StringUtils.isNotBlank(item.attributes().getVersionId()) ? item.attributes().getVersionId() :
+                            LocaleFactory.localizedString("None"),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.checksum.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                !Checksum.NONE.equals(item.attributes().getChecksum()) ? item.attributes().getChecksum().hash :
-                    StringUtils.isNotBlank(item.attributes().getETag()) ? item.attributes().getETag() : LocaleFactory.localizedString("None"),
-                TableCellAttributes.browserFontLeftAlignment());
+                    !Checksum.NONE.equals(item.attributes().getChecksum()) ? item.attributes().getChecksum().hash :
+                            StringUtils.isNotBlank(item.attributes().getETag()) ? item.attributes().getETag() : LocaleFactory.localizedString("None"),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else if(identifier.equals(BrowserColumn.storageclass.name())) {
             value = NSAttributedString.attributedStringWithAttributes(
-                StringUtils.isNotBlank(item.attributes().getStorageClass()) ?
-                    LocaleFactory.localizedString(item.attributes().getStorageClass(), "S3") :
-                    LocaleFactory.localizedString("None"),
-                TableCellAttributes.browserFontLeftAlignment());
+                    StringUtils.isNotBlank(item.attributes().getStorageClass()) ?
+                            LocaleFactory.localizedString(item.attributes().getStorageClass(), "S3") :
+                            LocaleFactory.localizedString("None"),
+                    TableCellAttributes.browserFontLeftAlignment());
         }
         else {
             throw new IllegalArgumentException(String.format("Unknown identifier %s", identifier));
@@ -346,9 +340,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
      */
     @Override
     public NSUInteger draggingSourceOperationMaskForLocal(final boolean local) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Request dragging source operation mask for local %s", local));
-        }
+        log.debug("Request dragging source operation mask for local {}", local);
         if(local) {
             // Move or copy within the browser
             return new NSUInteger(NSDraggingInfo.NSDragOperationMove.intValue() | NSDraggingInfo.NSDragOperationCopy.intValue());
@@ -364,9 +356,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
      * @return True if accepted
      */
     public boolean acceptDrop(final NSTableView view, final Path destination, final NSDraggingInfo info) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Accept drop for destination %s", destination));
-        }
+        log.debug("Accept drop for destination {}", destination);
         if(info.draggingPasteboard().availableTypeFromArray(NSArray.arrayWithObject(NSPasteboard.URLPboardType)) != null) {
             final NSObject o = info.draggingPasteboard().propertyListForType(NSPasteboard.URLPboardType);
             // Mount .webloc URLs dragged to browser window
@@ -399,7 +389,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                         for(int i = 0; i < elements.count().intValue(); i++) {
                             final Local local = LocalFactory.get(elements.objectAtIndex(new NSUInteger(i)).toString());
                             roots.add(new TransferItem(new Path(destination, local.getName(),
-                                local.isDirectory() ? EnumSet.of(Path.Type.directory) : EnumSet.of(Path.Type.file)), local));
+                                    local.isDirectory() ? EnumSet.of(Path.Type.directory) : EnumSet.of(Path.Type.file)), local));
                         }
                         controller.transfer(new UploadTransfer(controller.getSession().getHost(), roots));
                         return true;
@@ -415,22 +405,24 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                 }
                 final Map<Path, Path> files = new HashMap<Path, Path>();
                 for(Path next : pasteboard) {
-                    final Path renamed = new Path(destination, next.getName(), next.getType(), new PathAttributes(next.attributes()).withVersionId(null));
+                    final Path renamed = new Path(destination, next.getName(), EnumSet.of(next.isDirectory() ? Path.Type.directory : Path.Type.file));
                     files.put(next, renamed);
                 }
-                if(pasteboard.getBookmark().compareTo(controller.getSession().getHost()) != 0) {
-                    // Drag to browser windows with different session or explicit copy requested by user.
-                    final Host target = controller.getSession().getHost();
-                    controller.transfer(new CopyTransfer(pasteboard.getBookmark(), target, files),
-                        new ArrayList<Path>(files.values()), false);
-                }
-                else if(info.draggingSourceOperationMask().intValue() == NSDraggingInfo.NSDragOperationCopy.intValue()) {
-                    // The file should be copied
-                    new CopyController(controller).copy(files);
+                if(new AbstractHostCollection.ProfilePredicate(pasteboard.getBookmark()).test(controller.getSession().getHost())) {
+                    if(info.draggingSourceOperationMask().intValue() == NSDraggingInfo.NSDragOperationCopy.intValue()) {
+                        // The file should be copied
+                        new CopyController(controller).copy(files);
+                    }
+                    else {
+                        // The file should be renamed
+                        new MoveController(controller).rename(files);
+                    }
                 }
                 else {
-                    // The file should be renamed
-                    new MoveController(controller).rename(files);
+                    // Drag to browser windows with different session
+                    final Host target = controller.getSession().getHost();
+                    controller.transfer(new CopyTransfer(pasteboard.getBookmark(), target, files),
+                            new ArrayList<Path>(files.values()), false);
                 }
                 pasteboard.clear();
             }
@@ -447,9 +439,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
      * @return Drag operation
      */
     public NSUInteger validateDrop(final NSTableView view, final Path destination, final NSInteger row, final NSDraggingInfo info) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Validate drop for destination %s", destination));
-        }
+        log.debug("Validate drop for destination {}", destination);
         if(info.draggingPasteboard().availableTypeFromArray(NSArray.arrayWithObject(NSPasteboard.URLPboardType)) != null) {
             // Dragging URLs to mount new session
             final NSObject o = info.draggingPasteboard().propertyListForType(NSPasteboard.URLPboardType);
@@ -465,7 +455,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                             return NSDraggingInfo.NSDragOperationCopy;
                         }
                         else {
-                            log.warn(String.format("Protocol not supported for URL %s", elements.objectAtIndex(new NSUInteger(i)).toString()));
+                            log.warn("Protocol not supported for URL {}", elements.objectAtIndex(new NSUInteger(i)).toString());
                         }
                     }
                 }
@@ -505,20 +495,18 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                     return NSDraggingInfo.NSDragOperationNone;
                 }
             }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Drag operation mask is %d", info.draggingSourceOperationMask().intValue()));
-            }
+            log.debug("Drag operation mask is {}", info.draggingSourceOperationMask().intValue());
             this.setDropRowAndDropOperation(view, destination, row);
             final List<PathPasteboard> pasteboards = PathPasteboardFactory.allPasteboards();
             for(PathPasteboard pasteboard : pasteboards) {
                 if(pasteboard.isEmpty()) {
                     continue;
                 }
-                if(pasteboard.getBookmark().compareTo(controller.getSession().getHost()) == 0) {
+                if(new AbstractHostCollection.ProfilePredicate(pasteboard.getBookmark()).test(controller.getSession().getHost())) {
                     if(info.draggingSourceOperationMask().intValue() == NSDraggingInfo.NSDragOperationCopy.intValue()) {
                         // Explicit copy requested if drag operation is already NSDragOperationCopy. User is pressing the option key.
                         for(Path file : pasteboard) {
-                            if(!controller.getSession().getFeature(Copy.class).isSupported(file, destination)) {
+                            if(!controller.getSession().getFeature(Copy.class).isSupported(file, Optional.of(new Path(destination, file.getName(), file.getType())))) {
                                 return NSDraggingInfo.NSDragOperationNone;
                             }
                         }
@@ -526,7 +514,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                     }
                     else {
                         for(Path file : pasteboard) {
-                            if(!controller.getSession().getFeature(Move.class).isSupported(file, destination)) {
+                            if(!controller.getSession().getFeature(Move.class).isSupported(file, Optional.of(new Path(destination, file.getName(), file.getType())))) {
                                 return NSDraggingInfo.NSDragOperationNone;
                             }
                         }
@@ -551,15 +539,13 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
             view.setDropRow(new NSInteger(-1), NSTableView.NSTableViewDropOn);
         }
         else if(destination.isDirectory()) {
-            log.debug("setDropRowAndDropOperation:" + row.intValue());
+            log.debug("setDropRowAndDropOperation:{}", row.intValue());
             view.setDropRow(row, NSTableView.NSTableViewDropOn);
         }
     }
 
     public boolean writeItemsToPasteBoard(final NSTableView view, final List<Path> selected, final NSPasteboard pboard) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Write items to pasteboard %s", pboard));
-        }
+        log.debug("Write items to pasteboard {}", pboard);
         if(controller.isMounted()) {
             if(selected.size() > 0) {
                 // The fileTypes argument is the list of fileTypes being promised.
@@ -591,7 +577,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                     NSPoint dragPosition = view.convertPoint_fromView(event.locationInWindow(), null);
                     NSRect imageRect = new NSRect(new NSPoint(dragPosition.x.doubleValue() - 16, dragPosition.y.doubleValue() - 16), new NSSize(32, 32));
                     if(!view.dragPromisedFilesOfTypes(NSMutableArray.arrayWithObject(fileTypes.iterator().next()), imageRect, this.id(), true, event)) {
-                        log.warn(String.format("Failure for drag promise operation of %s", event));
+                        log.warn("Failure for drag promise operation of {}", event);
                         return false;
                     }
                     return true;
@@ -603,9 +589,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
 
     @Override
     public void draggedImage_beganAt(final NSImage image, final NSPoint point) {
-        if(log.isTraceEnabled()) {
-            log.trace("draggedImage_beganAt:" + point);
-        }
+        log.trace("draggedImage_beganAt:{}", point);
     }
 
     /**
@@ -613,9 +597,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
      */
     @Override
     public void draggedImage_endedAt_operation(final NSImage image, final NSPoint point, final NSUInteger operation) {
-        if(log.isTraceEnabled()) {
-            log.trace("draggedImage_endedAt_operation:" + operation);
-        }
+        log.trace("draggedImage_endedAt_operation:{}", operation);
         final PathPasteboard pasteboard = controller.getPasteboard();
         if(NSDraggingInfo.NSDragOperationDelete.intValue() == operation.intValue()) {
             new DeleteController(controller, controller.getSession()).delete(pasteboard, new ReloadCallback() {
@@ -630,9 +612,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
 
     @Override
     public void draggedImage_movedTo(final NSImage image, final NSPoint point) {
-        if(log.isTraceEnabled()) {
-            log.trace("draggedImage_movedTo:" + point);
-        }
+        log.trace("draggedImage_movedTo:{}", point);
     }
 
     /**
@@ -644,15 +624,12 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
      */
     @Override
     public NSArray namesOfPromisedFilesDroppedAtDestination(final NSURL url) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Return names of promised files dropped at %s", url));
-        }
+        log.debug("Return names of promised files dropped at {}", url);
         NSMutableArray promisedDragNames = NSMutableArray.array();
         if(null != url) {
             final Local destination = LocalFactory.get(url.path());
             final DownloadFilterOptions options = new DownloadFilterOptions(controller.getSession().getHost());
             if(destination.isChild(new TemporarySupportDirectoryFinder().find())) {
-                options.icon = false;
                 options.segments = false;
             }
             final PathPasteboard pasteboard = controller.getPasteboard();
@@ -668,12 +645,9 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
                     if(!file.exists()) {
                         try {
                             LocalTouchFactory.get().touch(file);
-                            if(options.icon) {
-                                IconServiceFactory.get().set(file, new TransferStatus().withLength(0L));
-                            }
                         }
                         catch(AccessDeniedException e) {
-                            log.warn(String.format("Failure creating file %s %s", file, e.getMessage()));
+                            log.warn("Failure creating file {} {}", file, e.getMessage());
                         }
                     }
                 }
@@ -699,7 +673,7 @@ public abstract class BrowserTableDataSource extends ProxyController implements 
             }
             else {
                 final Transfer transfer = new DownloadTransfer(controller.getSession().getHost(), downloads)
-                    .withOptions(options);
+                        .withOptions(options);
                 controller.transfer(transfer, Collections.emptyList());
             }
             pasteboard.clear();

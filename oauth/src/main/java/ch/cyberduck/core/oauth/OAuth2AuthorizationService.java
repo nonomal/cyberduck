@@ -15,26 +15,15 @@ package ch.cyberduck.core.oauth;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.AlphanumericRandomStringService;
-import ch.cyberduck.core.Credentials;
-import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.Host;
-import ch.cyberduck.core.LocaleFactory;
-import ch.cyberduck.core.LoginCallback;
-import ch.cyberduck.core.LoginOptions;
-import ch.cyberduck.core.OAuthTokens;
-import ch.cyberduck.core.PreferencesUseragentProvider;
-import ch.cyberduck.core.StringAppender;
+import ch.cyberduck.core.*;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.exception.InteroperabilityException;
+import ch.cyberduck.core.exception.LocalAccessDeniedException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.http.DefaultHttpResponseExceptionMappingService;
 import ch.cyberduck.core.http.UserAgentHttpRequestInitializer;
-import ch.cyberduck.core.local.BrowserLauncher;
-import ch.cyberduck.core.local.BrowserLauncherFactory;
+import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesFactory;
-import ch.cyberduck.core.threading.CancelCallback;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.client.HttpClient;
@@ -45,8 +34,6 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
 
 import com.google.api.client.auth.oauth2.AuthorizationCodeFlow;
 import com.google.api.client.auth.oauth2.AuthorizationCodeRequestUrl;
@@ -55,8 +42,8 @@ import com.google.api.client.auth.oauth2.ClientParametersAuthentication;
 import com.google.api.client.auth.oauth2.Credential;
 import com.google.api.client.auth.oauth2.PasswordTokenRequest;
 import com.google.api.client.auth.oauth2.RefreshTokenRequest;
-import com.google.api.client.auth.oauth2.TokenResponse;
 import com.google.api.client.auth.oauth2.TokenResponseException;
+import com.google.api.client.auth.openidconnect.IdTokenResponse;
 import com.google.api.client.http.GenericUrl;
 import com.google.api.client.http.HttpResponseException;
 import com.google.api.client.http.HttpTransport;
@@ -74,16 +61,17 @@ public class OAuth2AuthorizationService {
     private final JsonFactory json
             = new GsonFactory();
 
+    private final Host host;
+    private final Credentials credentials;
     private final String tokenServerUrl;
     private final String authorizationServerUrl;
+    private final LoginCallback prompt;
 
     private final String clientid;
     private final String clientsecret;
 
-    public final BrowserLauncher browser
-            = BrowserLauncherFactory.get();
-
     private final List<String> scopes;
+    private final boolean pkce;
 
     private final Map<String, String> additionalParameters
             = new HashMap<>();
@@ -92,59 +80,90 @@ public class OAuth2AuthorizationService {
             = BearerToken.authorizationHeaderAccessMethod();
 
     private String redirectUri = OOB_REDIRECT_URI;
+    private FlowType flowType = FlowType.AuthorizationCode;
 
     private final HttpTransport transport;
 
-    public OAuth2AuthorizationService(final HttpClient client,
+    private final HostPasswordStore store = PasswordStoreFactory.get();
+
+    public OAuth2AuthorizationService(final HttpClient client, final Host host,
                                       final String tokenServerUrl, final String authorizationServerUrl,
-                                      final String clientid, final String clientsecret, final List<String> scopes) {
-        this(new ApacheHttpTransport(client),
-                tokenServerUrl, authorizationServerUrl, clientid, clientsecret, scopes);
+                                      final String clientid, final String clientsecret, final List<String> scopes, final boolean pkce,
+                                      final LoginCallback prompt) throws LoginCanceledException {
+        this(new ApacheHttpTransport(client), host,
+                tokenServerUrl, authorizationServerUrl, clientid, clientsecret, scopes, pkce, prompt);
     }
 
-    public OAuth2AuthorizationService(final HttpTransport transport,
+    public OAuth2AuthorizationService(final HttpTransport transport, final Host host,
                                       final String tokenServerUrl, final String authorizationServerUrl,
-                                      final String clientid, final String clientsecret, final List<String> scopes) {
+                                      final String clientid, final String clientsecret, final List<String> scopes, final boolean pkce,
+                                      final LoginCallback prompt) throws LoginCanceledException {
         this.transport = transport;
+        this.host = host;
+        this.credentials = host.getCredentials();
         this.tokenServerUrl = tokenServerUrl;
         this.authorizationServerUrl = authorizationServerUrl;
-        this.clientid = clientid;
-        this.clientsecret = clientsecret;
+        this.prompt = prompt;
+        this.clientid = prompt(host, prompt, Profile.OAUTH_CLIENT_ID_KEY, LocaleFactory.localizedString(
+                Profile.OAUTH_CLIENT_ID_KEY, "Credentials"), clientid);
+        this.clientsecret = prompt(host, prompt, Profile.OAUTH_CLIENT_SECRET_KEY, LocaleFactory.localizedString(
+                Profile.OAUTH_CLIENT_SECRET_KEY, "Credentials"), clientsecret);
         this.scopes = scopes;
+        this.pkce = pkce;
     }
 
-    public OAuthTokens authorize(final Host bookmark, final LoginCallback prompt, final CancelCallback cancel,
-                                 final FlowType type) throws BackgroundException {
-        final Credentials credentials = bookmark.getCredentials();
+    /**
+     * Authorize when cached tokens expired otherwise return
+     * @return Tokens retrieved
+     */
+    public Credentials validate() throws BackgroundException {
         final OAuthTokens saved = credentials.getOauth();
         if(saved.validate()) {
             // Found existing tokens
             if(saved.isExpired()) {
-                log.warn(String.format("Refresh expired access tokens %s", saved));
+                log.warn("Refresh expired access tokens {}", saved);
                 // Refresh expired access key
                 try {
-                    credentials.setSaved(true);
-                    return this.refresh(saved);
+                    return credentials.withOauth(this.refresh(saved));
                 }
-                catch(LoginFailureException | InteroperabilityException e) {
-                    log.warn(String.format("Failure refreshing tokens from %s for %s", saved, bookmark));
+                catch(LoginFailureException e) {
+                    log.warn("Failure refreshing tokens from {} for {}", saved, host);
                     // Continue with new OAuth 2 flow
                 }
             }
             else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Returned saved OAuth tokens %s for %s", saved, bookmark));
-                }
-                return saved;
+                log.debug("Returned saved OAuth tokens {} for {}", saved, host);
+                return credentials;
             }
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Start new OAuth flow for %s with missing access token", bookmark));
+        return credentials.withOauth(this.authorize());
+    }
+
+    /**
+     * Save updated tokens in keychain
+     *
+     * @return Same tokens saved
+     */
+    public OAuthTokens save(final OAuthTokens tokens) throws LocalAccessDeniedException {
+        log.debug("Save new tokens {} for {}", tokens, host);
+        credentials.withOauth(tokens).withSaved(new LoginOptions().save);
+        if(credentials.isSaved()) {
+            store.save(host);
         }
-        final TokenResponse response;
-        switch(type) {
+        return tokens;
+    }
+
+
+    /**
+     * @return Tokens retrieved
+     */
+    public OAuthTokens authorize() throws BackgroundException {
+        log.debug("Start new OAuth flow for {} with missing access token", host);
+        final IdTokenResponse response;
+        // Save access token, refresh token and id token
+        switch(flowType) {
             case AuthorizationCode:
-                response = this.authorizeWithCode(bookmark, prompt, cancel, credentials);
+                response = this.authorizeWithCode(host, prompt);
                 break;
             case PasswordGrant:
                 response = this.authorizeWithPassword(credentials);
@@ -152,18 +171,14 @@ public class OAuth2AuthorizationService {
             default:
                 throw new LoginCanceledException();
         }
-        // Save access key and refresh key
-        final OAuthTokens tokens = new OAuthTokens(
+        return new OAuthTokens(
                 response.getAccessToken(), response.getRefreshToken(),
-                null == response.getExpiresInSeconds() ? System.currentTimeMillis() :
-                        System.currentTimeMillis() + response.getExpiresInSeconds() * 1000);
-        credentials.setOauth(tokens);
-        return tokens;
+                null == response.getExpiresInSeconds() ? Long.MAX_VALUE :
+                        System.currentTimeMillis() + response.getExpiresInSeconds() * 1000, response.getIdToken());
     }
 
-    private TokenResponse authorizeWithCode(final Host bookmark, final LoginCallback prompt, final CancelCallback cancel,
-                                            final Credentials credentials) throws BackgroundException {
-        if(PreferencesFactory.get().getBoolean("oauth.browser.open.warn")) {
+    private IdTokenResponse authorizeWithCode(final Host bookmark, final LoginCallback prompt) throws BackgroundException {
+        if(new HostPreferences(bookmark).getBoolean("oauth.browser.open.warn")) {
             prompt.warn(bookmark,
                     LocaleFactory.localizedString("Provide additional login credentials", "Credentials"),
                     new StringAppender()
@@ -174,81 +189,39 @@ public class OAuth2AuthorizationService {
             );
         }
         // Start OAuth2 flow within browser
-        final AuthorizationCodeFlow flow = new AuthorizationCodeFlow.Builder(
+        final AuthorizationCodeFlow.Builder flowBuilder = new AuthorizationCodeFlow.Builder(
                 method,
                 transport, json,
                 new GenericUrl(tokenServerUrl),
-                new ClientParametersAuthentication(clientid, clientsecret),
+                new ClientParametersAuthentication(clientid, StringUtils.isNotBlank(clientsecret) ? clientsecret : null),
                 clientid,
                 authorizationServerUrl)
                 .setScopes(scopes)
-                .setRequestInitializer(new UserAgentHttpRequestInitializer(new PreferencesUseragentProvider()))
-                .build();
-        final AuthorizationCodeRequestUrl authorizationCodeRequestUrl = flow.newAuthorizationUrl();
-        authorizationCodeRequestUrl.setRedirectUri(redirectUri);
+                .setRequestInitializer(new UserAgentHttpRequestInitializer(new PreferencesUseragentProvider()));
+        if(pkce) {
+            flowBuilder.enablePKCE();
+        }
+        final AuthorizationCodeFlow flow = flowBuilder.build();
+        final AuthorizationCodeRequestUrl authorizationCodeUrlBuilder = flow.newAuthorizationUrl();
+        authorizationCodeUrlBuilder.setRedirectUri(URIEncoder.decode(redirectUri));
         final String state = new AlphanumericRandomStringService().random();
-        authorizationCodeRequestUrl.setState(state);
+        authorizationCodeUrlBuilder.setState(state);
         for(Map.Entry<String, String> values : additionalParameters.entrySet()) {
-            authorizationCodeRequestUrl.set(values.getKey(), values.getValue());
+            authorizationCodeUrlBuilder.set(values.getKey(), values.getValue());
         }
         // Direct the user to an authorization page to grant access to their protected data.
-        final String url = authorizationCodeRequestUrl.build();
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Open browser with URL %s", url));
-        }
-        if(!browser.open(url)) {
-            log.warn(String.format("Failed to launch web browser for %s", url));
-        }
-        final AtomicReference<String> authenticationCode = new AtomicReference<>();
-        if(StringUtils.endsWith(redirectUri, ":oauth")) {
-            // Assume scheme handler is registered
-            final CountDownLatch signal = new CountDownLatch(1);
-            final OAuth2TokenListenerRegistry registry = OAuth2TokenListenerRegistry.get();
-            registry.register(state, new OAuth2TokenListener() {
-                @Override
-                public void callback(final String code) {
-                    if(log.isInfoEnabled()) {
-                        log.info(String.format("Callback with code %s", code));
-                    }
-                    if(!StringUtils.isBlank(code)) {
-                        credentials.setSaved(PreferencesFactory.get().getBoolean("connection.login.keychain"));
-                        authenticationCode.set(code);
-                    }
-                    signal.countDown();
-                }
-            });
-            if(log.isInfoEnabled()) {
-                log.info(String.format("Await callback from custom scheme %s and state %s", redirectUri, state));
-            }
-            prompt.await(signal, bookmark, LocaleFactory.localizedString("Login", "Login"),
-                    LocaleFactory.localizedString("Open web browser to authenticate and obtain an authorization code", "Credentials"));
-            if(StringUtils.isBlank(authenticationCode.get())) {
-                throw new LoginCanceledException();
-            }
-        }
-        else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Prompt for authentication code for state %s", state));
-            }
-            final Credentials input = prompt.prompt(bookmark,
-                    LocaleFactory.localizedString("Login", "Login"),
-                    LocaleFactory.localizedString("Paste the authentication code from your web browser", "Credentials"),
-                    new LoginOptions(bookmark.getProtocol()).keychain(true).user(false).oauth(true)
-                            .passwordPlaceholder(LocaleFactory.localizedString("Authentication Code", "Credentials"))
-            );
-            credentials.setSaved(input.isSaved());
-            authenticationCode.set(input.getPassword());
+        final String authorizationCodeUrl = authorizationCodeUrlBuilder.build();
+        log.debug("Open browser with URL {}", authorizationCodeUrl);
+        final String authorizationCode = OAuth2AuthorizationCodeProviderFactory.get().prompt(
+                bookmark, prompt, authorizationCodeUrl, redirectUri, state);
+        if(StringUtils.isBlank(authorizationCode)) {
+            throw new LoginCanceledException();
         }
         try {
-            if(StringUtils.isBlank(authenticationCode.get())) {
-                throw new LoginCanceledException();
-            }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Request tokens for authentication code %s", authenticationCode.get()));
-            }
+            log.debug("Request tokens for authentication code {}", authorizationCode);
             // Swap the given authorization token for access/refresh tokens
-            return flow.newTokenRequest(authenticationCode.get())
-                    .setRedirectUri(redirectUri).setScopes(scopes.isEmpty() ? null : scopes)
+            return flow.newTokenRequest(authorizationCode)
+                    .setRedirectUri(URIEncoder.decode(redirectUri)).setScopes(scopes.isEmpty() ? null : scopes)
                     .executeUnparsed().parseAs(PermissiveTokenResponse.class).toTokenResponse();
         }
         catch(TokenResponseException e) {
@@ -263,11 +236,9 @@ public class OAuth2AuthorizationService {
         }
     }
 
-    private TokenResponse authorizeWithPassword(final Credentials credentials) throws BackgroundException {
+    private IdTokenResponse authorizeWithPassword(final Credentials credentials) throws BackgroundException {
         try {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Request tokens for user %s", credentials.getUsername()));
-            }
+            log.debug("Request tokens for user {}", credentials.getUsername());
             final PasswordTokenRequest request = new PasswordTokenRequest(transport, json, new GenericUrl(tokenServerUrl),
                     credentials.getUsername(), credentials.getPassword()
             )
@@ -293,14 +264,12 @@ public class OAuth2AuthorizationService {
 
     public OAuthTokens refresh(final OAuthTokens tokens) throws BackgroundException {
         if(StringUtils.isBlank(tokens.getRefreshToken())) {
-            log.warn("Missing refresh token");
+            log.warn("Missing refresh token in {}", tokens);
             return tokens;
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Refresh expired tokens %s", tokens));
-        }
+        log.debug("Refresh expired tokens {}", tokens);
         try {
-            final TokenResponse response = new RefreshTokenRequest(transport, json, new GenericUrl(tokenServerUrl),
+            final IdTokenResponse response = new RefreshTokenRequest(transport, json, new GenericUrl(tokenServerUrl),
                     tokens.getRefreshToken())
                     .setScopes(scopes.isEmpty() ? null : scopes)
                     .setRequestInitializer(new UserAgentHttpRequestInitializer(new PreferencesUseragentProvider()))
@@ -308,9 +277,9 @@ public class OAuth2AuthorizationService {
                     .executeUnparsed().parseAs(PermissiveTokenResponse.class).toTokenResponse();
             final long expiryInMilliseconds = System.currentTimeMillis() + response.getExpiresInSeconds() * 1000;
             if(StringUtils.isBlank(response.getRefreshToken())) {
-                return new OAuthTokens(response.getAccessToken(), tokens.getRefreshToken(), expiryInMilliseconds);
+                return new OAuthTokens(response.getAccessToken(), tokens.getRefreshToken(), expiryInMilliseconds, response.getIdToken());
             }
-            return new OAuthTokens(response.getAccessToken(), response.getRefreshToken(), expiryInMilliseconds);
+            return new OAuthTokens(response.getAccessToken(), response.getRefreshToken(), expiryInMilliseconds, response.getIdToken());
         }
         catch(TokenResponseException e) {
             throw new OAuthExceptionMappingService().map(e);
@@ -334,6 +303,11 @@ public class OAuth2AuthorizationService {
         return this;
     }
 
+    public OAuth2AuthorizationService withFlowType(final FlowType flowType) {
+        this.flowType = flowType;
+        return this;
+    }
+
     public OAuth2AuthorizationService withParameter(final String key, final String value) {
         additionalParameters.put(key, value);
         return this;
@@ -345,6 +319,7 @@ public class OAuth2AuthorizationService {
     }
 
     public static final class PermissiveTokenResponse extends GenericJson {
+        private String idToken;
         private String accessToken;
         private String tokenType;
         private Long expiresInSeconds;
@@ -353,6 +328,9 @@ public class OAuth2AuthorizationService {
 
         @Override
         public PermissiveTokenResponse set(final String fieldName, final Object value) {
+            if("id_token".equals(fieldName)) {
+                idToken = (String) value;
+            }
             if("access_token".equals(fieldName)) {
                 accessToken = (String) value;
             }
@@ -387,14 +365,37 @@ public class OAuth2AuthorizationService {
             return this;
         }
 
-        public TokenResponse toTokenResponse() {
-            return new TokenResponse()
+        public IdTokenResponse toTokenResponse() {
+            final IdTokenResponse response = new IdTokenResponse()
                     .setTokenType(tokenType)
                     .setScope(scope)
                     .setExpiresInSeconds(expiresInSeconds)
                     .setAccessToken(accessToken)
                     .setRefreshToken(refreshToken);
+            if(null == idToken) {
+                return response;
+            }
+            return response.setIdToken(idToken);
         }
     }
 
+    /**
+     * Prompt for value if missing
+     */
+    private static String prompt(final Host bookmark, final PasswordCallback prompt,
+                                 final String property, final String message, final String value) throws LoginCanceledException {
+        if(null == value) {
+            final Credentials input = prompt.prompt(bookmark, message,
+                    LocaleFactory.localizedString("Provide additional login credentials", "Credentials"),
+                    new LoginOptions().icon(bookmark.getProtocol().disk()));
+            if(input.isSaved()) {
+                bookmark.setProperty(property, input.getPassword());
+            }
+            return input.getPassword();
+        }
+        if(StringUtils.isBlank(value)) {
+            return null;
+        }
+        return value;
+    }
 }

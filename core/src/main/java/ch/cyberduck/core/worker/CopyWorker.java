@@ -89,12 +89,16 @@ public class CopyWorker extends Worker<Map<Path, Path>> {
                         // Create directory unless copy implementation is recursive
                         final Directory directory = session.getFeature(Directory.class);
                         result.put(r.getKey(), directory.mkdir(r.getValue(),
-                                new TransferStatus().withRegion(r.getKey().attributes().getRegion())));
+                                new TransferStatus().withLength(0L).withRegion(r.getKey().attributes().getRegion())));
                     }
                     else {
                         final TransferStatus status = new TransferStatus()
                                 .withMime(new MappingMimeTypeService().getMime(r.getValue().getName()))
-                                .exists(new CachingFindFeature(cache, session.getFeature(Find.class, new DefaultFindFeature(session))).find(r.getValue()))
+                                .withAcl(r.getKey().attributes().getAcl())
+                                .withPermission(r.getKey().attributes().getPermission())
+                                .withEncryption(r.getKey().attributes().getEncryption())
+                                .withStorageClass(r.getKey().attributes().getStorageClass())
+                                .exists(new CachingFindFeature(session, cache, session.getFeature(Find.class, new DefaultFindFeature(session))).find(r.getValue()))
                                 .withLength(r.getKey().attributes().getSize());
                         final Path copied = copy.copy(r.getKey(), r.getValue(), status, callback, new DisabledStreamListener());
                         if(PathAttributes.EMPTY.equals(copied.attributes())) {

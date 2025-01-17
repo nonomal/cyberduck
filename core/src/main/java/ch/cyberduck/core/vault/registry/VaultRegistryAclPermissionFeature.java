@@ -15,12 +15,13 @@ package ch.cyberduck.core.vault.registry;
  * GNU General Public License for more details.
  */
 
+import ch.cyberduck.core.AbstractPath;
 import ch.cyberduck.core.Acl;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AclPermission;
+import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.vault.VaultRegistry;
 
 import java.util.EnumSet;
@@ -44,8 +45,8 @@ public class VaultRegistryAclPermissionFeature implements AclPermission {
     }
 
     @Override
-    public void setPermission(final Path file, final Acl acl) throws BackgroundException {
-        registry.find(session, file).getFeature(session, AclPermission.class, proxy).setPermission(file, acl);
+    public void setPermission(final Path file, final TransferStatus status) throws BackgroundException {
+        registry.find(session, file).getFeature(session, AclPermission.class, proxy).setPermission(file, status);
     }
 
     @Override
@@ -59,13 +60,8 @@ public class VaultRegistryAclPermissionFeature implements AclPermission {
     }
 
     @Override
-    public Acl getDefault(final Path file, final Local local) throws BackgroundException {
-        return proxy.getDefault(file, local);
-    }
-
-    @Override
-    public Acl getDefault(final EnumSet<Path.Type> type) throws BackgroundException {
-        return proxy.getDefault(type);
+    public Acl getDefault(final Path file) throws BackgroundException {
+        return proxy.getDefault(file);
     }
 
     @Override

@@ -16,7 +16,6 @@ package ch.cyberduck.core.eue;
  */
 
 import ch.cyberduck.core.CachingFileIdProvider;
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.eue.io.swagger.client.ApiException;
 import ch.cyberduck.core.eue.io.swagger.client.api.ListResourceAliasApi;
@@ -58,16 +57,14 @@ public class EueResourceIdProvider extends CachingFileIdProvider implements File
     }
 
     @Override
-    public String getFileId(final Path file, final ListProgressListener listener) throws BackgroundException {
+    public String getFileId(final Path file) throws BackgroundException {
         try {
             if(StringUtils.isNotBlank(file.attributes().getFileId())) {
                 return file.attributes().getFileId();
             }
-            final String cached = super.getFileId(file, listener);
+            final String cached = super.getFileId(file);
             if(cached != null) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Return cached fileid %s for file %s", cached, file));
-                }
+                log.debug("Return cached fileid {} for file {}", cached, file);
                 return cached;
             }
             if(file.isRoot()) {
@@ -77,7 +74,7 @@ public class EueResourceIdProvider extends CachingFileIdProvider implements File
             UiFsModel fsModel;
             final int chunksize = new HostPreferences(session.getHost()).getInteger("eue.listing.chunksize");
             do {
-                final String parentResourceId = this.getFileId(file.getParent(), listener);
+                final String parentResourceId = this.getFileId(file.getParent());
                 switch(parentResourceId) {
                     case EueResourceIdProvider.ROOT:
                     case EueResourceIdProvider.TRASH:

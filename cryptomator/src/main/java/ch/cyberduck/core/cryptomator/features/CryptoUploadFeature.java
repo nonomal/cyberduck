@@ -18,7 +18,9 @@ package ch.cyberduck.core.cryptomator.features;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.ProgressListener;
 import ch.cyberduck.core.Session;
+import ch.cyberduck.core.cryptomator.CryptoTransferStatus;
 import ch.cyberduck.core.cryptomator.CryptoVault;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Upload;
@@ -40,13 +42,13 @@ public class CryptoUploadFeature<Reply> implements Upload<Reply> {
     }
 
     @Override
-    public Reply upload(final Path file, final Local local, final BandwidthThrottle throttle, final StreamListener listener, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        return proxy.upload(vault.encrypt(session, file), local, throttle, listener, status, callback);
+    public Reply upload(final Path file, final Local local, final BandwidthThrottle throttle, final ProgressListener progress, final StreamListener streamListener, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
+        return proxy.upload(vault.encrypt(session, file), local, throttle, progress, streamListener, status.withDestinationLength(new CryptoTransferStatus(vault, status).getLength()), callback);
     }
 
     @Override
     public Write.Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return proxy.append(vault.encrypt(session, file), status);
+        return proxy.append(vault.encrypt(session, file), status.withDestinationLength(new CryptoTransferStatus(vault, status).getLength()));
     }
 
     @Override

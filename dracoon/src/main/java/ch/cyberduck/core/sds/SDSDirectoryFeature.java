@@ -15,13 +15,14 @@ package ch.cyberduck.core.sds;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.VersionId;
+import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sds.io.swagger.client.ApiException;
 import ch.cyberduck.core.sds.io.swagger.client.api.NodesApi;
@@ -35,6 +36,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.text.MessageFormat;
 import java.util.EnumSet;
 
 public class SDSDirectoryFeature implements Directory<VersionId> {
@@ -68,7 +70,7 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
 
     private Path createFolder(final Path folder) throws BackgroundException, ApiException {
         final CreateFolderRequest folderRequest = new CreateFolderRequest();
-        folderRequest.setParentId(Long.parseLong(nodeid.getVersionId(folder.getParent(), new DisabledListProgressListener())));
+        folderRequest.setParentId(Long.parseLong(nodeid.getVersionId(folder.getParent())));
         folderRequest.setName(folder.getName());
         final Node node = new NodesApi(session.getClient()).createFolder(folderRequest, StringUtils.EMPTY, null);
         nodeid.cache(folder, String.valueOf(node.getId()));
@@ -82,7 +84,7 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
         roomRequest.addAdminIdsItem(user.getId());
         roomRequest.setAdminGroupIds(null);
         if(!room.getParent().isRoot()) {
-            roomRequest.setParentId(Long.parseLong(nodeid.getVersionId(room.getParent(), new DisabledListProgressListener())));
+            roomRequest.setParentId(Long.parseLong(nodeid.getVersionId(room.getParent())));
         }
         roomRequest.setName(room.getName());
         final Node node = new NodesApi(session.getClient()).createRoom(roomRequest, StringUtils.EMPTY, null);
@@ -92,8 +94,8 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
             options.setIsEncrypted(true);
             return room.withType(EnumSet.of(Path.Type.directory, Path.Type.volume)).withAttributes(
                     new SDSAttributesAdapter(session).toAttributes(
-                            new NodesApi(session.getClient()).encryptRoom(options, Long.valueOf(nodeid.getVersionId(room,
-                                    new DisabledListProgressListener())), StringUtils.EMPTY, null)));
+                            new NodesApi(session.getClient()).encryptRoom(options, Long.valueOf(nodeid.getVersionId(room
+                            )), StringUtils.EMPTY, null)));
         }
         else {
             return room.withType(EnumSet.of(Path.Type.directory, Path.Type.volume)).withAttributes(
@@ -102,22 +104,19 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
     }
 
     @Override
-    public boolean isSupported(final Path workdir, final String name) {
+    public void preflight(final Path workdir, final String filename) throws BackgroundException {
         if(workdir.isRoot()) {
             if(!new HostPreferences(session.getHost()).getBoolean("sds.create.dataroom.enable")) {
-                log.warn(String.format("Disallow creating new top level data room %s", name));
-                return false;
+                log.warn("Disallow creating new top level data room {}", filename);
+                throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename)).withFile(workdir);
             }
         }
-        if(!new SDSTouchFeature(session, nodeid).validate(name)) {
-            log.warn(String.format("Validation failed for target name %s", name));
-            return false;
+        if(!SDSTouchFeature.validate(filename)) {
+            throw new InvalidFilenameException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename));
         }
-        return new SDSPermissionsFeature(session, nodeid).containsRole(workdir, SDSPermissionsFeature.CREATE_ROLE);
-    }
-
-    @Override
-    public Directory<VersionId> withWriter(final Write<VersionId> writer) {
-        return this;
+        final SDSPermissionsFeature permissions = new SDSPermissionsFeature(session, nodeid);
+        if(!permissions.containsRole(workdir, SDSPermissionsFeature.CREATE_ROLE)) {
+            throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename)).withFile(workdir);
+        }
     }
 }

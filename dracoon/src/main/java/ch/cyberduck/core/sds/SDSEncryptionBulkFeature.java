@@ -16,11 +16,12 @@ package ch.cyberduck.core.sds;
  */
 
 import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.DefaultPathContainerService;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Bulk;
 import ch.cyberduck.core.features.Delete;
+import ch.cyberduck.core.features.Scheduler;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.Transfer;
 import ch.cyberduck.core.transfer.TransferItem;
@@ -36,11 +37,14 @@ public class SDSEncryptionBulkFeature implements Bulk<Void> {
     private static final Logger log = LogManager.getLogger(SDSEncryptionBulkFeature.class);
 
     private final SDSSession session;
-    private final SDSNodeIdProvider nodeid;
+    private final SDSTripleCryptEncryptorFeature triplecrypt;
+
+    private final PathContainerService containerService
+            = new SDSPathContainerService();
 
     public SDSEncryptionBulkFeature(final SDSSession session, final SDSNodeIdProvider nodeid) {
         this.session = session;
-        this.nodeid = nodeid;
+        this.triplecrypt = new SDSTripleCryptEncryptorFeature(session, nodeid);
     }
 
     @Override
@@ -51,10 +55,11 @@ public class SDSEncryptionBulkFeature implements Bulk<Void> {
             default: {
                 final Map<Path, Boolean> rooms = this.getRoomEncryptionStatus(files);
                 for(Map.Entry<TransferItem, TransferStatus> entry : files.entrySet()) {
-                    final Path container = new DefaultPathContainerService().getContainer(entry.getKey().remote);
+                    final Path container = containerService.getContainer(entry.getKey().remote);
                     if(rooms.get(container)) {
                         final TransferStatus status = entry.getValue();
-                        status.setFilekey(nodeid.getFileKey());
+                        log.debug("Set file key for {}", entry.getKey());
+                        status.setFilekey(SDSTripleCryptEncryptorFeature.generateFileKey());
                     }
                 }
             }
@@ -66,15 +71,15 @@ public class SDSEncryptionBulkFeature implements Bulk<Void> {
      * @param files Files to upload
      * @return Map of rooms with Triple Crypt enabled
      */
-    private Map<Path, Boolean> getRoomEncryptionStatus(final Map<TransferItem, TransferStatus> files) {
+    private Map<Path, Boolean> getRoomEncryptionStatus(final Map<TransferItem, TransferStatus> files) throws BackgroundException {
         final Map<Path, Boolean> rooms = new HashMap<>();
-        final DefaultPathContainerService containerService = new DefaultPathContainerService();
         for(Map.Entry<TransferItem, TransferStatus> entry : files.entrySet()) {
             final Path container = containerService.getContainer(entry.getKey().remote);
             if(rooms.containsKey(container)) {
                 continue;
             }
-            rooms.put(container, SDSNodeIdProvider.isEncrypted(entry.getKey().remote));
+            log.debug("Determine encryption status for {}", container);
+            rooms.put(container, triplecrypt.isEncrypted(container));
         }
         return rooms;
     }
@@ -87,14 +92,15 @@ public class SDSEncryptionBulkFeature implements Bulk<Void> {
             default:
                 if(new HostPreferences(session.getHost()).getBoolean("sds.encryption.missingkeys.upload")) {
                     if(session.userAccount().isEncryptionEnabled()) {
-                        final SDSMissingFileKeysSchedulerFeature background = new SDSMissingFileKeysSchedulerFeature();
+                        final Scheduler scheduler = session.getFeature(Scheduler.class);
                         final Map<Path, Boolean> rooms = this.getRoomEncryptionStatus(files);
                         for(Map.Entry<TransferItem, TransferStatus> entry : files.entrySet()) {
                             final Path file = entry.getKey().remote;
                             if(file.isFile()) {
-                                final Path container = new DefaultPathContainerService().getContainer(file);
+                                final Path container = containerService.getContainer(file);
                                 if(rooms.get(container)) {
-                                    background.operate(session, callback, file);
+                                    log.debug("Run missing file keys for {}", file);
+                                    scheduler.execute(callback);
                                 }
                             }
                         }
@@ -107,5 +113,4 @@ public class SDSEncryptionBulkFeature implements Bulk<Void> {
     public Bulk<Void> withDelete(final Delete delete) {
         return this;
     }
-
 }

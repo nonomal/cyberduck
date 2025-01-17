@@ -25,6 +25,10 @@ import ch.cyberduck.core.transfer.TransferStatus;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.util.EnumSet;
+import java.util.Optional;
+
+import static ch.cyberduck.core.features.Copy.validate;
 
 public class LocalCopyFeature implements Copy {
 
@@ -39,8 +43,7 @@ public class LocalCopyFeature implements Copy {
         try {
             Files.copy(session.toPath(source), session.toPath(target), StandardCopyOption.REPLACE_EXISTING);
             listener.sent(status.getLength());
-            // Copy attributes from original file
-            return target.withAttributes(new LocalAttributesFinderFeature(session).find(target));
+            return target;
         }
         catch(IOException e) {
             throw new LocalExceptionMappingService().map("Cannot copy {0}", e, source);
@@ -48,7 +51,15 @@ public class LocalCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        Copy.super.preflight(source, target);
+        if(target.isPresent()) {
+            validate(session.getCaseSensitivity(), source, target.get());
+        }
+    }
+
+    @Override
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

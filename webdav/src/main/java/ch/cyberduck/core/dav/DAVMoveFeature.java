@@ -21,6 +21,7 @@ package ch.cyberduck.core.dav;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.Path;
+import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Lock;
@@ -33,6 +34,7 @@ import org.apache.http.HttpHeaders;
 
 import java.io.IOException;
 import java.util.Collections;
+import java.util.EnumSet;
 
 import com.github.sardine.impl.SardineException;
 
@@ -47,17 +49,20 @@ public class DAVMoveFeature implements Move {
     @Override
     public Path move(final Path file, final Path renamed, final TransferStatus status, final Delete.Callback callback, final ConnectionCallback connectionCallback) throws BackgroundException {
         try {
-            final String target = new DefaultUrlProvider(session.getHost()).toUrl(renamed).find(DescriptiveUrl.Type.provider).getUrl();
-            if(session.getFeature(Lock.class) != null && status.getLockId() != null) {
+            final String target = new DefaultUrlProvider(session.getHost()).toUrl(renamed,
+                    EnumSet.of(DescriptiveUrl.Type.provider)).find(DescriptiveUrl.Type.provider).getUrl();
+            if(status.getLockId() != null && session.getFeature(Lock.class) != null) {
                 // Indicate that the client has knowledge of that state token
-                session.getClient().move(new DAVPathEncoder().encode(file), file.isDirectory() ? String.format("%s/", target) : target, true,
-                    Collections.singletonMap(HttpHeaders.IF, String.format("(<%s>)", status.getLockId())));
+                session.getClient().move(new DAVPathEncoder().encode(file), file.isDirectory() ? String.format("%s/", target) : target,
+                        status.isExists(),
+                        Collections.singletonMap(HttpHeaders.IF, String.format("<%s> (<%s>)", new DAVPathEncoder().encode(file), status.getLockId())));
             }
             else {
-                session.getClient().move(new DAVPathEncoder().encode(file), file.isDirectory() ? String.format("%s/", target) : target, true);
+                session.getClient().move(new DAVPathEncoder().encode(file), file.isDirectory() ? String.format("%s/", target) : target,
+                        status.isExists());
             }
             // Copy original file attributes
-            return renamed.withAttributes(file.attributes());
+            return renamed.withAttributes(new PathAttributes(file.attributes()).withLockId(null));
         }
         catch(SardineException e) {
             throw new DAVExceptionMappingService().map("Cannot rename {0}", e, file);
@@ -68,7 +73,7 @@ public class DAVMoveFeature implements Move {
     }
 
     @Override
-    public boolean isRecursive(final Path source, final Path target) {
-        return true;
+    public EnumSet<Flags> features(final Path source, final Path target) {
+        return EnumSet.of(Flags.recursive);
     }
 }

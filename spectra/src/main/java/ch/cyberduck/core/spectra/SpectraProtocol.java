@@ -18,9 +18,13 @@ import ch.cyberduck.core.AbstractProtocol;
 import ch.cyberduck.core.DirectoryDelimiterPathContainerService;
 import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.PathContainerService;
+import ch.cyberduck.core.Protocol;
 import ch.cyberduck.core.Scheme;
 import ch.cyberduck.core.s3.S3Protocol;
 
+import com.google.auto.service.AutoService;
+
+@AutoService(Protocol.class)
 public class SpectraProtocol extends AbstractProtocol {
     @Override
     public String getName() {
@@ -58,6 +62,11 @@ public class SpectraProtocol extends AbstractProtocol {
     }
 
     @Override
+    public DirectoryTimestamp getDirectoryTimestamp() {
+        return DirectoryTimestamp.explicit;
+    }
+
+    @Override
     public boolean isHostnameConfigurable() {
         return true;
     }
@@ -80,6 +89,11 @@ public class SpectraProtocol extends AbstractProtocol {
     @Override
     public String getAuthorization() {
         return S3Protocol.AuthenticationHeaderSignatureVersion.AWS2.name();
+    }
+
+    @Override
+    public VersioningMode getVersioningMode() {
+        return VersioningMode.storage;
     }
 
     @Override

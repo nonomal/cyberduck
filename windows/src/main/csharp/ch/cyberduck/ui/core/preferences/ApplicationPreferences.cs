@@ -26,25 +26,22 @@ using Ch.Cyberduck.Core.Date;
 using Ch.Cyberduck.Core.Diagnostics;
 using Ch.Cyberduck.Core.Editor;
 using Ch.Cyberduck.Core.I18n;
+using Ch.Cyberduck.Core.Interactivity;
 using Ch.Cyberduck.Core.Local;
 using Ch.Cyberduck.Core.Preferences;
 using Ch.Cyberduck.Core.Proxy;
 using Ch.Cyberduck.Core.Sparkle;
 using Ch.Cyberduck.Core.Urlhandler;
 using Ch.Cyberduck.Ui.Controller;
+using Ch.Cyberduck.Ui.Pasteboard;
 using Ch.Cyberduck.Ui.Winforms.Threading;
-using org.apache.logging.log4j;
-using System.Reflection;
-using System.Text.RegularExpressions;
-using Application = System.Windows.Forms.Application;
+using CoreApplicationPreferences = Ch.Cyberduck.Core.Preferences.ApplicationPreferences<Ch.Cyberduck.Ui.Core.Preferences.ApplicationPreferences>;
 using Rendezvous = Ch.Cyberduck.Core.Bonjour.Rendezvous;
 
 namespace Ch.Cyberduck.Ui.Core.Preferences
 {
-    public class ApplicationPreferences : SettingsDictionaryPreferences
+    public class ApplicationPreferences(IPropertyStoreFactory propertyStoreFactory) : CoreApplicationPreferences(new DefaultLocales(), propertyStoreFactory)
     {
-        private static readonly Logger Log = LogManager.getLogger(typeof(ApplicationPreferences).FullName);
-
         protected override void setDefaults()
         {
             base.setDefaults();
@@ -88,7 +85,9 @@ namespace Ch.Cyberduck.Ui.Core.Preferences
             this.setDefault("factory.transferpromptcallback.sync.class",
                 typeof(SyncPromptController).AssemblyQualifiedName);
             this.setDefault("factory.proxy.class", typeof(SystemProxy).AssemblyQualifiedName);
+            this.setDefault("factory.proxy.configuration.class", typeof(SystemSettingsProxy).AssemblyQualifiedName);
             this.setDefault("factory.reachability.class", typeof(TcpReachability).AssemblyQualifiedName);
+            this.setDefault("factory.reachability.diagnostics.class", typeof(TcpReachability).AssemblyQualifiedName);
 
             this.setDefault("factory.applicationfinder.class", typeof(ShellApplicationFinder).AssemblyQualifiedName);
             this.setDefault("factory.applicationlauncher.class", typeof(WindowsApplicationLauncher).AssemblyQualifiedName);
@@ -101,13 +100,14 @@ namespace Ch.Cyberduck.Ui.Core.Preferences
             this.setDefault("factory.badgelabeler.class", typeof(TaskbarApplicationBadgeLabeler).AssemblyQualifiedName);
             this.setDefault("factory.filedescriptor.class", typeof(Win32FileDescriptor).AssemblyQualifiedName);
             this.setDefault("factory.schemehandler.class", typeof(URLSchemeHandlerConfiguration).AssemblyQualifiedName);
+            this.setDefault("factory.certificatetrustcallback.class", typeof(DialogPromptCertificateTrustCallback).AssemblyQualifiedName);
 
             if (Cyberduck.Core.Utils.IsWin10FallCreatorsUpdate)
             {
                 this.setDefault("factory.notification.class", typeof(DesktopNotificationService).AssemblyQualifiedName);
             }
 
-            if (Cyberduck.Core.Utils.IsRunningAsUWP)
+            if (EnvironmentInfo.Packaged)
             {
                 this.setDefault("factory.rendezvous.class", typeof(DisabledRendezvous).AssemblyQualifiedName);
                 this.setDefault("factory.licensefactory.class", typeof(WindowsStoreLicenseFactory).AssemblyQualifiedName);
@@ -119,6 +119,7 @@ namespace Ch.Cyberduck.Ui.Core.Preferences
             }
             this.setDefault("factory.vault.class", typeof(CryptoVault).AssemblyQualifiedName);
             this.setDefault("factory.securerandom.class", typeof(FastSecureRandomProvider).AssemblyQualifiedName);
+            this.setDefault("factory.pasteboardservice.class", typeof(ClipboardService).AssemblyQualifiedName);
         }
     }
 }

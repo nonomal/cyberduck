@@ -15,8 +15,6 @@ package ch.cyberduck.core.googledrive;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.DisabledListProgressListener;
-import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Metadata;
@@ -40,14 +38,14 @@ public class DriveMetadataFeature implements Metadata {
     }
 
     @Override
-    public Map<String, String> getDefault(final Local local) {
+    public Map<String, String> getDefault() {
         return Collections.emptyMap();
     }
 
     @Override
     public Map<String, String> getMetadata(final Path file) throws BackgroundException {
         try {
-            final String fileid = this.fileid.getFileId(file, new DisabledListProgressListener());
+            final String fileid = this.fileid.getFileId(file);
             final Map<String, String> properties = session.getClient().files().get(fileid).setFields("properties")
                 .setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute().getProperties();
             if(null == properties) {
@@ -63,11 +61,12 @@ public class DriveMetadataFeature implements Metadata {
     @Override
     public void setMetadata(final Path file, final TransferStatus status) throws BackgroundException {
         try {
-            final String fileid = this.fileid.getFileId(file, new DisabledListProgressListener());
+            final String fileid = this.fileid.getFileId(file);
             final File body = new File();
             body.setProperties(status.getMetadata());
-            session.getClient().files().update(fileid, body).setFields("properties").
-                setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
+            final File properties = session.getClient().files().update(fileid, body).setFields("properties").
+                    setSupportsAllDrives(new HostPreferences(session.getHost()).getBoolean("googledrive.teamdrive.enable")).execute();
+            status.setResponse(new DriveAttributesFinderFeature(session, this.fileid).toAttributes(properties));
         }
         catch(IOException e) {
             throw new DriveExceptionMappingService(fileid).map("Failure to write attributes of {0}", e, file);

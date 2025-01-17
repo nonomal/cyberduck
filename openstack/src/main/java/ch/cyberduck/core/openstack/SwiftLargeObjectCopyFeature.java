@@ -18,10 +18,12 @@ package ch.cyberduck.core.openstack;
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultIOExceptionMappingService;
 import ch.cyberduck.core.DefaultPathContainerService;
+import ch.cyberduck.core.LocaleFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.PathContainerService;
 import ch.cyberduck.core.exception.BackgroundException;
+import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.HashAlgorithm;
@@ -29,9 +31,11 @@ import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.io.IOException;
+import java.text.MessageFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import ch.iterate.openstack.swift.exception.GenericException;
 import ch.iterate.openstack.swift.model.StorageObject;
@@ -64,8 +68,15 @@ public class SwiftLargeObjectCopyFeature implements Copy {
     }
 
     @Override
-    public boolean isSupported(final Path source, final Path target) {
-        return !containerService.isContainer(source) && !containerService.isContainer(target);
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(containerService.isContainer(source)) {
+            throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            if(containerService.isContainer(target.get())) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
+            }
+        }
     }
 
     public Path copy(final Path source, final List<Path> sourceParts, final Path target, final TransferStatus status,
@@ -76,8 +87,8 @@ public class SwiftLargeObjectCopyFeature implements Copy {
             final Path destination = new Path(copySegmentsDirectory, copyPart.getName(), copyPart.getType());
             try {
                 session.getClient().copyObject(regionService.lookup(copyPart),
-                    containerService.getContainer(copyPart).getName(), containerService.getKey(copyPart),
-                    containerService.getContainer(target).getName(), containerService.getKey(destination));
+                        containerService.getContainer(copyPart).getName(), containerService.getKey(copyPart),
+                        containerService.getContainer(target).getName(), containerService.getKey(destination));
                 listener.sent(copyPart.attributes().getSize());
 
                 // copy attributes from source. Should be same?
@@ -85,10 +96,10 @@ public class SwiftLargeObjectCopyFeature implements Copy {
                 completed.add(destination);
             }
             catch(GenericException e) {
-                throw new SwiftExceptionMappingService().map(e);
+                throw new SwiftExceptionMappingService().map("Cannot copy {0}", e, source);
             }
             catch(IOException e) {
-                throw new DefaultIOExceptionMappingService().map(e);
+                throw new DefaultIOExceptionMappingService().map("Cannot copy {0}", e, source);
             }
         }
         final List<StorageObject> manifestObjects = new ArrayList<>();
@@ -102,19 +113,19 @@ public class SwiftLargeObjectCopyFeature implements Copy {
         final StorageObject stored = new StorageObject(containerService.getKey(target));
         try {
             final String checksum = session.getClient().createSLOManifestObject(regionService.lookup(
-                containerService.getContainer(target)),
-                containerService.getContainer(target).getName(),
-                status.getMime(),
-                containerService.getKey(target), manifest, Collections.emptyMap());
+                            containerService.getContainer(target)),
+                    containerService.getContainer(target).getName(),
+                    status.getMime(),
+                    containerService.getKey(target), manifest, Collections.emptyMap());
             // The value of the Content-Length header is the total size of all segment objects, and the value of the ETag header is calculated by taking
             // the ETag value of each segment, concatenating them together, and then returning the MD5 checksum of the result.
             stored.setMd5sum(checksum);
         }
         catch(GenericException e) {
-            throw new SwiftExceptionMappingService().map(e);
+            throw new SwiftExceptionMappingService().map("Cannot copy {0}", e, source);
         }
         catch(IOException e) {
-            throw new DefaultIOExceptionMappingService().map(e);
+            throw new DefaultIOExceptionMappingService().map("Cannot copy {0}", e, source);
         }
         final PathAttributes attributes = new PathAttributes(source.attributes());
         attributes.setChecksum(new Checksum(HashAlgorithm.md5, stored.getMd5sum()));
